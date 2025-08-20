@@ -7,6 +7,8 @@ final class AssetsGridViewController: UIViewController, UICollectionViewDataSour
     private var collectionView: UICollectionView!
     private let caching = ImageCachingController()
     private var isAscending = false // standard sort: creationDate desc by default
+    private var batchReorderMode = true
+    private var workingOrderAssetIds: [String] = []
 
     init(collection: PHAssetCollection) {
         self.collection = collection
@@ -47,6 +49,9 @@ final class AssetsGridViewController: UIViewController, UICollectionViewDataSour
     private func reloadFetch() {
         fetchResult = PhotosDataSource.shared.fetchAssets(in: collection, sortByCreationDateAscending: isAscending)
         caching.reset()
+        if batchReorderMode && collectionView?.isEditing == true {
+            workingOrderAssetIds = (0..<fetchResult.count).map { fetchResult.object(at: $0).localIdentifier }
+        }
         collectionView.reloadData()
     }
 
@@ -69,12 +74,39 @@ final class AssetsGridViewController: UIViewController, UICollectionViewDataSour
         collectionView.dragInteractionEnabled = true
         collectionView.dragDelegate = self
         collectionView.dropDelegate = self
+        // 初始化工作序列
+        workingOrderAssetIds = (0..<fetchResult.count).map { fetchResult.object(at: $0).localIdentifier }
     }
 
     @objc private func finishCustomReorder() {
         collectionView.isEditing = false
         navigationItem.rightBarButtonItems = navigationItem.rightBarButtonItems?.filter { $0.title != "完成" }
-        // 顺序已在交互中写回系统相册
+        // 如果是批次模式：一次性写回顺序
+        guard batchReorderMode else { return }
+        let targetIds = workingOrderAssetIds
+        let targetAssets = PHAsset.fetchAssets(withLocalIdentifiers: targetIds, options: nil)
+        var orderedAssets: [PHAsset] = []
+        orderedAssets.reserveCapacity(targetAssets.count)
+        let map = Dictionary(uniqueKeysWithValues: (0..<targetAssets.count).map { (targetAssets.object(at: $0).localIdentifier, targetAssets.object(at: $0)) })
+        for id in targetIds { if let a = map[id] { orderedAssets.append(a) } }
+
+        PHPhotoLibrary.shared().performChanges({
+            guard let change = PHAssetCollectionChangeRequest(for: self.collection) else { return }
+            let current = PHAsset.fetchAssets(in: self.collection, options: nil)
+            change.removeAssets(current)
+            change.insertAssets(orderedAssets as NSArray, at: IndexSet(0..<orderedAssets.count))
+        }) { success, error in
+            DispatchQueue.main.async {
+                if success {
+                    self.reloadFetch()
+                } else {
+                    let msg = error?.localizedDescription ?? "应用排序失败"
+                    let alert = UIAlertController(title: "错误", message: msg, preferredStyle: .alert)
+                    alert.addAction(UIAlertAction(title: "确定", style: .default))
+                    self.present(alert, animated: true)
+                }
+            }
+        }
     }
 
     // MARK: - UICollectionViewDataSource
@@ -149,26 +181,35 @@ extension AssetsGridViewController: UICollectionViewDragDelegate, UICollectionVi
     func collectionView(_ collectionView: UICollectionView, performDropWith coordinator: UICollectionViewDropCoordinator) {
         guard let destination = coordinator.destinationIndexPath else { return }
         let items = coordinator.items
-        let sourceIndexes: [Int] = items.compactMap { item in
-            guard let source = item.sourceIndexPath else { return nil }
-            return source.item
-        }
+        let sourceIndexes: [Int] = items.compactMap { $0.sourceIndexPath?.item }
         guard !sourceIndexes.isEmpty else { return }
 
-        // 更新系统相册顺序
-        PHPhotoLibrary.shared().performChanges({
-            guard let changeRequest = PHAssetCollectionChangeRequest(for: self.collection) else { return }
-            let indexSet = IndexSet(sourceIndexes)
-            changeRequest.moveAssets(at: indexSet, to: destination.item)
-        }) { success, error in
-            DispatchQueue.main.async {
-                if success {
-                    self.reloadFetch()
-                } else {
-                    let msg = error?.localizedDescription ?? "重排失败"
-                    let alert = UIAlertController(title: "错误", message: msg, preferredStyle: .alert)
-                    alert.addAction(UIAlertAction(title: "确定", style: .default))
-                    self.present(alert, animated: true)
+        if batchReorderMode {
+            // 仅更新本地工作序列与 UI，不立即写系统
+            for from in sourceIndexes.sorted() { // 简化：逐个移动
+                moveIdInWorkingOrder(fromIndex: from, toIndex: destination.item)
+            }
+            collectionView.performBatchUpdates({
+                for from in sourceIndexes {
+                    collectionView.moveItem(at: IndexPath(item: from, section: 0), to: destination)
+                }
+            })
+        } else {
+            // 实时写回系统相册
+            PHPhotoLibrary.shared().performChanges({
+                guard let changeRequest = PHAssetCollectionChangeRequest(for: self.collection) else { return }
+                let indexSet = IndexSet(sourceIndexes)
+                changeRequest.moveAssets(at: indexSet, to: destination.item)
+            }) { success, error in
+                DispatchQueue.main.async {
+                    if success {
+                        self.reloadFetch()
+                    } else {
+                        let msg = error?.localizedDescription ?? "重排失败"
+                        let alert = UIAlertController(title: "错误", message: msg, preferredStyle: .alert)
+                        alert.addAction(UIAlertAction(title: "确定", style: .default))
+                        self.present(alert, animated: true)
+                    }
                 }
             }
         }
@@ -180,5 +221,16 @@ extension AssetsGridViewController: UICollectionViewDragDelegate, UICollectionVi
     }
     func collectionView(_ collectionView: UICollectionView, dragSessionWillBegin session: UIDragSession) {}
     func collectionView(_ collectionView: UICollectionView, dragSessionDidEnd session: UIDragSession) {}
+}
+
+private extension AssetsGridViewController {
+    func moveIdInWorkingOrder(fromIndex: Int, toIndex: Int) {
+        guard fromIndex != toIndex,
+              fromIndex >= 0, fromIndex < workingOrderAssetIds.count,
+              toIndex >= 0, toIndex <= workingOrderAssetIds.count else { return }
+        let id = workingOrderAssetIds.remove(at: fromIndex)
+        let insertIndex = min(toIndex, workingOrderAssetIds.count)
+        workingOrderAssetIds.insert(id, at: insertIndex)
+    }
 }
 
