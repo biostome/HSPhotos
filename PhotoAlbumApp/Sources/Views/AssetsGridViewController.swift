@@ -35,10 +35,32 @@ final class AssetsGridViewController: UIViewController, UICollectionViewDataSour
 
         navigationItem.rightBarButtonItems = [
             UIBarButtonItem(title: "排序", style: .plain, target: self, action: #selector(toggleSort)),
-            UIBarButtonItem(title: "自定义排序", style: .plain, target: self, action: #selector(startCustomReorder))
+            UIBarButtonItem(title: "自定义排序", style: .plain, target: self, action: #selector(startCustomReorder)),
+            UIBarButtonItem(title: "实验复制重建", style: .plain, target: self, action: #selector(experimentalDuplicateRebuild))
         ]
 
         reloadFetch()
+    }
+
+    @objc private func experimentalDuplicateRebuild() {
+        let alert = UIAlertController(title: "实验功能", message: "复制照片并新建相册以体现自定义顺序（仅照片，可能占用空间/iCloud）。继续？", preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        alert.addAction(UIAlertAction(title: "继续", style: .destructive, handler: { _ in
+            let ids = (0..<self.fetchResult.count).map { self.fetchResult.object(at: $0).localIdentifier }
+            let cfg = ExperimentalDuplicateSorter.Config(newAlbumTitle: (self.collection.localizedTitle ?? "相册") + "-复制重建",
+                                                         startDate: Date(),
+                                                         stepSeconds: 5)
+            ExperimentalDuplicateSorter.rebuildAsNewAlbum(from: self.collection, orderedAssetIds: ids, config: cfg, progress: { done, total in
+                self.title = "导出中 \(done)/\(total)"
+            }, completion: { success, error in
+                self.title = self.collection.localizedTitle
+                let msg = success ? "已创建镜像相册并按顺序导入" : (error?.localizedDescription ?? "失败")
+                let doneAlert = UIAlertController(title: success ? "完成" : "错误", message: msg, preferredStyle: .alert)
+                doneAlert.addAction(UIAlertAction(title: "确定", style: .default))
+                self.present(doneAlert, animated: true)
+            })
+        }))
+        present(alert, animated: true)
     }
 
     override func viewDidLayoutSubviews() {
