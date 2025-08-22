@@ -9,6 +9,9 @@ final class AssetsGridViewController: UIViewController, UICollectionViewDataSour
     private var isAscending = false // standard sort: creationDate desc by default
     private var batchReorderMode = true
     private var workingOrderAssetIds: [String] = []
+    private lazy var isUserRegularAlbum: Bool = {
+        return collection.assetCollectionType == .album && collection.assetCollectionSubtype == .albumRegular
+    }()
 
     init(collection: PHAssetCollection) {
         self.collection = collection
@@ -33,34 +36,16 @@ final class AssetsGridViewController: UIViewController, UICollectionViewDataSour
         collectionView.register(AssetCell.self, forCellWithReuseIdentifier: AssetCell.reuseId)
         view.addSubview(collectionView)
 
-        navigationItem.rightBarButtonItems = [
-            UIBarButtonItem(title: "排序", style: .plain, target: self, action: #selector(toggleSort)),
-            UIBarButtonItem(title: "自定义排序", style: .plain, target: self, action: #selector(startCustomReorder)),
-            UIBarButtonItem(title: "实验复制重建", style: .plain, target: self, action: #selector(experimentalDuplicateRebuild))
+        var items: [UIBarButtonItem] = [
+            UIBarButtonItem(title: "排序", style: .plain, target: self, action: #selector(toggleSort))
         ]
+        if isUserRegularAlbum {
+            items.append(UIBarButtonItem(title: "自定义排序", style: .plain, target: self, action: #selector(startCustomReorder)))
+        }
+        items.append(UIBarButtonItem(title: "实验复制重建", style: .plain, target: self, action: #selector(experimentalDuplicateRebuild)))
+        navigationItem.rightBarButtonItems = items
 
         reloadFetch()
-    }
-
-    @objc private func experimentalDuplicateRebuild() {
-        let alert = UIAlertController(title: "实验功能", message: "复制照片并新建相册以体现自定义顺序（仅照片，可能占用空间/iCloud）。继续？", preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
-        alert.addAction(UIAlertAction(title: "继续", style: .destructive, handler: { _ in
-            let ids = (0..<self.fetchResult.count).map { self.fetchResult.object(at: $0).localIdentifier }
-            let cfg = ExperimentalDuplicateSorter.Config(newAlbumTitle: (self.collection.localizedTitle ?? "相册") + "-复制重建",
-                                                         startDate: Date(),
-                                                         stepSeconds: 5)
-            ExperimentalDuplicateSorter.rebuildAsNewAlbum(from: self.collection, orderedAssetIds: ids, config: cfg, progress: { done, total in
-                self.title = "导出中 \(done)/\(total)"
-            }, completion: { success, error in
-                self.title = self.collection.localizedTitle
-                let msg = success ? "已创建镜像相册并按顺序导入" : (error?.localizedDescription ?? "失败")
-                let doneAlert = UIAlertController(title: success ? "完成" : "错误", message: msg, preferredStyle: .alert)
-                doneAlert.addAction(UIAlertAction(title: "确定", style: .default))
-                self.present(doneAlert, animated: true)
-            })
-        }))
-        present(alert, animated: true)
     }
 
     override func viewDidLayoutSubviews() {
@@ -83,7 +68,7 @@ final class AssetsGridViewController: UIViewController, UICollectionViewDataSour
     }
 
     @objc private func startCustomReorder() {
-        guard collection.assetCollectionSubtype == .albumRegular || collection.assetCollectionType == .album else {
+        guard isUserRegularAlbum else {
             let alert = UIAlertController(title: "不可自定义排序", message: "仅用户创建的相册支持重排。", preferredStyle: .alert)
             alert.addAction(UIAlertAction(title: "确定", style: .default))
             present(alert, animated: true)
@@ -180,6 +165,27 @@ final class AssetsGridViewController: UIViewController, UICollectionViewDataSour
         if h > 0 { return String(format: "%d:%02d:%02d", h, m, s) }
         return String(format: "%d:%02d", m, s)
     }
+
+    @objc private func experimentalDuplicateRebuild() {
+        let alert = UIAlertController(title: "实验功能", message: "复制照片并新建相册以体现自定义顺序（仅照片，可能占用空间/iCloud）。继续？", preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        alert.addAction(UIAlertAction(title: "继续", style: .destructive, handler: { _ in
+            let ids = (0..<self.fetchResult.count).map { self.fetchResult.object(at: $0).localIdentifier }
+            let cfg = ExperimentalDuplicateSorter.Config(newAlbumTitle: (self.collection.localizedTitle ?? "相册") + "-复制重建",
+                                                         startDate: Date(),
+                                                         stepSeconds: 5)
+            ExperimentalDuplicateSorter.rebuildAsNewAlbum(from: self.collection, orderedAssetIds: ids, config: cfg, progress: { done, total in
+                self.title = "导出中 \(done)/\(total)"
+            }, completion: { success, error in
+                self.title = self.collection.localizedTitle
+                let msg = success ? "已创建镜像相册并按顺序导入" : (error?.localizedDescription ?? "失败")
+                let doneAlert = UIAlertController(title: success ? "完成" : "错误", message: msg, preferredStyle: .alert)
+                doneAlert.addAction(UIAlertAction(title: "确定", style: .default))
+                self.present(doneAlert, animated: true)
+            })
+        }))
+        present(alert, animated: true)
+    }
 }
 
 extension AssetsGridViewController: UICollectionViewDelegateFlowLayout {
@@ -219,7 +225,7 @@ extension AssetsGridViewController: UICollectionViewDragDelegate, UICollectionVi
         } else {
             // 实时写回系统相册
             PHPhotoLibrary.shared().performChanges({
-                guard let changeRequest = PHAssetCollectionChangeRequest(for: self.collection) else { return }
+                guard self.isUserRegularAlbum, let changeRequest = PHAssetCollectionChangeRequest(for: self.collection) else { return }
                 let indexSet = IndexSet(sourceIndexes)
                 changeRequest.moveAssets(at: indexSet, to: destination.item)
             }) { success, error in
