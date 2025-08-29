@@ -126,43 +126,32 @@ class PhotoGridViewController: UIViewController {
         self.navigationItem.rightBarButtonItem = selectBarButton
         
         do {
-            
+            // 开始记录同步时间
             let start = Date()
+            
             // 执行排序操作
             let sortedAssets = try self.gridView.sort()
+            
+            // 重新交给视图刷新
             self.gridView.assets = sortedAssets
             
             // 清除选中状态
             self.gridView.clearSelected()
             
+            // 开始同步
             let loadingAlert = UIAlertController(title: "同步中", message: "正在将照片顺序同步到系统相册...", preferredStyle: .alert)
             present(loadingAlert, animated: true)
             
-            self.sync(sortedAssets: sortedAssets, for: self.collection) { success, message in
+            PhotoSyncor.sync(sortedAssets: sortedAssets, for: self.collection) { success, message in
                 // 显示耗时信息
                 let duration = Date().timeIntervalSince(start)
                 loadingAlert.dismiss(animated: true) {
                     if success {
-                        // 获取同步后的结果并显示
-                        let fetchResult = PHAsset.fetchAssets(in: self.collection, options: nil)
-                        var syncedAssets: [PHAsset] = []
-                        fetchResult.enumerateObjects { asset, _, _ in
-                            syncedAssets.append(asset)
-                        }
-                        
-//                        let message = """
-//                                    排序前：\(sortedAssets.map { $0.localIdentifier }.joined(separator: ", "))
-//                                    
-//                                    排序后：\(syncedAssets.map { $0.localIdentifier }.joined(separator: ", "))
-//                                    
-//                                    排序耗时: \(String(format: "%.2f", duration))秒
-//                                    """
-                        let message = """
-                                    排序耗时: \(String(format: "%.2f", duration))秒
-                                    """
-                        self.showAlert(title: "同步成功", message: message)
+                        let message = " 序耗时: \(String(format: "%.2f", duration))秒"
+                        self.syncSuccess(message: message)
                     } else {
-                        self.showAlert(title: "同步失败", message: "无法同步照片顺序到系统相册：\(message ?? "")")
+                        let message = "无法同步照片顺序到系统相册：\(message ?? "")"
+                        self.syncFailed(message: message)
                     }
                 }
             }
@@ -172,66 +161,20 @@ class PhotoGridViewController: UIViewController {
             showAlert(title: "排序失败", message: error.localizedDescription)
         }
     }
+
     
-    typealias SortCompletion = (Bool, String?) -> Void
-    
-    /// 将修改的顺序同步到系统相册
-    /// - Parameters:
-    ///   - sortedAssets: 已经改变顺序的数据
-    ///   - collection: 目标相册
-    func sync(sortedAssets: [PHAsset], for collection: PHAssetCollection, completion: @escaping SortCompletion) {
-        // Check permission
-        guard PHPhotoLibrary.authorizationStatus() == .authorized || PHPhotoLibrary.authorizationStatus() == .limited else {
-            completion(false, "No photo library access permission")
-            return
-        }
-        
-        // Fetch original assets efficiently
-        let fetchOptions = PHFetchOptions()
-        let fetchResult = PHAsset.fetchAssets(in: collection, options: fetchOptions)
-        let count = fetchResult.count
-        guard count > 0 else {
-            completion(false, "No assets in collection")
-            return
-        }
-        
-        var originalAssets = [PHAsset]()
-        originalAssets.reserveCapacity(count)
-        for i in 0..<count {
-            originalAssets.append(fetchResult.object(at: i))
-        }
-        
-        // Validate sortedAssets
-        guard sortedAssets.count == count else {
-            completion(false, "Sorted assets count must match collection assets count")
-            return
-        }
-        
-        // Validate that sortedAssets contains exactly the same assets as originalAssets
-        let originalSet = Set(originalAssets.map { $0.localIdentifier })
-        let sortedSet = Set(sortedAssets.map { $0.localIdentifier })
-        guard originalSet == sortedSet else {
-            completion(false, "Sorted assets must exactly match the original assets")
-            return
-        }
-        
-        // Convert sortedAssets to NSArray for replaceAssets
-        let sortedAssetsNSArray = sortedAssets as NSArray
-        
-        // Execute reorder using replaceAssets
-        PHPhotoLibrary.shared().performChanges({
-            guard let changeRequest = PHAssetCollectionChangeRequest(for: collection) else {
-                return
-            }
-            
-            let indices = IndexSet(0..<count)
-            changeRequest.replaceAssets(at: indices, withAssets: sortedAssetsNSArray)
-        }, completionHandler: { success, error in
-            DispatchQueue.main.async {
-                completion(success, error?.localizedDescription ?? (success ? nil : "Sync operation failed"))
-            }
-        })
+    /// 同步成功
+    /// - Parameter message: 提示消息
+    private func syncSuccess(message: String) {
+        self.showAlert(title: "同步成功", message: message)
     }
+    
+    /// 同步失败
+    /// - Parameter message: 提示消息
+    private func syncFailed(message: String) {
+        self.showAlert(title: "同步失败", message: message)
+    }
+    
     
     /// 保存相册的排序偏好
     /// - Parameter sortPreference: 排序偏好 ("creationDate", "modificationDate", "filename", "custom")
