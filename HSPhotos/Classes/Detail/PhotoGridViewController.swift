@@ -45,32 +45,11 @@ class PhotoGridViewController: UIViewController {
     
     private lazy var fetchOptions: PHFetchOptions = {
         let options = PHFetchOptions()
-        
-        // 读取系统相册排序偏好
-        let key = "system_sort_preference_\(collection.localIdentifier)"
-        if let sortPreference = UserDefaults.standard.string(forKey: key) {
-            // 根据保存的排序偏好设置 sortDescriptors
-            switch sortPreference {
-            case "creationDate":
-                options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-            case "modificationDate":
-                options.sortDescriptors = [NSSortDescriptor(key: "modificationDate", ascending: false)]
-            case "filename":
-                options.sortDescriptors = [NSSortDescriptor(key: "filename", ascending: true)]
-            case "custom":
-                // 自定义排序，不设置 sortDescriptors，使用相册的自定义排序
-                break
-            default:
-                // 默认按创建时间倒序
-                options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-            }
-        } else {
-            // 如果没有保存的排序偏好，使用相册的自定义排序
-            // 系统相册会按照用户自定义的顺序返回照片
-        }
-        
+        options.sortDescriptors = sortPreference.sortDescriptors
         return options
     }()
+    
+    private var sortPreference: PhotoSortPreference = .custom
 
     init(collection: PHAssetCollection) {
         self.collection = collection
@@ -108,20 +87,44 @@ class PhotoGridViewController: UIViewController {
         assets.enumerateObjects { asset, index, _ in
             newAssets.append(asset)
         }
+        
+        if self.sortPreference == .custom {
+            newAssets = PhotoOrder.apply(to: newAssets, for: collection)
+        }
+        
         self.assets = newAssets
     }
     
+    /// 排序方式改变
+    /// - Parameter preference: 
+    private func onChanged(sort preference: PhotoSortPreference) {
+        self.sortPreference = preference
+        
+        let options = PHFetchOptions()
+        options.sortDescriptors = preference.sortDescriptors
+        fetchOptions = options
+        
+        
+        let assets = PHAsset.fetchAssets(in: collection, options: fetchOptions)
+        var newAssets: [PHAsset] = []
+        assets.enumerateObjects { asset, index, _ in
+            newAssets.append(asset)
+        }
+        
+        if self.sortPreference == .custom {
+            newAssets = PhotoOrder.apply(to: newAssets, for: collection)
+        }
+        
+        self.assets = newAssets
+    }
+    
+    /// 选择按钮点击
     @objc private func selectionButtonTapped(sender: UIBarButtonItem) {
-        print("selectionButtonTapped")
         self.isSelectionMode = true
         self.navigationItem.rightBarButtonItem = doneBarButton
     }
     
-
-    
     @objc private func doneButtonTapped(sender: UIBarButtonItem) {
-        print("doneButtonTapped")
-        
         self.isSelectionMode = false
         self.navigationItem.rightBarButtonItem = selectBarButton
         
@@ -135,6 +138,9 @@ class PhotoGridViewController: UIViewController {
             // 重新交给视图刷新
             self.gridView.assets = sortedAssets
             
+            // 保存自定义排序
+            PhotoOrder.set(order: sortedAssets, for: self.collection)
+            
             // 清除选中状态
             self.gridView.clearSelected()
             
@@ -142,12 +148,12 @@ class PhotoGridViewController: UIViewController {
             let loadingAlert = UIAlertController(title: "同步中", message: "正在将照片顺序同步到系统相册...", preferredStyle: .alert)
             present(loadingAlert, animated: true)
             
-            PhotoSyncor.sync(sortedAssets: sortedAssets, for: self.collection) { success, message in
+            PhotoSyncService.sync(sortedAssets: sortedAssets, for: self.collection) { success, message in
                 // 显示耗时信息
                 let duration = Date().timeIntervalSince(start)
                 loadingAlert.dismiss(animated: true) {
                     if success {
-                        let message = " 序耗时: \(String(format: "%.2f", duration))秒"
+                        let message = "排序耗时: \(String(format: "%.2f", duration))秒"
                         self.syncSuccess(message: message)
                     } else {
                         let message = "无法同步照片顺序到系统相册：\(message ?? "")"
@@ -162,7 +168,6 @@ class PhotoGridViewController: UIViewController {
         }
     }
 
-    
     /// 同步成功
     /// - Parameter message: 提示消息
     private func syncSuccess(message: String) {
@@ -173,46 +178,6 @@ class PhotoGridViewController: UIViewController {
     /// - Parameter message: 提示消息
     private func syncFailed(message: String) {
         self.showAlert(title: "同步失败", message: message)
-    }
-    
-    
-    /// 保存相册的排序偏好
-    /// - Parameter sortPreference: 排序偏好 ("creationDate", "modificationDate", "filename", "custom")
-    func saveSortPreference(_ sortPreference: String) {
-        let key = "system_sort_preference_\(collection.localIdentifier)"
-        UserDefaults.standard.set(sortPreference, forKey: key)
-        
-        // 更新 fetchOptions 并重新加载照片
-        updateFetchOptionsSorting()
-        loadPhoto()
-    }
-    
-    /// 获取相册的排序偏好
-    /// - Returns: 排序偏好字符串，如果没有设置则返回 nil
-    func getSortPreference() -> String? {
-        let key = "system_sort_preference_\(collection.localIdentifier)"
-        return UserDefaults.standard.string(forKey: key)
-    }
-    
-    /// 更新 fetchOptions 的排序设置
-    private func updateFetchOptionsSorting() {
-        let key = "system_sort_preference_\(collection.localIdentifier)"
-        if let sortPreference = UserDefaults.standard.string(forKey: key) {
-            switch sortPreference {
-            case "creationDate":
-                fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-            case "modificationDate":
-                fetchOptions.sortDescriptors = [NSSortDescriptor(key: "modificationDate", ascending: false)]
-            case "filename":
-                fetchOptions.sortDescriptors = [NSSortDescriptor(key: "filename", ascending: true)]
-            case "custom":
-                fetchOptions.sortDescriptors = nil
-            default:
-                fetchOptions.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
-            }
-        } else {
-            fetchOptions.sortDescriptors = nil
-        }
     }
 }
 

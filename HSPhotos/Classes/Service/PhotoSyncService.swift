@@ -8,7 +8,7 @@
 import Foundation
 import Photos
 
-class PhotoSyncor {
+class PhotoSyncService {
     
     typealias SortCompletion = (Bool, String?) -> Void
     
