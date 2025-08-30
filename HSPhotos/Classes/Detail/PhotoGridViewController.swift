@@ -88,6 +88,13 @@ class PhotoGridViewController: UIViewController {
             newAssets.append(asset)
         }
         
+        // 如果为空就保存一次
+        // 需求是不能受到系统相册的影响
+        let orders = PhotoOrder.order(for: self.collection)
+        if orders.count == 0{
+            PhotoOrder.set(order: newAssets, for: self.collection)
+        }
+        
         if self.sortPreference == .custom {
             newAssets = PhotoOrder.apply(to: newAssets, for: collection)
         }
