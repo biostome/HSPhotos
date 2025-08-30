@@ -10,18 +10,11 @@ import Photos
 
 class PhotoGridViewController: UIViewController {
     
-    private let collection: PHAssetCollection
-    
-    public var assets: [PHAsset] = [] {
-        didSet{
-            self.gridView.assets = assets
-        }
-    }
     
     private lazy var gridView: PhotoGridView = {
         let view = PhotoGridView()
         view.translatesAutoresizingMaskIntoConstraints = false
-//        view.delegate = self
+        view.delegate = self
         return view
     }()
     
@@ -34,14 +27,38 @@ class PhotoGridViewController: UIViewController {
         let button = UIBarButtonItem(title: "完成", style: .plain, target: self, action: #selector(doneButtonTapped(sender: )))
         return button
     }()
-    
-    private var selectedPhotos: [IndexPath] = []
-    
-    private var isSelectionMode = false {
-        didSet{
-            self.gridView.isSelectionMode = isSelectionMode
+
+    // menu button
+    private lazy var menuButton: UIButton = {
+        let button = UIButton(type: .custom)
+        button.setImage(UIImage(systemName: "ellipsis"), for: .normal)
+        button.setTitleColor(.white, for: .normal)
+        button.layer.cornerRadius = 44 / 2.0
+        button.backgroundColor = .white
+        button.layer.shadowColor = UIColor.lightGray.cgColor
+        button.layer.shadowRadius = 44 / 2.0
+        button.layer.shadowOffset = CGSize(width: 0, height: 4)
+        button.layer.shadowOpacity = 0.5
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.showsMenuAsPrimaryAction = true // 点击按钮直接显示菜单
+        // 定义菜单
+        let copy = UIAction(title: "复制", image: UIImage(systemName: "doc.on.doc")) { _ in
+            print("👉 复制")
+            self.onCopy()
         }
-    }
+        
+        let paste = UIAction(title: "粘贴", image: UIImage(systemName: "doc.on.doc")) { _ in
+            print("👉 粘贴")
+            self.onPaste()
+        }
+        let sort = UIAction(title: "排序", image: UIImage(systemName: "trash")) { _ in
+            print("👉 排序")
+            self.onOrder()
+        }
+
+        button.menu = UIMenu(title: "操作选项", children: [paste, copy, sort])
+        return button
+    }()
     
     private lazy var fetchOptions: PHFetchOptions = {
         let options = PHFetchOptions()
@@ -49,7 +66,22 @@ class PhotoGridViewController: UIViewController {
         return options
     }()
     
+    private let collection: PHAssetCollection
+    
     private var sortPreference: PhotoSortPreference = .custom
+    
+    private var assets: [PHAsset] = [] {
+        didSet{
+            self.gridView.assets = assets
+        }
+    }
+    
+    private var isSelectionMode = false {
+        didSet{
+            self.gridView.isSelectionMode = isSelectionMode
+            self.navigationItem.rightBarButtonItem = isSelectionMode ? doneBarButton : selectBarButton
+        }
+    }
 
     init(collection: PHAssetCollection) {
         self.collection = collection
@@ -79,6 +111,16 @@ class PhotoGridViewController: UIViewController {
         ])
         
         self.navigationItem.rightBarButtonItem = selectBarButton
+        
+        
+        view.addSubview(menuButton)
+        NSLayoutConstraint.activate([
+            menuButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
+            menuButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+            menuButton.heightAnchor.constraint(equalToConstant: 44),
+            menuButton.widthAnchor.constraint(equalToConstant: 60)
+        ])
+        
     }
     
     private func loadPhoto() {
@@ -125,16 +167,7 @@ class PhotoGridViewController: UIViewController {
         self.assets = newAssets
     }
     
-    /// 选择按钮点击
-    @objc private func selectionButtonTapped(sender: UIBarButtonItem) {
-        self.isSelectionMode = true
-        self.navigationItem.rightBarButtonItem = doneBarButton
-    }
-    
-    @objc private func doneButtonTapped(sender: UIBarButtonItem) {
-        self.isSelectionMode = false
-        self.navigationItem.rightBarButtonItem = selectBarButton
-        
+    private func onOrder(){
         do {
             // 开始记录同步时间
             let start = Date()
@@ -143,7 +176,7 @@ class PhotoGridViewController: UIViewController {
             let sortedAssets = try self.gridView.sort()
             
             // 重新交给视图刷新
-            self.gridView.assets = sortedAssets
+            self.assets = sortedAssets
             
             // 保存自定义排序
             PhotoOrder.set(order: sortedAssets, for: self.collection)
@@ -174,6 +207,37 @@ class PhotoGridViewController: UIViewController {
             showAlert(title: "排序失败", message: error.localizedDescription)
         }
     }
+    
+    private func onCopy(){
+        AssetPasteboard.copyAssets(self.gridView.selectedAssets) { success, message in
+            print(success ? "✅ 已复制到剪切板" : "❌ 复制失败: \(message ?? "")")
+        }
+    }
+    
+    private func onPaste(){
+        // 2. 从剪切板获取（不一定粘贴）
+        guard let assets = AssetPasteboard.assetsFromPasteboard() else {
+            print("👉 剪切板里没有资源")
+            return
+        }
+        print("👉 剪切板里有 \(assets.count) 个资源")
+        
+        AssetPasteboard.pasteAssets(assets, into: collection) { success, error in
+            print(success ? "✅ 已粘贴到相册" : "❌ 粘贴失败: \(error ?? "")")
+            self.loadPhoto()
+        }
+    }
+
+    /// 选择按钮点击
+    @objc private func selectionButtonTapped(sender: UIBarButtonItem) {
+        self.isSelectionMode = true
+    }
+    
+    @objc private func doneButtonTapped(sender: UIBarButtonItem) {
+        self.isSelectionMode = false
+        self.gridView.clearSelected()
+        self.updateMenus()
+    }
 
     /// 同步成功
     /// - Parameter message: 提示消息
@@ -185,6 +249,32 @@ class PhotoGridViewController: UIViewController {
     /// - Parameter message: 提示消息
     private func syncFailed(message: String) {
         self.showAlert(title: "同步失败", message: message)
+    }
+    
+    private func updateMenus(){
+        let attributes: UIMenuElement.Attributes = gridView.selectedAssets.isEmpty ? .disabled : []
+        // 定义菜单
+        let copy = UIAction(title: "复制", image: UIImage(systemName: "doc.on.doc"), attributes: attributes) { _ in
+            print("👉 复制")
+            self.onCopy()
+        }
+        
+        let paste = UIAction(title: "粘贴", image: UIImage(systemName: "doc.on.doc")) { _ in
+            print("👉 粘贴")
+            self.onPaste()
+        }
+        let sort = UIAction(title: "排序", image: UIImage(systemName: "trash"), attributes: attributes) { _ in
+            print("👉 排序")
+            self.onOrder()
+        }
+
+        menuButton.menu = UIMenu(title: "操作选项", children: [paste, copy, sort])
+    }
+}
+
+extension PhotoGridViewController: PhotoGridViewDelegate {
+    func photoGridView(_ photoGridView: PhotoGridView, didSelectItemAt indexPath: IndexPath) {
+        updateMenus()
     }
 }
 

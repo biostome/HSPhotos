@@ -51,6 +51,8 @@ class PhotoGridView: UIView {
     
     public var delegate: PhotoGridViewDelegate?
     
+    public var selectedAssets: [PHAsset] { selectedPhotos }
+    
     public var isSelectionMode = false {
         didSet{
             self.collectionView.reloadData()
@@ -194,9 +196,8 @@ extension PhotoGridView: UICollectionViewDelegate {
             }
 
             self.delegate?.photoGridView(self, didSelctedItems: self.selectedPhotos)
-        } else {
             self.delegate?.photoGridView(self, didSelectItemAt: indexPath)
-        }
+        } 
     }
 }
 
