@@ -104,7 +104,6 @@ class PhotoCell: UICollectionViewCell {
 
     // MARK: - 配置
     func configure(with asset: PHAsset, isSelected: Bool, selectionIndex: Int?, selectionMode: PhotoSelectionMode) {
-        imageView.image = UIImage(systemName: "photo") // 默认占位图
 
         // 避免重复请求
         if currentAssetID != asset.localIdentifier {
@@ -147,7 +146,6 @@ class PhotoCell: UICollectionViewCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
-        imageView.image = UIImage(systemName: "photo")
         selectionOverlay.isHidden = true
         selectionNumberLabel.isHidden = true
         currentAssetID = nil

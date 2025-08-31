@@ -77,12 +77,6 @@ class PhotoGridView: UIView {
     // 本地ID -> 数组索引，用于快速查找选中照片在数组中的位置
     private var selectedMap: [String: Int] = [:]
     
-    // 本地ID -> 选中顺序，用于跟踪图片上的数字（从 1 开始）
-    private var selectionOrder: [String: Int] = [:]
-    
-    // 跟踪当前最大选中顺序
-    private var currentSelectionOrder: Int = 0
-    
     private lazy var collectionView: UICollectionView = {
         let layout = UICollectionViewFlowLayout()
         layout.minimumInteritemSpacing = 2
@@ -122,34 +116,18 @@ class PhotoGridView: UIView {
         ])
     }
     
-    /// 切换选中状态
+    
     func toggle(photo: PHAsset) {
         if let index = selectedMap[photo.localIdentifier] {
-            // 移除照片
             selectedPhotos.remove(at: index)
-            let removedOrder = selectionOrder[photo.localIdentifier]!
-            selectionOrder.removeValue(forKey: photo.localIdentifier)
             selectedMap.removeValue(forKey: photo.localIdentifier)
-            // 更新后续照片的索引和顺序
+            // 更新后续索引
             for i in index..<selectedPhotos.count {
-                let asset = selectedPhotos[i]
-                selectedMap[asset.localIdentifier] = i
-                if let order = selectionOrder[asset.localIdentifier], order > removedOrder {
-                    selectionOrder[asset.localIdentifier] = order - 1
-                }
-            }
-            // 更新最大顺序
-            if selectedPhotos.isEmpty {
-                currentSelectionOrder = 0
-            } else {
-                currentSelectionOrder = selectionOrder.values.max() ?? 0
+                selectedMap[selectedPhotos[i].localIdentifier] = i
             }
         } else {
-            // 添加照片
             selectedPhotos.append(photo)
             selectedMap[photo.localIdentifier] = selectedPhotos.count - 1
-            currentSelectionOrder += 1
-            selectionOrder[photo.localIdentifier] = currentSelectionOrder
         }
     }
     
@@ -180,7 +158,7 @@ class PhotoGridView: UIView {
     }
     
     func index(of photo: PHAsset) -> Int? {
-        return selectionOrder[photo.localIdentifier]
+        return selectedMap[photo.localIdentifier].map { $0 + 1 }
     }
     
     func sort() throws -> [PHAsset] {
@@ -204,8 +182,6 @@ class PhotoGridView: UIView {
     func clearSelected() {
         selectedPhotos.removeAll()
         selectedMap.removeAll()
-        selectionOrder.removeAll()
-        currentSelectionOrder = 0
         selectedStart = nil
         selectedEnd = nil
         delegate?.photoGridView(self, didSelectedItems: selectedPhotos)
