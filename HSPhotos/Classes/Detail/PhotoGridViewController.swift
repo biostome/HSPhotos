@@ -90,14 +90,15 @@ class PhotoGridViewController: UIViewController {
         
         // 如果为空就保存一次
         // 需求是不能受到系统相册的影响
-        let orders = PhotoOrder.order(for: self.collection)
-        if orders.count == 0{
-            PhotoOrder.set(order: newAssets, for: self.collection)
-        }
-        
-        if self.sortPreference == .custom {
-            newAssets = PhotoOrder.apply(to: newAssets, for: collection)
-        }
+        // 新需求:要双向同步就不能使用持久化
+//        let orders = PhotoOrder.order(for: self.collection)
+//        if orders.count == 0{
+//            PhotoOrder.set(order: newAssets, for: self.collection)
+//        }
+//        
+//        if self.sortPreference == .custom {
+//            newAssets = PhotoOrder.apply(to: newAssets, for: collection)
+//        }
         
         self.assets = newAssets
     }
@@ -117,10 +118,10 @@ class PhotoGridViewController: UIViewController {
         assets.enumerateObjects { asset, index, _ in
             newAssets.append(asset)
         }
-        
-        if self.sortPreference == .custom {
-            newAssets = PhotoOrder.apply(to: newAssets, for: collection)
-        }
+        // 新需求:要双向同步就不能使用持久化
+//        if self.sortPreference == .custom {
+//            newAssets = PhotoOrder.apply(to: newAssets, for: collection)
+//        }
         
         self.assets = newAssets
     }
@@ -146,7 +147,8 @@ class PhotoGridViewController: UIViewController {
             self.gridView.assets = sortedAssets
             
             // 保存自定义排序
-            PhotoOrder.set(order: sortedAssets, for: self.collection)
+            // 新需求:要双向同步就不能使用持久化
+//            PhotoOrder.set(order: sortedAssets, for: self.collection)
             
             // 清除选中状态
             self.gridView.clearSelected()
