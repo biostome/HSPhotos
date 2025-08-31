@@ -81,9 +81,29 @@ class PhotoCell: UICollectionViewCell {
             selectionNumberLabel.heightAnchor.constraint(equalToConstant: 20)
         ])
     }
+    
+    lazy var requestOptions: PHImageRequestOptions = {
+        
+        let options = PHImageRequestOptions()
+        options.version = .current
+//        options.deliveryMode = .highQualityFormat
+//        options.resizeMode = .exact
+        
+        // 允许iCloud下载
+        options.isNetworkAccessAllowed = true
+        
+        // 设置进度回调
+        options.progressHandler = { progress, _, _, _ in
+            DispatchQueue.main.async {
+//                print("progress: \(progress)%")
+            }
+        }
+        
+        return options
+    }()
 
     // MARK: - 配置
-    func configure(with asset: PHAsset, isSelected: Bool, selectionIndex: Int?, isSelectionMode: Bool) {
+    func configure(with asset: PHAsset, isSelected: Bool, selectionIndex: Int?, selectionMode: PhotoSelectionMode) {
         imageView.image = UIImage(systemName: "photo") // 默认占位图
 
         // 避免重复请求
@@ -92,19 +112,21 @@ class PhotoCell: UICollectionViewCell {
 
             let targetSize = CGSize(width: bounds.width * UIScreen.main.scale,
                                     height: bounds.height * UIScreen.main.scale)
-
             requestID = PHImageManager.default().requestImage(
                 for: asset,
                 targetSize: targetSize,
                 contentMode: .aspectFill,
-                options: nil
+                options: requestOptions
             ) { [weak self] image, _ in
                 self?.imageView.image = image
             }
         }
 
-        // 选择状态
-        if isSelectionMode {
+        switch selectionMode {
+        case .none:
+            selectionOverlay.isHidden = true
+            selectionNumberLabel.isHidden = true
+        case .multiple:
             selectionOverlay.isHidden = !isSelected
             if isSelected, let index = selectionIndex {
                 selectionNumberLabel.text = "\(index)"
@@ -112,9 +134,14 @@ class PhotoCell: UICollectionViewCell {
             } else {
                 selectionNumberLabel.isHidden = true
             }
-        } else {
-            selectionOverlay.isHidden = true
-            selectionNumberLabel.isHidden = true
+        case .range:
+            selectionOverlay.isHidden = !isSelected
+            if isSelected, let index = selectionIndex {
+                selectionNumberLabel.text = "\(index)"
+                selectionNumberLabel.isHidden = false
+            } else {
+                selectionNumberLabel.isHidden = true
+            }
         }
     }
 
