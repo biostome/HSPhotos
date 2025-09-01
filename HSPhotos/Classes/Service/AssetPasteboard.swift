@@ -19,6 +19,15 @@ class AssetPasteboard {
             completion(false, "没有可复制的资源")
             return
         }
+        
+        #if DEBUG
+        // 添加日志显示复制的照片顺序（仅 Debug）
+        print("📋 复制照片顺序:")
+        for (index, asset) in assets.enumerated() {
+            print("  \(index + 1). \(asset.localIdentifier)")
+        }
+        #endif
+        
         let idsString = ids.joined(separator: ",")
         UIPasteboard.general.string = idsString
         completion(true, nil)
@@ -34,10 +43,23 @@ class AssetPasteboard {
         let ids = idsString.components(separatedBy: ",")
         let result = PHAsset.fetchAssets(withLocalIdentifiers: ids, options: nil)
         
-        var assets: [PHAsset] = []
+        // 先构建一次查找表，整体 O(n)
+        var idToAsset: [String: PHAsset] = [:]
+        idToAsset.reserveCapacity(result.count)
         result.enumerateObjects { obj, _, _ in
-            assets.append(obj)
+            idToAsset[obj.localIdentifier] = obj
         }
+        // 按 ids 顺序映射，保持选择顺序
+        let assets: [PHAsset] = ids.compactMap { idToAsset[$0] }
+        
+        #if DEBUG
+        // 添加日志显示粘贴的照片顺序（仅 Debug）
+        print("📋 粘贴照片顺序:")
+        for (index, asset) in assets.enumerated() {
+            print("  \(index + 1). \(asset.localIdentifier)")
+        }
+        #endif
+        
         return assets
     }
 
