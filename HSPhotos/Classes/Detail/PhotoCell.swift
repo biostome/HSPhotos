@@ -7,7 +7,7 @@
 import UIKit
 import Photos
 
-class PhotoCell: UICollectionViewCell {
+class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
 
     // MARK: - 懒加载 UI 元素
     private lazy var imageView: UIImageView = {
@@ -27,6 +27,19 @@ class PhotoCell: UICollectionViewCell {
         overlay.layer.borderColor = UIColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0).cgColor
         overlay.isHidden = true
         overlay.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(overlay)
+        return overlay
+    }()
+    
+    private lazy var highlightOverlay: UIView = {
+        let overlay = UIView()
+        overlay.backgroundColor = UIColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 0.25)
+        overlay.layer.cornerRadius = 0
+        overlay.layer.borderWidth = 2
+        overlay.layer.borderColor = UIColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0).cgColor
+        overlay.isHidden = true
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        overlay.isUserInteractionEnabled = false
         contentView.addSubview(overlay)
         return overlay
     }()
@@ -91,6 +104,11 @@ class PhotoCell: UICollectionViewCell {
             selectionOverlay.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             selectionOverlay.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             selectionOverlay.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            
+            highlightOverlay.topAnchor.constraint(equalTo: contentView.topAnchor),
+            highlightOverlay.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            highlightOverlay.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            highlightOverlay.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
             
             selectionNumberLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 6),
             selectionNumberLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -6),
@@ -187,17 +205,17 @@ class PhotoCell: UICollectionViewCell {
         requestID = nil
     }
     
-    /// 执行高亮边框效果
+    /// 执行渐变柔光高亮效果
     func performHighlightAnimation() {
-        // 设置高亮边框
-        contentView.layer.borderWidth = 3.0
-        contentView.layer.borderColor = UIColor.systemBlue.cgColor
-        
-        // 延迟后淡出边框
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-            UIView.animate(withDuration: 0.3, animations: {
-                self.contentView.layer.borderWidth = 0.0
-            })
+        self.highlightOverlay.isHidden = false
+        UIView.animate(withDuration: 0.45) {
+            self.highlightOverlay.alpha = 0.8
+        } completion: { completion in
+            UIView.animate(withDuration: 0.45) {
+                self.highlightOverlay.alpha = 0
+            } completion: { finish in
+                self.highlightOverlay.isHidden = true
+            }
         }
     }
 }

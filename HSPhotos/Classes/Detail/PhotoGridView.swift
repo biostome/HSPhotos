@@ -200,11 +200,12 @@ class PhotoGridView: UIView {
         
         let indexPath = IndexPath(item: index, section: 0)
         
-        // 使用 performBatchUpdates 确保滚动完成后再执行动画
-        collectionView.performBatchUpdates({
-            collectionView.scrollToItem(at: indexPath, at: .centeredVertically, animated: true)
-        }) { [weak self] finished in
-            guard let self = self, finished else { return }
+        // 先执行滚动动画
+        collectionView.scrollToItem(at: indexPath, at: .centeredVertically, animated: true)
+        
+        // 等待滚动动画完成后再执行高亮边框动画
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+            guard let self = self else { return }
             if let cell = self.collectionView.cellForItem(at: indexPath) as? PhotoCell {
                 cell.performHighlightAnimation()
             }
