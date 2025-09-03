@@ -22,8 +22,7 @@ extension UserDefaults {
 
 enum PhotoSortPreference: String {
     case creationDate = "creationDate"
-//    case modificationDate = "modificationDate"
-//    case filename = "filename"
+    case modificationDate = "modificationDate"
     case custom = "custom"
     
     func preference(for collection: PHAssetCollection) -> Self {
@@ -43,10 +42,8 @@ extension PhotoSortPreference {
         switch self {
         case .creationDate:
             return [NSSortDescriptor(key: "creationDate", ascending: false)]
-//        case .modificationDate:
-//            return [NSSortDescriptor(key: "modificationDate", ascending: false)]
-//        case .filename:
-//            return [NSSortDescriptor(key: "filename", ascending: true)]
+        case .modificationDate:
+            return [NSSortDescriptor(key: "modificationDate", ascending: false)]
         case .custom:
             return nil
         }

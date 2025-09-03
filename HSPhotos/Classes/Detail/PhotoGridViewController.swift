@@ -39,6 +39,22 @@ class PhotoGridViewController: UIViewController {
         return button
     }()
     
+    private lazy var sortButton: UIButton = {
+        let button = UIButton(type: .custom)
+        button.setImage(UIImage(systemName: "arrow.up.arrow.down"), for: .normal)
+        button.tintColor = UIColor.systemBlue
+        button.layer.cornerRadius = 44 / 2.0
+        button.backgroundColor = .white
+        button.layer.shadowColor = UIColor.lightGray.cgColor
+        button.layer.shadowRadius = 44 / 2.0
+        button.layer.shadowOffset = CGSize(width: 0, height: 4)
+        button.layer.shadowOpacity = 0.5
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.showsMenuAsPrimaryAction = true
+        button.menu = createSortMenu()
+        return button
+    }()
+    
     private lazy var fetchOptions: PHFetchOptions = {
         let options = PHFetchOptions()
         options.sortDescriptors = sortPreference.sortDescriptors
@@ -65,6 +81,10 @@ class PhotoGridViewController: UIViewController {
     
     init(collection: PHAssetCollection) {
         self.collection = collection
+                
+        // 初始化排序偏好
+        self.sortPreference = PhotoSortPreference.custom.preference(for: collection)
+        
         super.init(nibName: nil, bundle: nil)
     }
     
@@ -75,6 +95,7 @@ class PhotoGridViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = collection.localizedTitle
+
         setupUI()
         loadPhoto()
     }
@@ -99,6 +120,15 @@ class PhotoGridViewController: UIViewController {
             menuButton.heightAnchor.constraint(equalToConstant: 44),
             menuButton.widthAnchor.constraint(equalToConstant: 60)
         ])
+        
+        view.addSubview(sortButton)
+        NSLayoutConstraint.activate([
+            sortButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
+            sortButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            sortButton.heightAnchor.constraint(equalToConstant: 44),
+            sortButton.widthAnchor.constraint(equalToConstant: 44)
+        ])
+
     }
     
     private func loadPhoto() {
@@ -123,8 +153,11 @@ class PhotoGridViewController: UIViewController {
             newAssets.append(asset)
         }
         self.assets = newAssets
+        
+        // 保存排序偏好
+        preference.set(preference: self.collection)
     }
-    
+
     private func onOrder() {
         do {
             let start = Date()
@@ -236,6 +269,8 @@ class PhotoGridViewController: UIViewController {
         selectBarButton.menu = createSelectionMenu()
     }
     
+    // MARK: - Menu Creation Methods
+    
     private func createSelectionMenu() -> UIMenu {
         let multipleSelectAction = UIAction(title: "多选", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
             self?.setSelectionMode(.multiple)
@@ -252,6 +287,40 @@ class PhotoGridViewController: UIViewController {
         return UIMenu(
             title: "选择模式",
             children: [multipleSelectAction, rangeSelectAction, cancelAction]
+        )
+    }
+    
+    private func createSortMenu() -> UIMenu {
+        let creationDateAction = UIAction(
+            title: "按照拍摄时间排序",
+            image: UIImage(systemName: "camera"),
+            state: sortPreference == .creationDate ? .on : .off
+        ) { [unowned self] _ in
+            self.onChanged(sort: .creationDate)
+            self.sortButton.menu = self.createSortMenu()
+        }
+        
+        let modificationDateAction = UIAction(
+            title: "按照加入时间排序",
+            image: UIImage(systemName: "clock"),
+            state: sortPreference == .modificationDate ? .on : .off
+        ) { [weak self] _ in
+            self?.onChanged(sort: .modificationDate)
+            self?.sortButton.menu = self?.createSortMenu()
+        }
+        
+        let customAction = UIAction(
+            title: "按照自定义排序",
+            image: UIImage(systemName: "hand.draw"),
+            state: sortPreference == .custom ? .on : .off
+        ) { [weak self] _ in
+            self?.onChanged(sort: .custom)
+            self?.sortButton.menu = self?.createSortMenu()
+        }
+        
+        return UIMenu(
+            title: "排序方式",
+            children: [customAction, modificationDateAction, creationDateAction]
         )
     }
     
