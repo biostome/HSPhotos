@@ -22,7 +22,7 @@ class PhotoCell: UICollectionViewCell {
     private lazy var selectionOverlay: UIView = {
         let overlay = UIView()
         overlay.backgroundColor = UIColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 0.25)
-        overlay.layer.cornerRadius = 6
+        overlay.layer.cornerRadius = 0
         overlay.layer.borderWidth = 2
         overlay.layer.borderColor = UIColor(red: 0.0, green: 0.48, blue: 1.0, alpha: 1.0).cgColor
         overlay.isHidden = true
@@ -45,6 +45,23 @@ class PhotoCell: UICollectionViewCell {
         return label
     }()
     
+    private lazy var indexLabel: UILabel = {
+        let label = UILabel()
+        
+        // 使用更轻量级的背景效果替代虚化
+        label.backgroundColor = UIColor.black.withAlphaComponent(0.5)
+        label.textColor = .white
+        label.font = UIFont.systemFont(ofSize: 12, weight: .semibold)
+        label.textAlignment = .center
+        label.layer.cornerRadius = 10
+        label.clipsToBounds = true
+        
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.alpha = 1
+        
+        return label
+    }()
+    
     // MARK: - 数据缓存
     private var currentAssetID: String?
     private var requestID: PHImageRequestID?
@@ -61,7 +78,7 @@ class PhotoCell: UICollectionViewCell {
     // MARK: - 布局
     private func setupUI() {
         contentView.backgroundColor = .white
-        contentView.layer.cornerRadius = 6
+        contentView.layer.cornerRadius = 0
         contentView.clipsToBounds = true
         
         NSLayoutConstraint.activate([
@@ -79,6 +96,16 @@ class PhotoCell: UICollectionViewCell {
             selectionNumberLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -6),
             selectionNumberLabel.widthAnchor.constraint(equalToConstant: 20),
             selectionNumberLabel.heightAnchor.constraint(equalToConstant: 20)
+        ])
+        
+        contentView.addSubview(indexLabel)
+        
+        // 设置约束
+        NSLayoutConstraint.activate([
+            indexLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -2),
+            indexLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 2),
+            indexLabel.widthAnchor.constraint(equalToConstant: 32),
+            indexLabel.heightAnchor.constraint(equalToConstant: 20)
         ])
     }
     
@@ -103,7 +130,7 @@ class PhotoCell: UICollectionViewCell {
     }()
 
     // MARK: - 配置
-    func configure(with asset: PHAsset, isSelected: Bool, selectionIndex: Int?, selectionMode: PhotoSelectionMode) {
+    func configure(with asset: PHAsset, isSelected: Bool, selectionIndex: Int?, selectionMode: PhotoSelectionMode, index: Int? = nil) {
 
         // 避免重复请求
         if currentAssetID != asset.localIdentifier {
@@ -119,6 +146,11 @@ class PhotoCell: UICollectionViewCell {
             ) { [weak self] image, _ in
                 self?.imageView.image = image
             }
+        }
+        
+        // 设置索引标签
+        if let index = index {
+            indexLabel.text = "\(index + 1)"
         }
 
         switch selectionMode {
@@ -153,5 +185,19 @@ class PhotoCell: UICollectionViewCell {
             PHImageManager.default().cancelImageRequest(requestID)
         }
         requestID = nil
+    }
+    
+    /// 执行高亮边框效果
+    func performHighlightAnimation() {
+        // 设置高亮边框
+        contentView.layer.borderWidth = 3.0
+        contentView.layer.borderColor = UIColor.systemBlue.cgColor
+        
+        // 延迟后淡出边框
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+            UIView.animate(withDuration: 0.3, animations: {
+                self.contentView.layer.borderWidth = 0.0
+            })
+        }
     }
 }

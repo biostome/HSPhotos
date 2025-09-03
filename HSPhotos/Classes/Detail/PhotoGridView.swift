@@ -56,6 +56,8 @@ class PhotoGridView: UIView {
     
     public var delegate: PhotoGridViewDelegate?
     
+    public weak var scrollDelegate: UIScrollViewDelegate?
+    
     public var selectedAssets: [PHAsset] { selectedPhotos }
     
     public var selectionMode: PhotoSelectionMode = .none {
@@ -106,6 +108,7 @@ class PhotoGridView: UIView {
         collectionView.delegate = self
         collectionView.dataSource = self
         collectionView.translatesAutoresizingMaskIntoConstraints = false
+        collectionView.keyboardDismissMode = .onDrag
         addSubview(collectionView)
         
         NSLayoutConstraint.activate([
@@ -187,6 +190,26 @@ class PhotoGridView: UIView {
         delegate?.photoGridView(self, didSelectedItems: selectedPhotos)
         collectionView.reloadData()
     }
+    
+    // MARK: - Public Methods
+    
+    /// 定位到指定索引位置的照片
+    /// - Parameter index: 照片在数组中的索引位置
+    func scrollTo(index: Int) {
+        guard index >= 0 && index < assets.count else { return }
+        
+        let indexPath = IndexPath(item: index, section: 0)
+        
+        // 使用 performBatchUpdates 确保滚动完成后再执行动画
+        collectionView.performBatchUpdates({
+            collectionView.scrollToItem(at: indexPath, at: .centeredVertically, animated: true)
+        }) { [weak self] finished in
+            guard let self = self, finished else { return }
+            if let cell = self.collectionView.cellForItem(at: indexPath) as? PhotoCell {
+                cell.performHighlightAnimation()
+            }
+        }
+    }
 
     // MARK: - Asset Management
     
@@ -246,7 +269,7 @@ extension PhotoGridView: UICollectionViewDataSource {
         let photo = assets[indexPath.item]
         let isSelected = selectedMap[photo.localIdentifier] != nil
         let selectionIndex = index(of: photo)
-        cell.configure(with: photo, isSelected: isSelected, selectionIndex: selectionIndex, selectionMode: selectionMode)
+        cell.configure(with: photo, isSelected: isSelected, selectionIndex: selectionIndex, selectionMode: selectionMode, index: indexPath.item)
         return cell
     }
 }
@@ -361,5 +384,11 @@ extension PhotoGridView: UICollectionViewDelegateFlowLayout {
     
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, minimumLineSpacingForSectionAt section: Int) -> CGFloat {
         return 2
+    }
+    
+    // MARK: - UIScrollViewDelegate
+    
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        scrollDelegate?.scrollViewDidScroll?(scrollView)
     }
 }

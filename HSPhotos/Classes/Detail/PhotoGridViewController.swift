@@ -10,6 +10,14 @@ import Photos
 
 class PhotoGridViewController: UIViewController {
     
+    private lazy var searchTextField: SearchBarView = {
+        let searchBarView = SearchBarView()
+        searchBarView.translatesAutoresizingMaskIntoConstraints = false
+        searchBarView.delegate = self
+        searchBarView.alpha = 0.0
+        return searchBarView
+    }()
+    
     private lazy var gridView: PhotoGridView = {
         let view = PhotoGridView()
         view.translatesAutoresizingMaskIntoConstraints = false
@@ -79,6 +87,9 @@ class PhotoGridViewController: UIViewController {
         }
     }
     
+    private var lastContentOffsetY: CGFloat = 0
+    private var searchTextFieldTopConstraint: NSLayoutConstraint!
+    
     init(collection: PHAssetCollection) {
         self.collection = collection
                 
@@ -95,6 +106,9 @@ class PhotoGridViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = collection.localizedTitle
+        
+        // 禁用大标题模式
+        navigationItem.largeTitleDisplayMode = .never
 
         setupUI()
         loadPhoto()
@@ -102,9 +116,19 @@ class PhotoGridViewController: UIViewController {
     
     private func setupUI() {
         view.backgroundColor = UIColor(red: 0.96, green: 0.96, blue: 0.97, alpha: 1.0)
+        
         view.addSubview(gridView)
+        view.addSubview(searchTextField)
+        
+        // 创建搜索条的顶部约束
+        searchTextFieldTopConstraint = searchTextField.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8)
         
         NSLayoutConstraint.activate([
+            searchTextFieldTopConstraint,
+            searchTextField.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            searchTextField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            searchTextField.heightAnchor.constraint(equalToConstant: 44),
+            
             gridView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
             gridView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             gridView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
@@ -112,6 +136,9 @@ class PhotoGridViewController: UIViewController {
         ])
         
         navigationItem.rightBarButtonItem = selectBarButton
+        
+        // 设置 gridView 的滚动委托
+        gridView.scrollDelegate = self
         
         view.addSubview(menuButton)
         NSLayoutConstraint.activate([
@@ -357,6 +384,19 @@ class PhotoGridViewController: UIViewController {
     private func syncFailed(message: String) {
         showAlert(title: "同步失败", message: message)
     }
+    
+    // MARK: - Search Methods
+    
+    private func performSearch(with text: String) {
+        // 判断输入内容是否为数字
+        if let index = Int(text) {
+            // 输入的是数字，调用 scrollTo 方法
+            gridView.scrollTo(index: index - 1) // 用户输入从1开始，数组索引从0开始
+        } else {
+            // 非数字内容的其他搜索逻辑
+            print("执行搜索: \(text)")
+        }
+    }
 
 }
 
@@ -379,5 +419,55 @@ extension PhotoGridViewController {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "确定", style: .default, handler: nil))
         present(alert, animated: true, completion: nil)
+    }
+}
+
+// MARK: - SearchBarViewDelegate
+
+extension PhotoGridViewController: SearchBarViewDelegate {
+    func searchBarView(_ searchBarView: SearchBarView, didSearchWith text: String) {
+        performSearch(with: text)
+    }
+}
+
+// MARK: - UIScrollViewDelegate
+
+extension PhotoGridViewController: UIScrollViewDelegate {
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        if scrollView.isDragging {
+            let currentOffsetY = scrollView.contentOffset.y
+            let offsetDifference = currentOffsetY - lastContentOffsetY
+            
+            // 如果偏移量为0，显示搜索条（移动到导航栏下方）
+            if currentOffsetY <= 0 {
+                moveSearchBarToHidden()
+            }
+            // 向上滚动（负值）显示搜索条
+            else if offsetDifference < 0 {
+                moveSearchBarToHidden()
+            }
+            // 向下滚动（正值）隐藏搜索条（移动到导航栏上方）
+            else if offsetDifference > 0 {
+                moveSearchBarToVisible()
+            }
+            
+            lastContentOffsetY = currentOffsetY
+            
+        }
+    }
+    
+    private func moveSearchBarToVisible() {
+        UIView.animate(withDuration: 0.3) {
+            self.searchTextField.transform = CGAffineTransform(translationX: 0, y: 0)
+            self.searchTextField.alpha = 1.0
+        }
+    }
+    
+    private func moveSearchBarToHidden() {
+        let searchBarHeight = searchTextField.frame.height + 8 // 搜索条高度 + 间距
+        UIView.animate(withDuration: 0.3) {
+            self.searchTextField.transform = CGAffineTransform(translationX: 0, y: -searchBarHeight)
+            self.searchTextField.alpha = 0.0
+        }
     }
 }
