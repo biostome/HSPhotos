@@ -134,7 +134,7 @@ class PhotoGridViewController: UIViewController {
             let loadingAlert = UIAlertController(title: "同步中", message: "正在将照片顺序同步到系统相册...", preferredStyle: .alert)
             present(loadingAlert, animated: true)
             
-            PhotoSyncService.sync(sortedAssets: sortedAssets, for: self.collection) { [weak self] success, message in
+            PhotoChangesService.sync(sortedAssets: sortedAssets, for: self.collection) { [weak self] success, message in
                 guard let self = self else { return }
                 let duration = Date().timeIntervalSince(start)
                 loadingAlert.dismiss(animated: true) {
@@ -174,6 +174,55 @@ class PhotoGridViewController: UIViewController {
             self.showAlert(title: title, message: message)
             if success { loadPhoto() }
         }
+    }
+    
+    private func onDelete() {
+        let selectedAssets = gridView.selectedAssets
+        guard !selectedAssets.isEmpty else {
+            showAlert(title: "删除失败", message: "请先选择要删除的照片")
+            return
+        }
+        
+        showDeleteConfirmationAlert(for: selectedAssets)
+    }
+    
+    private func showDeleteConfirmationAlert(for assets: [PHAsset]) {
+        let count = assets.count
+        let message = count == 1 ? "确定要从相册中删除这张照片吗？" : "确定要从相册中删除这\(count)张照片吗？"
+        
+        let alert = UIAlertController(title: "删除照片", message: message, preferredStyle: .alert)
+        
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel, handler: nil))
+        alert.addAction(UIAlertAction(title: "删除", style: .destructive) { [weak self] _ in
+            self?.performDelete(assets: assets)
+        })
+        
+        present(alert, animated: true)
+    }
+    
+    private func performDelete(assets: [PHAsset]) {
+        let loadingAlert = UIAlertController(title: "删除中", message: "正在从相册中删除照片...", preferredStyle: .alert)
+        present(loadingAlert, animated: true)
+        
+        let selectedAssets = self.gridView.selectedAssets
+        // 删除照片和 Cell
+        gridView.deleteAssets(assets: selectedAssets) { success in
+            PhotoChangesService.delete(assets: selectedAssets, for: self.collection) { success, error in
+                loadingAlert.dismiss(animated: true) {
+                    if success {
+                        let count = assets.count
+                        let message = count == 1 ? "已删除 1 张照片" : "已删除 \(count) 张照片"
+                        self.showAlert(title: "删除成功", message: message)
+                        self.gridView.clearSelected()
+                        self.loadPhoto() // 重新加载照片列表
+                    } else {
+                        let message = error ?? "无法删除照片"
+                        self.showAlert(title: "删除失败", message: message)
+                    }
+                }
+            }
+        }
+
     }
     
     private func setSelectionMode(_ mode: PhotoSelectionMode) {
@@ -221,7 +270,11 @@ class PhotoGridViewController: UIViewController {
             self?.onOrder()
         }
         
-        return UIMenu(title: "操作选项", children: [paste, copy, sort])
+        let delete = UIAction(title: "删除", image: UIImage(systemName: "trash"), attributes: [attributes, .destructive].compactMap { $0 }.reduce([], { $0.union($1) })) { [weak self] _ in
+            self?.onDelete()
+        }
+        
+        return UIMenu(title: "操作选项", children: [paste, copy, sort, delete])
     }
     
     private func updateOperationMenu() {

@@ -8,7 +8,7 @@
 import Foundation
 import Photos
 
-class PhotoSyncService {
+class PhotoChangesService {
     
     typealias SortCompletion = (Bool, String?) -> Void
     
@@ -66,6 +66,25 @@ class PhotoSyncService {
         }, completionHandler: { success, error in
             DispatchQueue.main.async {
                 completion(success, error?.localizedDescription ?? (success ? nil : "Sync operation failed"))
+            }
+        })
+    }
+
+    // 删除相片同步方法
+    static func delete(assets: [PHAsset], for collection: PHAssetCollection, completion: @escaping SortCompletion) {
+        PHPhotoLibrary.shared().performChanges({
+            // Remove assets from the collection
+            guard let changeRequest = PHAssetCollectionChangeRequest(for: collection) else {
+                return
+            }
+            // Convert to NSArray for the method call
+            let assetsArray = NSArray(array: assets)
+            
+            // Remove assets from the collection
+            changeRequest.removeAssets(assetsArray)
+        }, completionHandler: { success, error in
+            DispatchQueue.main.async {
+                completion(success, error?.localizedDescription ?? (success ? nil : "Delete operation failed"))
             }
         })
     }

@@ -187,6 +187,52 @@ class PhotoGridView: UIView {
         delegate?.photoGridView(self, didSelectedItems: selectedPhotos)
         collectionView.reloadData()
     }
+
+    // MARK: - Asset Management
+    
+    /// 删除指定的资源项
+    /// - Parameters:
+    ///   - assetsToDelete: 要删除的资源数组
+    ///   - completion: 删除完成回调
+    func deleteAssets(assets assetsToDelete: [PHAsset], completion: @escaping (Bool) -> Void) {
+        guard !assetsToDelete.isEmpty else {
+            completion(true)
+            return
+        }
+        
+        // 使用 Set 提高查找效率
+        let assetsToDeleteSet = Set(assetsToDelete.map { $0.localIdentifier })
+        
+        // 收集需要删除的 IndexPath
+        let indexPathsToDelete = assets.enumerated().compactMap { index, asset in
+            assetsToDeleteSet.contains(asset.localIdentifier) ? IndexPath(item: index, section: 0) : nil
+        }
+        
+        // 执行删除动画 - 在 batch updates 内部更新数据源
+        collectionView.performBatchUpdates {
+            // 在这里更新数据源，确保与 UI 更新同步
+            self.assets.removeAll { asset in
+                assetsToDeleteSet.contains(asset.localIdentifier)
+            }
+            
+            // 从选中列表中移除并更新索引
+            for asset in assetsToDelete {
+                if let selectedIndex = self.selectedMap[asset.localIdentifier] {
+                    self.selectedPhotos.remove(at: selectedIndex)
+                    self.selectedMap.removeValue(forKey: asset.localIdentifier)
+                    // 更新后续索引
+                    for i in selectedIndex..<self.selectedPhotos.count {
+                        self.selectedMap[self.selectedPhotos[i].localIdentifier] = i
+                    }
+                }
+            }
+            
+            // 删除 UI 中的项目
+            self.collectionView.deleteItems(at: indexPathsToDelete)
+        } completion: { finished in
+            completion(finished)
+        }
+    }
 }
 
 // MARK: - UICollectionViewDataSource
