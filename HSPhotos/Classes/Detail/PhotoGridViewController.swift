@@ -286,9 +286,11 @@ class PhotoGridViewController: UIViewController {
     }
     
     private func setSelectionMode(_ mode: PhotoSelectionMode) {
-        gridView.clearSelected()
-        gridView.selectedStart = nil
-        gridView.selectedEnd = nil
+        if mode == .none {
+            gridView.clearSelected()
+            gridView.selectedStart = nil
+            gridView.selectedEnd = nil
+        }
         selectionMode = mode
     }
     
