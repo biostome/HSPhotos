@@ -378,7 +378,7 @@ class PhotoGridViewController: UIViewController {
     }
     
     private func syncSuccess(message: String) {
-//        showAlert(title: "同步成功", message: message)
+        showAlert(title: "同步成功", message: message)
     }
     
     private func syncFailed(message: String) {
