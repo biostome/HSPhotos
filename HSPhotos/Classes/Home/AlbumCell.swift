@@ -76,6 +76,7 @@ class AlbumCell: UICollectionViewCell {
             countLabel.bottomAnchor.constraint(equalTo: imageView.bottomAnchor, constant: -8),
             countLabel.trailingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: -8),
             countLabel.heightAnchor.constraint(equalToConstant: 20),
+            countLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 30),
             
             titleLabel.topAnchor.constraint(equalTo: imageView.bottomAnchor, constant: 12),
             titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
