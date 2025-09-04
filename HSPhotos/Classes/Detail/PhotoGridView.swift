@@ -46,6 +46,18 @@ extension PhotoGridViewDelegate {
     func photoGridView(_ photoGridView: PhotoGridView, didSelectedItems assets: [PHAsset]) {}
 }
 
+
+// MARK: - Constants
+struct PhotoGridConstants {
+    static let allowedColumns = [1, 3, 5, 7, 11]
+    static let defaultColumns = 3
+    static let defaultSpacing: CGFloat = 2
+    static let compactSpacing: CGFloat = 0
+    static let sectionInset: CGFloat = 2
+    static let zoomThreshold: (enlarge: CGFloat, shrink: CGFloat) = (1.3, 0.7)
+}
+
+
 class PhotoGridView: UIView {
     
     public var assets: [PHAsset] = [] {
@@ -79,12 +91,15 @@ class PhotoGridView: UIView {
     // 本地ID -> 数组索引，用于快速查找选中照片在数组中的位置
     private var selectedMap: [String: Int] = [:]
     
+    
+    private var columns: Int = PhotoGridConstants.defaultColumns
+    
+    
+    private var lastScale: CGFloat = 3.0
+    
     private lazy var collectionView: UICollectionView = {
-        let layout = UICollectionViewFlowLayout()
-        layout.minimumInteritemSpacing = 2
-        layout.minimumLineSpacing = 2
-        layout.sectionInset = UIEdgeInsets(top: 8, left: 8, bottom: 80, right: 8)
-        let collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
+        let initialLayout = createLayout(for: columns)
+        let collectionView = UICollectionView(frame: .zero, collectionViewLayout: initialLayout)
         collectionView.backgroundColor = UIColor(red: 0.96, green: 0.96, blue: 0.97, alpha: 1.0)
         collectionView.register(PhotoCell.self, forCellWithReuseIdentifier: "PhotoCell")
         collectionView.showsVerticalScrollIndicator = false
@@ -97,6 +112,7 @@ class PhotoGridView: UIView {
     override init(frame: CGRect) {
         super.init(frame: frame)
         setupUI()
+        setupGestures()
     }
     
     required init?(coder: NSCoder) {
@@ -119,6 +135,78 @@ class PhotoGridView: UIView {
         ])
     }
     
+    private func setupGestures() {
+        let pinchGesture = UIPinchGestureRecognizer(target: self, action: #selector(handlePinchGesture(_:)))
+        collectionView.addGestureRecognizer(pinchGesture)
+    }
+    
+    private func calculateNewColumns(for scaleDelta: CGFloat) -> Int {
+        guard let currentIndex = PhotoGridConstants.allowedColumns.firstIndex(of: columns) else {
+            return columns
+        }
+        
+        if scaleDelta > PhotoGridConstants.zoomThreshold.enlarge {
+            // 放大时减少列数
+            return currentIndex > 0 ? PhotoGridConstants.allowedColumns[currentIndex - 1] : columns
+        } else if scaleDelta < PhotoGridConstants.zoomThreshold.shrink {
+            // 缩小时增加列数
+            return currentIndex < PhotoGridConstants.allowedColumns.count - 1
+                ? PhotoGridConstants.allowedColumns[currentIndex + 1]
+                : columns
+        }
+        
+        return columns
+    }
+    
+    private func updateColumns(to newColumns: Int) {
+        columns = newColumns
+        let newLayout = createLayout(for: columns)
+        collectionView.setCollectionViewLayout(newLayout, animated: true)
+    }
+    
+    // MARK: - Gesture Handling
+    @objc private func handlePinchGesture(_ gesture: UIPinchGestureRecognizer) {
+        switch gesture.state {
+        case .began:
+            lastScale = gesture.scale
+            
+        case .changed:
+            let scaleDelta = gesture.scale / lastScale
+            let newColumns = calculateNewColumns(for: scaleDelta)
+            
+            if newColumns != columns {
+                updateColumns(to: newColumns)
+                lastScale = gesture.scale
+            }
+            
+        default:
+            break
+        }
+    }
+    
+    // MARK: - Layout Methods
+    private func createLayout(for columns: Int) -> UICollectionViewFlowLayout {
+        let layout = UICollectionViewFlowLayout()
+        
+        // 根据列数动态调整间距
+        let spacing = columns > 5 ? PhotoGridConstants.compactSpacing : PhotoGridConstants.defaultSpacing
+        let sectionInset = columns > 5 ? PhotoGridConstants.compactSpacing : PhotoGridConstants.sectionInset
+        
+        layout.minimumInteritemSpacing = spacing
+        layout.minimumLineSpacing = spacing
+        layout.sectionInset = UIEdgeInsets(
+            top: sectionInset,
+            left: sectionInset,
+            bottom: sectionInset,
+            right: sectionInset
+        )
+        
+        let totalSpacing = sectionInset * 2 + (CGFloat(columns - 1) * spacing)
+        let itemWidth = (bounds.width - totalSpacing) / CGFloat(columns)
+        layout.itemSize = CGSize(width: itemWidth, height: itemWidth)
+        
+        return layout
+    }
     
     func toggle(photo: PHAsset) {
         if let index = selectedMap[photo.localIdentifier] {
@@ -372,19 +460,15 @@ extension PhotoGridView {
 
 // MARK: - UICollectionViewDelegateFlowLayout
 extension PhotoGridView: UICollectionViewDelegateFlowLayout {
+    
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
-        let spacing: CGFloat = 2
-        let availableWidth = collectionView.bounds.width - 16 - spacing * 4
-        let itemWidth = availableWidth / 5
-        return CGSize(width: itemWidth, height: itemWidth)
-    }
-    
-    func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, minimumInteritemSpacingForSectionAt section: Int) -> CGFloat {
-        return 2
-    }
-    
-    func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, minimumLineSpacingForSectionAt section: Int) -> CGFloat {
-        return 2
+        guard let flowLayout = collectionViewLayout as? UICollectionViewFlowLayout else { return .zero }
+        let sectionInset = flowLayout.sectionInset
+        let interItemSpacing = flowLayout.minimumInteritemSpacing
+        
+        let totalSpacing = sectionInset.left + sectionInset.right + (CGFloat(columns - 1) * interItemSpacing)
+        let width = (collectionView.bounds.width - totalSpacing) / CGFloat(columns)
+        return CGSize(width: width, height: width)
     }
     
     // MARK: - UIScrollViewDelegate
