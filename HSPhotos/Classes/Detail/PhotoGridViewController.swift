@@ -328,11 +328,11 @@ class PhotoGridViewController: UIViewController {
         }
         
         let modificationDateAction = UIAction(
-            title: "按照加入时间排序",
+            title: "按照最近加入时间排序",
             image: UIImage(systemName: "clock"),
-            state: sortPreference == .modificationDate ? .on : .off
+            state: sortPreference == .recentDate ? .on : .off
         ) { [weak self] _ in
-            self?.onChanged(sort: .modificationDate)
+            self?.onChanged(sort: .recentDate)
             self?.sortButton.menu = self?.createSortMenu()
         }
         
