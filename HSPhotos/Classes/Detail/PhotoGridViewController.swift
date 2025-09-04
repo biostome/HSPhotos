@@ -370,7 +370,7 @@ class PhotoGridViewController: UIViewController {
             self?.onDelete()
         }
         
-        return UIMenu(title: "操作选项", children: [paste, copy, sort, delete])
+        return UIMenu(title: "操作选项", children: [delete, paste, copy, sort])
     }
     
     private func updateOperationMenu() {
