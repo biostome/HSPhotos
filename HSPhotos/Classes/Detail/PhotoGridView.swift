@@ -36,6 +36,7 @@ protocol PhotoGridViewDelegate {
     func photoGridView(_ photoGridView: PhotoGridView, didDeselectItemAt indexPath: IndexPath)
     func photoGridView(_ photoGridView: PhotoGridView, didDeselectItemAt asset: PHAsset)
     func photoGridView(_ photoGridView: PhotoGridView, didSelectedItems assets: [PHAsset])
+    func photoGridView(_ photoGridView: PhotoGridView, didSetAnchor asset: PHAsset)
 }
 
 extension PhotoGridViewDelegate {
@@ -44,6 +45,7 @@ extension PhotoGridViewDelegate {
     func photoGridView(_ photoGridView: PhotoGridView, didDeselectItemAt indexPath: IndexPath) {}
     func photoGridView(_ photoGridView: PhotoGridView, didDeselectItemAt asset: PHAsset) {}
     func photoGridView(_ photoGridView: PhotoGridView, didSelectedItems assets: [PHAsset]) {}
+    func photoGridView(_ photoGridView: PhotoGridView, didSetAnchor asset: PHAsset) {}
 }
 
 
@@ -90,6 +92,9 @@ class PhotoGridView: UIView {
     
     // 本地ID -> 数组索引，用于快速查找选中照片在数组中的位置
     private var selectedMap: [String: Int] = [:]
+    
+    // 当前锚点照片
+    private var anchorPhoto: PHAsset?
     
     
     private var columns: Int = PhotoGridConstants.defaultColumns
@@ -216,6 +221,10 @@ class PhotoGridView: UIView {
             for i in index..<selectedPhotos.count {
                 selectedMap[selectedPhotos[i].localIdentifier] = i
             }
+            // 如果删除的是锚点照片，清除锚点
+            if anchorPhoto?.localIdentifier == photo.localIdentifier {
+                anchorPhoto = nil
+            }
         } else {
             selectedPhotos.append(photo)
             selectedMap[photo.localIdentifier] = selectedPhotos.count - 1
@@ -232,7 +241,8 @@ class PhotoGridView: UIView {
             guard index < assets.count else { continue }
             let asset = assets[index]
             if selectedMap[asset.localIdentifier] == nil {
-                toggle(photo: asset)
+                selectedPhotos.append(asset)
+                selectedMap[asset.localIdentifier] = selectedPhotos.count - 1
                 indexPaths.append(IndexPath(item: index, section: 0))
                 delegate?.photoGridView(self, didSelectItemAt: IndexPath(item: index, section: 0))
                 delegate?.photoGridView(self, didSelectItemAt: asset)
@@ -257,15 +267,26 @@ class PhotoGridView: UIView {
             throw PhotoSortError.notEnoughPhotosSelected
         }
         
-        let anchorPhoto = selectedPhotos.first!
-        let photosToMove = Array(selectedPhotos.dropFirst())
+        // 确定排序基准照片：优先使用锚点，如果没有锚点则使用第一张选中的照片
+        let currentAnchorPhoto: PHAsset
+        if let anchorPhoto = anchorPhoto {
+            // 锚点照片即使没有被选中也可以作为排序基准
+            currentAnchorPhoto = anchorPhoto
+        } else {
+            // 没有锚点时，使用第一张选中的照片作为基准
+            currentAnchorPhoto = selectedPhotos.first!
+        }
+        
+        // 获取要移动的照片（除了基准照片之外的所有选中照片）
+        let photosToMove = selectedPhotos.filter { $0.localIdentifier != currentAnchorPhoto.localIdentifier }
         let identifiersToMove = Set(photosToMove.map { $0.localIdentifier })
         var temporaryAssets = self.assets.filter { !identifiersToMove.contains($0.localIdentifier) }
         
-        guard let anchorIndex = temporaryAssets.firstIndex(of: anchorPhoto) else {
+        guard let anchorIndex = temporaryAssets.firstIndex(of: currentAnchorPhoto) else {
             throw PhotoSortError.anchorPhotoMissing
         }
         
+        // 按选中顺序插入照片（基准照片始终在首位，其余按选中顺序跟随）
         temporaryAssets.insert(contentsOf: photosToMove, at: anchorIndex + 1)
         return temporaryAssets
     }
@@ -275,6 +296,7 @@ class PhotoGridView: UIView {
         selectedMap.removeAll()
         selectedStart = nil
         selectedEnd = nil
+        anchorPhoto = nil  // 清除锚点
         delegate?.photoGridView(self, didSelectedItems: selectedPhotos)
         collectionView.reloadData()
     }
@@ -336,6 +358,10 @@ class PhotoGridView: UIView {
                     for i in selectedIndex..<self.selectedPhotos.count {
                         self.selectedMap[self.selectedPhotos[i].localIdentifier] = i
                     }
+                    // 如果删除的是锚点照片，清除锚点
+                    if self.anchorPhoto?.localIdentifier == asset.localIdentifier {
+                        self.anchorPhoto = nil
+                    }
                 }
             }
             
@@ -358,7 +384,8 @@ extension PhotoGridView: UICollectionViewDataSource {
         let photo = assets[indexPath.item]
         let isSelected = selectedMap[photo.localIdentifier] != nil
         let selectionIndex = index(of: photo)
-        cell.configure(with: photo, isSelected: isSelected, selectionIndex: selectionIndex, selectionMode: selectionMode, index: indexPath.item)
+        let isAnchor = anchorPhoto?.localIdentifier == photo.localIdentifier
+        cell.configure(with: photo, isSelected: isSelected, selectionIndex: selectionIndex, selectionMode: selectionMode, index: indexPath.item, isAnchor: isAnchor)
         return cell
     }
 }
@@ -477,3 +504,41 @@ extension PhotoGridView: UICollectionViewDelegateFlowLayout {
         scrollDelegate?.scrollViewDidScroll?(scrollView)
     }
 }
+
+// MARK: - UICollectionView Context Menu
+extension PhotoGridView {
+    func collectionView(_ collectionView: UICollectionView, contextMenuConfigurationForItemAt indexPath: IndexPath, point: CGPoint) -> UIContextMenuConfiguration? {
+        guard indexPath.item < assets.count else { return nil }
+        let asset = assets[indexPath.item]
+        let isCurrentAnchor = anchorPhoto?.localIdentifier == asset.localIdentifier
+        
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
+            if isCurrentAnchor {
+                // 如果当前是锚点，显示取消锚点选项
+                let removeAnchorAction = UIAction(title: "取消锚点", image: UIImage(systemName: "anchor.slash")) { [weak self] _ in
+                    self?.anchorPhoto = nil
+                    self?.collectionView.reloadData()
+                    print("锚点已取消")
+                }
+                return UIMenu(title: "", children: [removeAnchorAction])
+            } else {
+                // 如果不是锚点，显示设为锚点选项
+                let setAnchorAction = UIAction(title: "设为锚点", image: UIImage(systemName: "anchor")) { [weak self] _ in
+                    self?.anchorPhoto = asset
+                    self?.collectionView.reloadData()
+                    self?.delegate?.photoGridView(self!, didSetAnchor: asset)
+                    print("锚点已设置为: \(asset.localIdentifier)")
+                }
+                return UIMenu(title: "", children: [setAnchorAction])
+            }
+        }
+    }
+    
+    func collectionView(_ collectionView: UICollectionView, previewForHighlightingContextMenuWithConfiguration configuration: UIContextMenuConfiguration) -> UITargetedPreview? {
+        guard let identifier = configuration.identifier as? IndexPath,
+              let cell = collectionView.cellForItem(at: identifier) else { return nil }
+        
+        return UITargetedPreview(view: cell)
+    }
+}
+

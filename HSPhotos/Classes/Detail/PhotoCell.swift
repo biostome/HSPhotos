@@ -75,9 +75,24 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         return label
     }()
     
+    private lazy var anchorLabel: UILabel = {
+        let label = UILabel()
+        label.text = "锚"
+        label.textColor = UIColor.white
+        label.backgroundColor = UIColor.systemOrange
+        label.font = UIFont.systemFont(ofSize: 12, weight: .bold)
+        label.textAlignment = .center
+        label.layer.cornerRadius = 8
+        label.clipsToBounds = true
+        label.isHidden = true
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
     // MARK: - 数据缓存
     private var currentAssetID: String?
     private var requestID: PHImageRequestID?
+    private var currentAsset: PHAsset?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -117,15 +132,23 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         ])
         
         contentView.addSubview(indexLabel)
+        contentView.addSubview(anchorLabel)
         
         // 设置约束
         NSLayoutConstraint.activate([
             indexLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -2),
             indexLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 2),
             indexLabel.widthAnchor.constraint(equalToConstant: 32),
-            indexLabel.heightAnchor.constraint(equalToConstant: 20)
+            indexLabel.heightAnchor.constraint(equalToConstant: 20),
+            
+            anchorLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 6),
+            anchorLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 6),
+            anchorLabel.widthAnchor.constraint(equalToConstant: 20),
+            anchorLabel.heightAnchor.constraint(equalToConstant: 20)
         ])
     }
+    
+    
     
     lazy var requestOptions: PHImageRequestOptions = {
         
@@ -148,7 +171,10 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
     }()
 
     // MARK: - 配置
-    func configure(with asset: PHAsset, isSelected: Bool, selectionIndex: Int?, selectionMode: PhotoSelectionMode, index: Int? = nil) {
+    func configure(with asset: PHAsset, isSelected: Bool, selectionIndex: Int?, selectionMode: PhotoSelectionMode, index: Int? = nil, isAnchor: Bool = false) {
+        
+        // 保存当前资产
+        currentAsset = asset
 
         // 避免重复请求
         if currentAssetID != asset.localIdentifier {
@@ -171,6 +197,8 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
             indexLabel.text = "\(index + 1)"
         }
 
+        // 设置锚点标识
+        anchorLabel.isHidden = !isAnchor
         switch selectionMode {
         case .none:
             selectionOverlay.isHidden = true
@@ -198,7 +226,9 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         super.prepareForReuse()
         selectionOverlay.isHidden = true
         selectionNumberLabel.isHidden = true
+        anchorLabel.isHidden = true
         currentAssetID = nil
+        currentAsset = nil
         if let requestID = requestID {
             PHImageManager.default().cancelImageRequest(requestID)
         }
@@ -219,3 +249,4 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         }
     }
 }
+
