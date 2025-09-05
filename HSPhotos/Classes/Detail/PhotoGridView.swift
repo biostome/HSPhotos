@@ -37,6 +37,7 @@ protocol PhotoGridViewDelegate {
     func photoGridView(_ photoGridView: PhotoGridView, didDeselectItemAt asset: PHAsset)
     func photoGridView(_ photoGridView: PhotoGridView, didSelectedItems assets: [PHAsset])
     func photoGridView(_ photoGridView: PhotoGridView, didSetAnchor asset: PHAsset)
+    func photoGridView(_ photoGridView: PhotoGridView, sortPreference: PhotoSortPreference) -> PhotoSortPreference
 }
 
 extension PhotoGridViewDelegate {
@@ -46,6 +47,7 @@ extension PhotoGridViewDelegate {
     func photoGridView(_ photoGridView: PhotoGridView, didDeselectItemAt asset: PHAsset) {}
     func photoGridView(_ photoGridView: PhotoGridView, didSelectedItems assets: [PHAsset]) {}
     func photoGridView(_ photoGridView: PhotoGridView, didSetAnchor asset: PHAsset) {}
+    func photoGridView(_ photoGridView: PhotoGridView, sortPreference: PhotoSortPreference) -> PhotoSortPreference { .custom }
 }
 
 
@@ -87,6 +89,11 @@ class PhotoGridView: UIView {
     /// 选中的结束位置
     public var selectedEnd: Int?
     
+    // 公共方法：获取 collectionView 用于滚动同步
+    public var scrollView: UIScrollView {
+        return collectionView
+    }
+    
     // 选中照片
     private var selectedPhotos: [PHAsset] = []
     
@@ -96,6 +103,7 @@ class PhotoGridView: UIView {
     // 当前锚点照片
     private var anchorPhoto: PHAsset?
     
+    // 预览指示器
     
     private var columns: Int = PhotoGridConstants.defaultColumns
     
@@ -136,7 +144,7 @@ class PhotoGridView: UIView {
             collectionView.topAnchor.constraint(equalTo: topAnchor),
             collectionView.leadingAnchor.constraint(equalTo: leadingAnchor),
             collectionView.trailingAnchor.constraint(equalTo: trailingAnchor),
-            collectionView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            collectionView.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
     }
     
@@ -541,4 +549,5 @@ extension PhotoGridView {
         return UITargetedPreview(view: cell)
     }
 }
+
 

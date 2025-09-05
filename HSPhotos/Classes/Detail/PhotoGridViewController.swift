@@ -25,6 +25,13 @@ class PhotoGridViewController: UIViewController {
         return view
     }()
     
+    private lazy var previewIndicator: PhotoPreviewIndicator = {
+        let indicator = PhotoPreviewIndicator()
+        indicator.translatesAutoresizingMaskIntoConstraints = false
+        indicator.delegate = self
+        return indicator
+    }()
+    
     private lazy var selectBarButton: UIBarButtonItem = {
         let button = UIBarButtonItem(title: "选择", style: .plain, target: self, action: nil)
         button.menu = createSelectionMenu()
@@ -76,6 +83,10 @@ class PhotoGridViewController: UIViewController {
     private var assets: [PHAsset] = [] {
         didSet {
             self.gridView.assets = assets
+            // 延迟配置 previewIndicator，确保 frame 已设置
+            DispatchQueue.main.async {
+                self.previewIndicator.configure(with: self.assets, sortPreference: self.sortPreference)
+            }
         }
     }
     
@@ -114,11 +125,20 @@ class PhotoGridViewController: UIViewController {
         loadPhoto()
     }
     
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // 确保 previewIndicator 在布局完成后正确配置
+        if !assets.isEmpty && previewIndicator.bounds.width == 0 {
+            previewIndicator.configure(with: assets, sortPreference: sortPreference)
+        }
+    }
+    
     private func setupUI() {
         view.backgroundColor = UIColor(red: 0.96, green: 0.96, blue: 0.97, alpha: 1.0)
         
         view.addSubview(gridView)
         view.addSubview(searchTextField)
+        view.addSubview(previewIndicator)
         
         // 创建搜索条的顶部约束
         searchTextFieldTopConstraint = searchTextField.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8)
@@ -133,6 +153,11 @@ class PhotoGridViewController: UIViewController {
             gridView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             gridView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             gridView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            
+            previewIndicator.centerYAnchor.constraint(equalTo: view.centerYAnchor, constant: -50),
+            previewIndicator.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -30),
+            previewIndicator.widthAnchor.constraint(equalToConstant: 20),
+            previewIndicator.heightAnchor.constraint(equalToConstant: 300)
         ])
         
         navigationItem.rightBarButtonItem = selectBarButton
@@ -414,6 +439,37 @@ extension PhotoGridViewController: PhotoGridViewDelegate {
     func photoGridView(_ photoGridView: PhotoGridView, didSelctedItems assets: [PHAsset]) {
         updateOperationMenu()
     }
+    
+    func photoGridView(_ photoGridView: PhotoGridView, sortPreference: PhotoSortPreference) -> PhotoSortPreference {
+        return self.sortPreference
+    }
+}
+
+extension PhotoGridViewController: PhotoPreviewIndicatorDelegate {
+    func photoPreviewIndicator(_ indicator: PhotoPreviewIndicator, didSelectPhotoAt index: Int) {
+        gridView.scrollTo(index: index)
+    }
+    
+    func photoPreviewIndicator(_ indicator: PhotoPreviewIndicator, didScrollTo offset: CGFloat, contentHeight: CGFloat, visibleHeight: CGFloat) {
+        // 计算指示器的滚动进度
+        let indicatorScrollableHeight = contentHeight - visibleHeight
+        guard indicatorScrollableHeight > 0 else { return }
+        
+        let indicatorProgress = min(max(offset / indicatorScrollableHeight, 0), 1)
+        
+        // 计算主相册应该滚动到的位置
+        let mainScrollView = gridView.scrollView
+        let mainContentHeight = mainScrollView.contentSize.height
+        let mainVisibleHeight = mainScrollView.bounds.height
+        let mainScrollableHeight = mainContentHeight - mainVisibleHeight
+        
+        guard mainScrollableHeight > 0 else { return }
+        
+        let targetOffset = indicatorProgress * mainScrollableHeight
+        
+        // 更新主相册的滚动位置
+        mainScrollView.setContentOffset(CGPoint(x: 0, y: targetOffset), animated: false)
+    }
 }
 
 extension PhotoGridViewController {
@@ -456,6 +512,13 @@ extension PhotoGridViewController: UIScrollViewDelegate {
             lastContentOffsetY = currentOffsetY
             
         }
+        
+        // 同步 previewIndicator 的滚动位置
+        previewIndicator.updateScrollPosition(
+            basedOn: scrollView.contentOffset.y,
+            mainContentHeight: scrollView.contentSize.height,
+            mainVisibleHeight: scrollView.bounds.height
+        )
     }
     
     private func moveSearchBarToVisible() {
