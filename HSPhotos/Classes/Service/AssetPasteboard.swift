@@ -73,18 +73,14 @@ class AssetPasteboard {
             return
         }
         
-        PHPhotoLibrary.shared().performChanges({
-            if let changeRequest = PHAssetCollectionChangeRequest(for: collection) {
-                changeRequest.addAssets(assets as NSFastEnumeration)
-            }
-        }, completionHandler: { success, error in
+        PhotoChangesService.copy(assets: assets, to: collection) { success, error in
             DispatchQueue.main.async {
                 if success {
                     completion(true, nil)
                 } else {
-                    completion(false, error?.localizedDescription ?? "粘贴失败")
+                    completion(false, error ?? "粘贴失败")
                 }
             }
-        })
+        }
     }
 }

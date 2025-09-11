@@ -31,6 +31,28 @@ class PhotoGridViewController: UIViewController {
         return button
     }()
     
+    private lazy var undoBarButton: UIBarButtonItem = {
+        let button = UIBarButtonItem(
+            image: UIImage(systemName: "arrow.uturn.left"),
+            style: .plain,
+            target: self,
+            action: #selector(undoAction)
+        )
+        button.isEnabled = false
+        return button
+    }()
+    
+    private lazy var redoBarButton: UIBarButtonItem = {
+        let button = UIBarButtonItem(
+            image: UIImage(systemName: "arrow.uturn.right"),
+            style: .plain,
+            target: self,
+            action: #selector(redoAction)
+        )
+        button.isEnabled = false
+        return button
+    }()
+    
     private lazy var menuButton: UIButton = {
         let button = UIButton(type: .custom)
         button.setImage(UIImage(systemName: "ellipsis"), for: .normal)
@@ -112,6 +134,7 @@ class PhotoGridViewController: UIViewController {
 
         setupUI()
         loadPhoto()
+        setupUndoManager()
     }
     
     private func setupUI() {
@@ -135,7 +158,8 @@ class PhotoGridViewController: UIViewController {
             gridView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
         
-        navigationItem.rightBarButtonItem = selectBarButton
+        // 将撤销和重做按钮放在导航栏右侧，选择按钮的左侧
+        navigationItem.rightBarButtonItems = [selectBarButton, redoBarButton, undoBarButton]
         
         // 设置 gridView 的滚动委托
         gridView.scrollDelegate = self
@@ -156,6 +180,78 @@ class PhotoGridViewController: UIViewController {
             sortButton.widthAnchor.constraint(equalToConstant: 44)
         ])
 
+    }
+    
+    private func setupUndoManager() {
+        // 定期检查撤销和重做状态
+        Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
+            DispatchQueue.main.async {
+                self.updateUndoRedoButtons()
+            }
+        }
+    }
+    
+    private func updateUndoRedoButtons() {
+        undoBarButton.isEnabled = UndoManagerService.shared.canUndo
+        redoBarButton.isEnabled = UndoManagerService.shared.canRedo
+    }
+    
+    @objc private func undoAction() {
+        guard let action = UndoManagerService.shared.undo() else { return }
+        
+        let loadingAlert = UIAlertController(title: "撤销中", message: "正在撤销操作...", preferredStyle: .alert)
+        present(loadingAlert, animated: true)
+        
+        PhotoChangesService.undo(action) { [weak self] success, error in
+            guard let self = self else { return }
+            loadingAlert.dismiss(animated: true) {
+                if success {
+                    self.loadPhoto() // 重新加载照片列表
+                } else {
+                    self.showAlert(title: "撤销失败", message: error ?? "无法撤销操作")
+                }
+                // 更新按钮状态
+                self.updateUndoRedoButtons()
+            }
+        }
+    }
+    
+    @objc private func redoAction() {
+        guard let action = UndoManagerService.shared.redo() else { return }
+        
+        // 对于重做操作，我们需要执行原始操作而不是撤销操作
+        let loadingAlert = UIAlertController(title: "重做中", message: "正在重做操作...", preferredStyle: .alert)
+        present(loadingAlert, animated: true)
+        
+        PhotoChangesService.redo(action) { [weak self] success, error in
+            guard let self = self else { return }
+            loadingAlert.dismiss(animated: true) {
+                if success {
+                    self.loadPhoto() // 重新加载照片列表
+                } else {
+                    self.showAlert(title: "重做失败", message: error ?? "无法重做操作")
+                }
+                // 更新按钮状态
+                self.updateUndoRedoButtons()
+            }
+        }
+    }
+    
+    private func performRedo(action: UndoAction, completion: @escaping (Bool, String?) -> Void) {
+        switch action.type {
+        case .sort(let collection, let originalAssets, let sortedAssets):
+            // 重做排序操作，恢复排序后的顺序
+            PhotoChangesService.sync(sortedAssets: sortedAssets, for: collection, completion: completion)
+        case .delete(let collection, let assets):
+            // 重做删除操作，再次从相册删除照片
+            PhotoChangesService.delete(assets: assets, for: collection, completion: completion)
+        case .move(let sourceCollection, let destinationCollection, let assets):
+            // 重做移动操作，再次将照片从源相册移到目标相册
+            PhotoChangesService.move(assets: assets, from: sourceCollection, to: destinationCollection, completion: completion)
+        case .copy(let sourceAssets, let destinationCollection):
+            // 重做复制操作，再次将照片复制到目标相册
+            PhotoChangesService.copy(assets: sourceAssets, to: destinationCollection, completion: completion)
+        }
     }
     
     private func loadPhoto() {
@@ -205,6 +301,8 @@ class PhotoGridViewController: UIViewController {
                         let message = "无法同步照片顺序到系统相册：\(message ?? "")"
                         self.syncFailed(message: message)
                     }
+                    // 更新按钮状态
+                    self.updateUndoRedoButtons()
                 }
             }
         } catch {
@@ -232,7 +330,11 @@ class PhotoGridViewController: UIViewController {
             let title = success ? "粘贴成功" : "粘贴失败"
             let message = success ? "已粘贴到相册" : (error ?? "无法粘贴到相册")
             self.showAlert(title: title, message: message)
-            if success { loadPhoto() }
+            if success { 
+                self.loadPhoto() 
+                // 更新按钮状态
+                self.updateUndoRedoButtons()
+            }
         }
     }
     
@@ -315,6 +417,8 @@ class PhotoGridViewController: UIViewController {
                     let message = error ?? "无法移动照片"
                     self.showAlert(title: "移动失败", message: message)
                 }
+                // 更新按钮状态
+                self.updateUndoRedoButtons()
             }
         }
     }
@@ -352,6 +456,8 @@ class PhotoGridViewController: UIViewController {
                         let message = error ?? "无法删除照片"
                         self.showAlert(title: "删除失败", message: message)
                     }
+                    // 更新按钮状态
+                    self.updateUndoRedoButtons()
                 }
             }
         }
@@ -490,6 +596,7 @@ extension PhotoGridViewController: PhotoGridViewDelegate {
     
     func photoGridView(_ photoGridView: PhotoGridView, didSelectedItems assets: [PHAsset]) {
         updateOperationMenu()
+        updateUndoRedoButtons()
     }
     
     func photoGridView(_ photoGridView: PhotoGridView, didSetAnchor asset: PHAsset) {
