@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		3A8DD6EE2E725C4E007E445B /* SKPhotoBrowser in Frameworks */ = {isa = PBXBuildFile; productRef = 3A8DD6ED2E725C4E007E445B /* SKPhotoBrowser */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFileReference section */
 		3A38C24E2E56AB0C002D5078 /* HSPhotos.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = HSPhotos.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
@@ -36,6 +40,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				3A8DD6EE2E725C4E007E445B /* SKPhotoBrowser in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -78,6 +83,7 @@
 			);
 			name = HSPhotos;
 			packageProductDependencies = (
+				3A8DD6ED2E725C4E007E445B /* SKPhotoBrowser */,
 			);
 			productName = HSPhotos;
 			productReference = 3A38C24E2E56AB0C002D5078 /* HSPhotos.app */;
@@ -107,6 +113,9 @@
 			);
 			mainGroup = 3A38C2452E56AB0C002D5078;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				3A8DD6EC2E725C4E007E445B /* XCRemoteSwiftPackageReference "SKPhotoBrowser" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 3A38C24F2E56AB0C002D5078 /* Products */;
 			projectDirPath = "";
@@ -347,6 +356,25 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		3A8DD6EC2E725C4E007E445B /* XCRemoteSwiftPackageReference "SKPhotoBrowser" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/suzuki-0000/SKPhotoBrowser.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 7.1.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		3A8DD6ED2E725C4E007E445B /* SKPhotoBrowser */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 3A8DD6EC2E725C4E007E445B /* XCRemoteSwiftPackageReference "SKPhotoBrowser" */;
+			productName = SKPhotoBrowser;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 3A38C2462E56AB0C002D5078 /* Project object */;
 }
