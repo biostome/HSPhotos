@@ -246,6 +246,79 @@ class PhotoGridViewController: UIViewController {
         showDeleteConfirmationAlert(for: selectedAssets)
     }
     
+    private func onMove() {
+        let selectedAssets = gridView.selectedAssets
+        guard !selectedAssets.isEmpty else {
+            showAlert(title: "移动失败", message: "请先选择要移动的照片")
+            return
+        }
+        
+        // 显示相册选择器
+        showAlbumPicker(for: selectedAssets)
+    }
+    
+    private func showAlbumPicker(for assets: [PHAsset]) {
+        // 获取所有用户创建的相册
+        let options = PHFetchOptions()
+        options.sortDescriptors = [NSSortDescriptor(key: "localizedTitle", ascending: true)]
+        
+        let collections = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: options)
+        var albumList: [PHAssetCollection] = []
+        
+        collections.enumerateObjects { collection, _, _ in
+            // 排除当前相册
+            if collection.localIdentifier != self.collection.localIdentifier {
+                albumList.append(collection)
+            }
+        }
+        
+        guard !albumList.isEmpty else {
+            showAlert(title: "移动失败", message: "没有找到其他相册")
+            return
+        }
+        
+        // 创建相册选择动作表
+        let alert = UIAlertController(title: "选择目标相册", message: nil, preferredStyle: .actionSheet)
+        
+        for collection in albumList {
+            let action = UIAlertAction(title: collection.localizedTitle ?? "未命名相册", style: .default) { _ in
+                self.performMove(assets: assets, to: collection)
+            }
+            alert.addAction(action)
+        }
+        
+        alert.addAction(UIAlertAction(title: "取消", style: .cancel, handler: nil))
+        
+        // iPad适配
+        if let popover = alert.popoverPresentationController {
+            popover.sourceView = self.view
+            popover.sourceRect = CGRect(x: self.view.bounds.midX, y: self.view.bounds.midY, width: 0, height: 0)
+        }
+        
+        present(alert, animated: true)
+    }
+    
+    private func performMove(assets: [PHAsset], to destinationCollection: PHAssetCollection) {
+        let loadingAlert = UIAlertController(title: "移动中", message: "正在将照片移动到其他相册...", preferredStyle: .alert)
+        present(loadingAlert, animated: true)
+        
+        PhotoChangesService.move(assets: assets, from: self.collection, to: destinationCollection) { [weak self] success, error in
+            guard let self = self else { return }
+            loadingAlert.dismiss(animated: true) {
+                if success {
+                    let count = assets.count
+                    let message = count == 1 ? "已移动 1 张照片" : "已移动 \(count) 张照片"
+                    self.showAlert(title: "移动成功", message: message)
+                    self.gridView.clearSelected()
+                    self.loadPhoto() // 重新加载照片列表
+                } else {
+                    let message = error ?? "无法移动照片"
+                    self.showAlert(title: "移动失败", message: message)
+                }
+            }
+        }
+    }
+    
     private func showDeleteConfirmationAlert(for assets: [PHAsset]) {
         let count = assets.count
         let message = count == 1 ? "确定要从相册中删除这张照片吗？" : "确定要从相册中删除这\(count)张照片吗？"
@@ -372,7 +445,11 @@ class PhotoGridViewController: UIViewController {
             self?.onDelete()
         }
         
-        return UIMenu(title: "操作选项", children: [delete, paste, copy, sort])
+        let move = UIAction(title: "剪切", image: UIImage(systemName: "scissors"), attributes: attributes) { [weak self] _ in
+            self?.onMove()
+        }
+        
+        return UIMenu(title: "操作选项", children: [delete, move, paste, copy, sort])
     }
     
     private func updateOperationMenu() {

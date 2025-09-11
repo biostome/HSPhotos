@@ -88,4 +88,34 @@ class PhotoChangesService {
             }
         })
     }
+    
+    // 移动相片到另一个相册的方法
+    static func move(assets: [PHAsset], from sourceCollection: PHAssetCollection, to destinationCollection: PHAssetCollection, completion: @escaping SortCompletion) {
+        #if DEBUG
+        // 添加日志显示移动的照片顺序（仅 Debug）
+        print("✂️ 移动照片顺序:")
+        for (index, asset) in assets.enumerated() {
+            print("  \(index + 1). \(asset.localIdentifier)")
+        }
+        #endif
+        
+        PHPhotoLibrary.shared().performChanges({
+            // 1. 从源相册删除照片
+            guard let sourceChangeRequest = PHAssetCollectionChangeRequest(for: sourceCollection) else {
+                return
+            }
+            let assetsArray = NSArray(array: assets)
+            sourceChangeRequest.removeAssets(assetsArray)
+            
+            // 2. 将照片添加到目标相册
+            guard let destinationChangeRequest = PHAssetCollectionChangeRequest(for: destinationCollection) else {
+                return
+            }
+            destinationChangeRequest.addAssets(assetsArray)
+        }, completionHandler: { success, error in
+            DispatchQueue.main.async {
+                completion(success, error?.localizedDescription ?? (success ? nil : "Move operation failed"))
+            }
+        })
+    }
 }
