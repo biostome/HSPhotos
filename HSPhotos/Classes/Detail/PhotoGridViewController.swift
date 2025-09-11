@@ -7,8 +7,12 @@
 
 import UIKit
 import Photos
+import SKPhotoBrowser
 
 class PhotoGridViewController: UIViewController {
+    
+    // 添加自定义转场代理属性
+    private lazy var customTransitioningDelegate = CustomTransitioningDelegate()
     
     private lazy var searchTextField: SearchBarView = {
         let searchBarView = SearchBarView()
@@ -124,6 +128,11 @@ class PhotoGridViewController: UIViewController {
 
         setupUI()
         loadPhoto()
+        
+        SKPhotoBrowserOptions.displayAction = true
+        SKPhotoBrowserOptions.displayStatusbar = true
+        SKPhotoBrowserOptions.displayCounterLabel = true
+        SKPhotoBrowserOptions.displayBackAndForwardButton = true
     }
     
     override func viewDidLayoutSubviews() {
@@ -187,7 +196,8 @@ class PhotoGridViewController: UIViewController {
     private func loadPhoto() {
         let assets = PHAsset.fetchAssets(in: collection, options: fetchOptions)
         var newAssets: [PHAsset] = []
-        assets.enumerateObjects { asset, _, _ in
+        assets.enumerateObjects { asset, index, _ in
+            asset.index = index
             newAssets.append(asset)
         }
         self.assets = newAssets
@@ -429,20 +439,47 @@ class PhotoGridViewController: UIViewController {
 }
 
 extension PhotoGridViewController: PhotoGridViewDelegate {
-    func photoGridView(_ photoGridView: PhotoGridView, didSelectItemAt indexPath: IndexPath) {
+    func photoGridView(_ photoGridView: PhotoGridView, didSelectItemAt asset: PHAsset) {
         updateOperationMenu()
     }
     
-    func photoGridView(_ photoGridView: PhotoGridView, didDeselectItemAt indexPath: IndexPath) {
+    func photoGridView(_ photoGridView: PhotoGridView, didDeselectItemAt asset: PHAsset) {
         updateOperationMenu()
     }
     
-    func photoGridView(_ photoGridView: PhotoGridView, didSelctedItems assets: [PHAsset]) {
+    func photoGridView(_ photoGridView: PhotoGridView, didSelectedItems assets: [PHAsset]) {
+        updateOperationMenu()
+    }
+    
+    func photoGridView(_ photoGridView: PhotoGridView, didDeselectItems assets: [PHAsset]) {
+        updateOperationMenu()
+    }
+    
+    func photoGridView(_ photoGridView: PhotoGridView, didSetAnchor asset: PHAsset) {
         updateOperationMenu()
     }
     
     func photoGridView(_ photoGridView: PhotoGridView, sortPreference: PhotoSortPreference) -> PhotoSortPreference {
         return self.sortPreference
+    }
+    
+    func photoGridView(_ photoGridView: PhotoGridView, didClickItemAt indexPath: IndexPath, with asset: PHAsset) {
+        guard let cell = self.gridView.collectionView.cellForItem(at: indexPath) as? PhotoCell else {
+            return
+        }
+        guard let originImage = cell.imageView.image else {
+            return
+        }
+        
+        let browser = SKPhotoBrowser(originImage: originImage, photos: self.assets, animatedFromView: cell)
+        browser.initializePageIndex(indexPath.row)
+        browser.delegate = self
+        
+        // 设置自定义动画器
+        browser.transitioningDelegate = customTransitioningDelegate
+        browser.modalPresentationStyle = .custom
+        
+        self.present(browser, animated: true, completion: {})
     }
 }
 
@@ -535,5 +572,41 @@ extension PhotoGridViewController: UIScrollViewDelegate {
             self.searchTextField.transform = CGAffineTransform(translationX: 0, y: -searchBarHeight)
             self.searchTextField.alpha = 0.0
         }
+    }
+}
+
+extension PhotoGridViewController: SKPhotoBrowserDelegate {
+    func didShowPhotoAtIndex(_ index: Int) {
+        gridView.collectionView.visibleCells.forEach({$0.isHidden = false})
+        gridView.collectionView.cellForItem(at: IndexPath(item: index, section: 0))?.isHidden = true
+    }
+    
+    func willDismissAtPageIndex(_ index: Int) {
+        gridView.collectionView.visibleCells.forEach({$0.isHidden = false})
+        gridView.collectionView.cellForItem(at: IndexPath(item: index, section: 0))?.isHidden = true
+    }
+    
+    func willShowActionSheet(_ photoIndex: Int) {
+        // do some handle if you need
+    }
+    
+    func didDismissAtPageIndex(_ index: Int) {
+        gridView.collectionView.cellForItem(at: IndexPath(item: index, section: 0))?.isHidden = false
+    }
+    
+    func didDismissActionSheetWithButtonIndex(_ buttonIndex: Int, photoIndex: Int) {
+        // handle dismissing custom actions
+    }
+    
+    func removePhoto(_ browser: SKPhotoBrowser, index: Int, reload: @escaping (() -> Void)) {
+        reload()
+    }
+
+    func viewForPhoto(_ browser: SKPhotoBrowser, index: Int) -> UIView? {
+        return gridView.collectionView.cellForItem(at: IndexPath(item: index, section: 0))
+    }
+    
+    func captionViewForPhotoAtIndex(index: Int) -> SKCaptionView? {
+        return nil
     }
 }

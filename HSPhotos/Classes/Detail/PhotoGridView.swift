@@ -31,23 +31,13 @@ enum PhotoSortError: Error, LocalizedError {
 }
 
 protocol PhotoGridViewDelegate {
-    func photoGridView(_ photoGridView: PhotoGridView, didSelectItemAt indexPath: IndexPath)
     func photoGridView(_ photoGridView: PhotoGridView, didSelectItemAt asset: PHAsset)
-    func photoGridView(_ photoGridView: PhotoGridView, didDeselectItemAt indexPath: IndexPath)
+    func photoGridView(_ photoGridView: PhotoGridView, didClickItemAt indexPath: IndexPath, with asset: PHAsset)
     func photoGridView(_ photoGridView: PhotoGridView, didDeselectItemAt asset: PHAsset)
     func photoGridView(_ photoGridView: PhotoGridView, didSelectedItems assets: [PHAsset])
+    func photoGridView(_ photoGridView: PhotoGridView, didDeselectItems assets: [PHAsset])
     func photoGridView(_ photoGridView: PhotoGridView, didSetAnchor asset: PHAsset)
     func photoGridView(_ photoGridView: PhotoGridView, sortPreference: PhotoSortPreference) -> PhotoSortPreference
-}
-
-extension PhotoGridViewDelegate {
-    func photoGridView(_ photoGridView: PhotoGridView, didSelectItemAt indexPath: IndexPath) {}
-    func photoGridView(_ photoGridView: PhotoGridView, didSelectItemAt asset: PHAsset) {}
-    func photoGridView(_ photoGridView: PhotoGridView, didDeselectItemAt indexPath: IndexPath) {}
-    func photoGridView(_ photoGridView: PhotoGridView, didDeselectItemAt asset: PHAsset) {}
-    func photoGridView(_ photoGridView: PhotoGridView, didSelectedItems assets: [PHAsset]) {}
-    func photoGridView(_ photoGridView: PhotoGridView, didSetAnchor asset: PHAsset) {}
-    func photoGridView(_ photoGridView: PhotoGridView, sortPreference: PhotoSortPreference) -> PhotoSortPreference { .custom }
 }
 
 
@@ -110,7 +100,7 @@ class PhotoGridView: UIView {
     
     private var lastScale: CGFloat = 3.0
     
-    private lazy var collectionView: UICollectionView = {
+    public lazy var collectionView: UICollectionView = {
         let initialLayout = createLayout(for: columns)
         let collectionView = UICollectionView(frame: .zero, collectionViewLayout: initialLayout)
         collectionView.backgroundColor = UIColor(red: 0.96, green: 0.96, blue: 0.97, alpha: 1.0)
@@ -252,7 +242,6 @@ class PhotoGridView: UIView {
                 selectedPhotos.append(asset)
                 selectedMap[asset.localIdentifier] = selectedPhotos.count - 1
                 indexPaths.append(IndexPath(item: index, section: 0))
-                delegate?.photoGridView(self, didSelectItemAt: IndexPath(item: index, section: 0))
                 delegate?.photoGridView(self, didSelectItemAt: asset)
             }
         }
@@ -406,7 +395,7 @@ extension PhotoGridView: UICollectionViewDelegate {
         
         switch selectionMode {
         case .none:
-            return
+            self.delegate?.photoGridView(self, didClickItemAt: indexPath, with: photo)
         case .multiple:
             handleMultipleSelection(at: indexPath, in: collectionView, with: photo)
         case .range:
@@ -430,10 +419,8 @@ extension PhotoGridView {
             collectionView.reloadItems(at: [indexPath])
         } completion: { _ in
             if wasSelected {
-                self.delegate?.photoGridView(self, didDeselectItemAt: indexPath)
                 self.delegate?.photoGridView(self, didDeselectItemAt: photo)
             } else {
-                self.delegate?.photoGridView(self, didSelectItemAt: indexPath)
                 self.delegate?.photoGridView(self, didSelectItemAt: photo)
             }
             self.delegate?.photoGridView(self, didSelectedItems: self.selectedPhotos)
@@ -450,7 +437,6 @@ extension PhotoGridView {
                 toggle(photo: photo)
                 collectionView.reloadItems(at: [indexPath])
             } completion: { _ in
-                self.delegate?.photoGridView(self, didDeselectItemAt: indexPath)
                 self.delegate?.photoGridView(self, didDeselectItemAt: photo)
                 self.delegate?.photoGridView(self, didSelectedItems: self.selectedPhotos)
             }
@@ -466,7 +452,6 @@ extension PhotoGridView {
                 toggle(photo: photo)
                 collectionView.reloadItems(at: [indexPath])
             } completion: { _ in
-                self.delegate?.photoGridView(self, didSelectItemAt: indexPath)
                 self.delegate?.photoGridView(self, didSelectItemAt: photo)
                 self.delegate?.photoGridView(self, didSelectedItems: self.selectedPhotos)
             }
@@ -484,7 +469,6 @@ extension PhotoGridView {
             toggle(photo: photo)
             collectionView.reloadItems(at: [indexPath])
         } completion: { _ in
-            self.delegate?.photoGridView(self, didDeselectItemAt: indexPath)
             self.delegate?.photoGridView(self, didDeselectItemAt: photo)
             self.delegate?.photoGridView(self, didSelectedItems: self.selectedPhotos)
         }

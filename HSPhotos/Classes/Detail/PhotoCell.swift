@@ -6,11 +6,12 @@
 //
 import UIKit
 import Photos
+import SKPhotoBrowser
 
 class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
 
     // MARK: - 懒加载 UI 元素
-    private lazy var imageView: UIImageView = {
+    public lazy var imageView: UIImageView = {
         let iv = UIImageView()
         iv.contentMode = .scaleAspectFill
         iv.clipsToBounds = true
@@ -89,10 +90,29 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         return label
     }()
     
-    // MARK: - 数据缓存
-    private var currentAssetID: String?
-    private var requestID: PHImageRequestID?
-    private var currentAsset: PHAsset?
+    fileprivate lazy var requestOptions: PHImageRequestOptions = {
+        let options = PHImageRequestOptions()
+        options.version = .current
+        options.deliveryMode = .opportunistic
+        options.resizeMode = .fast
+        options.isNetworkAccessAllowed = true
+        return options
+    }()
+    
+    fileprivate lazy var bigRequestOptions: PHImageRequestOptions = {
+        let options = PHImageRequestOptions()
+        options.version = .current
+        options.deliveryMode = .highQualityFormat
+        options.resizeMode = .fast
+        options.isNetworkAccessAllowed = true
+        return options
+    }()
+    
+    fileprivate var requestId: PHImageRequestID?
+    
+    
+    fileprivate let imageManager = PHCachingImageManager.default()
+
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -148,46 +168,16 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         ])
     }
     
-    
-    
-    lazy var requestOptions: PHImageRequestOptions = {
-        
-        let options = PHImageRequestOptions()
-        options.version = .current
-//        options.deliveryMode = .highQualityFormat
-//        options.resizeMode = .exact
-        
-        // 允许iCloud下载
-        options.isNetworkAccessAllowed = true
-        
-        // 设置进度回调
-        options.progressHandler = { progress, _, _, _ in
-            DispatchQueue.main.async {
-//                print("progress: \(progress)%")
-            }
-        }
-        
-        return options
-    }()
-
     // MARK: - 配置
     func configure(with asset: PHAsset, isSelected: Bool, selectionIndex: Int?, selectionMode: PhotoSelectionMode, index: Int? = nil, isAnchor: Bool = false) {
         
-        // 保存当前资产
-        currentAsset = asset
-
-        // 避免重复请求
-        if currentAssetID != asset.localIdentifier {
-            currentAssetID = asset.localIdentifier
-
-            let targetSize = CGSize(width: bounds.width * UIScreen.main.scale,
-                                    height: bounds.height * UIScreen.main.scale)
-            requestID = PHImageManager.default().requestImage(
-                for: asset,
-                targetSize: targetSize,
-                contentMode: .aspectFill,
-                options: requestOptions
-            ) { [weak self] image, _ in
+        if let id = requestId {
+            imageManager.cancelImageRequest(id)
+            requestId = nil
+        }
+        
+        requestId = requestImageForAsset(asset, options: requestOptions) {[weak self] image, requestId in
+            if requestId == self?.requestId || self?.requestId == nil {
                 self?.imageView.image = image
             }
         }
@@ -227,12 +217,6 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         selectionOverlay.isHidden = true
         selectionNumberLabel.isHidden = true
         anchorLabel.isHidden = true
-        currentAssetID = nil
-        currentAsset = nil
-        if let requestID = requestID {
-            PHImageManager.default().cancelImageRequest(requestID)
-        }
-        requestID = nil
     }
     
     /// 执行渐变柔光高亮效果
@@ -245,6 +229,34 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
                 self.highlightOverlay.alpha = 0
             } completion: { finish in
                 self.highlightOverlay.isHidden = true
+            }
+        }
+    }
+    
+    fileprivate func requestImageForAsset(_ asset: PHAsset, options: PHImageRequestOptions, completion: @escaping (_ image: UIImage?, _ requestId: PHImageRequestID?) -> Void) -> PHImageRequestID {
+        
+        let scale = UIScreen.main.scale
+        let targetSize: CGSize
+        
+        if options.deliveryMode == .highQualityFormat {
+            targetSize = CGSize(width: 600 * scale, height: 600 * scale)
+        } else {
+            targetSize = CGSize(width: 182 * scale, height: 182 * scale)
+        }
+        
+        requestOptions.isSynchronous = false
+        
+        // Workaround because PHImageManager.requestImageForAsset doesn't work for burst images
+        if asset.representsBurst {
+            return imageManager.requestImageData(for: asset, options: options) { data, _, _, dict in
+                let image = data.flatMap { UIImage(data: $0) }
+                let requestId = dict?[PHImageResultRequestIDKey] as? NSNumber
+                completion(image, requestId?.int32Value)
+            }
+        } else {
+            return imageManager.requestImage(for: asset, targetSize: targetSize, contentMode: .aspectFill, options: options) { image, dict in
+                let requestId = dict?[PHImageResultRequestIDKey] as? NSNumber
+                completion(image, requestId?.int32Value)
             }
         }
     }
