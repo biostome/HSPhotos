@@ -411,7 +411,11 @@ extension PhotoGridViewController: PhotoGridViewDelegate {
         updateOperationMenu()
     }
     
-    func photoGridView(_ photoGridView: PhotoGridView, didSelctedItems assets: [PHAsset]) {
+    func photoGridView(_ photoGridView: PhotoGridView, didSelectedItems assets: [PHAsset]) {
+        updateOperationMenu()
+    }
+    
+    func photoGridView(_ photoGridView: PhotoGridView, didSetAnchor asset: PHAsset) {
         updateOperationMenu()
     }
 }
