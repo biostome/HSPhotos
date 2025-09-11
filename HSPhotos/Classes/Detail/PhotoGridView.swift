@@ -79,6 +79,21 @@ class PhotoGridView: UIView {
     /// 选中的结束位置
     public var selectedEnd: Int?
     
+    // 新增：用于跟踪滑动手势选中的状态
+    private var isSlidingSelectionEnabled = false
+    private var lastSelectedIndexPath: IndexPath?
+    
+    // 新增：用于跟踪滑动选择的方向（选中或反选）
+    private var isSlidingToSelect = true
+    
+    // 新增：用于临时禁用滚动
+    private var isScrollDisabled = false
+    
+    // 新增：用于跟踪手势方向
+    private var initialTouchPoint: CGPoint = .zero
+    private var hasStartedSelection = false
+    private let selectionThreshold: CGFloat = 10.0 // 开始选中的阈值
+    
     // 公共方法：获取 collectionView 用于滚动同步
     public var scrollView: UIScrollView {
         return collectionView
@@ -141,6 +156,11 @@ class PhotoGridView: UIView {
     private func setupGestures() {
         let pinchGesture = UIPinchGestureRecognizer(target: self, action: #selector(handlePinchGesture(_:)))
         collectionView.addGestureRecognizer(pinchGesture)
+        
+        // 添加滑动手势识别器
+        let panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePanGesture(_:)))
+        panGesture.delegate = self
+        collectionView.addGestureRecognizer(panGesture)
     }
     
     private func calculateNewColumns(for scaleDelta: CGFloat) -> Int {
@@ -187,6 +207,103 @@ class PhotoGridView: UIView {
         }
     }
     
+    // 新增：处理滑动手势
+    @objc private func handlePanGesture(_ gesture: UIPanGestureRecognizer) {
+        // 只在多选模式下启用滑动选择
+        guard selectionMode == .multiple else { return }
+        
+        let point = gesture.location(in: collectionView)
+        let translation = gesture.translation(in: collectionView)
+        
+        switch gesture.state {
+        case .began:
+            initialTouchPoint = point
+            hasStartedSelection = false
+            isSlidingSelectionEnabled = false
+            lastSelectedIndexPath = nil
+            isSlidingToSelect = true // 默认为选中模式
+        case .changed:
+            let deltaX = abs(translation.x)
+            let deltaY = abs(translation.y)
+            
+            // 如果还没有开始选择，判断是否应该开始选择
+            if !hasStartedSelection {
+                // 如果横向移动大于阈值且横向移动大于纵向移动，则开始选择
+                if deltaX > selectionThreshold && deltaX > deltaY {
+                    hasStartedSelection = true
+                    isSlidingSelectionEnabled = true
+                    // 禁用滚动
+                    isScrollDisabled = true
+                    collectionView.isScrollEnabled = false
+                    // 获取起始点的索引路径
+                    if let indexPath = collectionView.indexPathForItem(at: initialTouchPoint) {
+                        // 检查起始点是否已选中，如果是则设置为反选模式
+                        if let asset = getAsset(at: indexPath) {
+                            isSlidingToSelect = selectedMap[asset.localIdentifier] == nil
+                        }
+                        handleSlidingSelection(at: indexPath)
+                    }
+                }
+            }
+            
+            // 如果已经开始了选择，则处理滑动选择
+            if isSlidingSelectionEnabled {
+                if let indexPath = collectionView.indexPathForItem(at: point) {
+                    handleSlidingSelection(at: indexPath)
+                }
+            }
+        case .ended, .cancelled:
+            // 恢复滚动
+            isSlidingSelectionEnabled = false
+            isScrollDisabled = false
+            collectionView.isScrollEnabled = true
+            hasStartedSelection = false
+            lastSelectedIndexPath = nil
+        default:
+            break
+        }
+    }
+    
+    // 新增：处理滑动选择逻辑
+    private func handleSlidingSelection(at indexPath: IndexPath) {
+        guard isSlidingSelectionEnabled, indexPath.item < assets.count else { return }
+        
+        // 如果是同一个单元格，不处理
+        if lastSelectedIndexPath == indexPath {
+            return
+        }
+        
+        let photo = assets[indexPath.item]
+        let isSelected = selectedMap[photo.localIdentifier] != nil
+        
+        // 根据滑动模式进行选中或反选
+        if isSlidingToSelect {
+            // 选中模式：只选中未选中的照片
+            if !isSelected {
+                collectionView.performBatchUpdates {
+                    toggle(photo: photo)
+                    collectionView.reloadItems(at: [indexPath])
+                } completion: { _ in
+                    self.delegate?.photoGridView(self, didSelectItemAt: photo)
+                    self.delegate?.photoGridView(self, didSelectedItems: self.selectedPhotos)
+                }
+            }
+        } else {
+            // 反选模式：只取消已选中的照片
+            if isSelected {
+                collectionView.performBatchUpdates {
+                    toggle(photo: photo)
+                    collectionView.reloadItems(at: [indexPath])
+                } completion: { _ in
+                    self.delegate?.photoGridView(self, didDeselectItemAt: photo)
+                    self.delegate?.photoGridView(self, didSelectedItems: self.selectedPhotos)
+                }
+            }
+        }
+        
+        lastSelectedIndexPath = indexPath
+    }
+    
     // MARK: - Layout Methods
     private func createLayout(for columns: Int) -> UICollectionViewFlowLayout {
         let layout = UICollectionViewFlowLayout()
@@ -209,6 +326,12 @@ class PhotoGridView: UIView {
         layout.itemSize = CGSize(width: itemWidth, height: itemWidth)
         
         return layout
+    }
+    
+    // 新增：根据索引路径获取资源
+    private func getAsset(at indexPath: IndexPath) -> PHAsset? {
+        guard indexPath.item < assets.count else { return nil }
+        return assets[indexPath.item]
     }
     
     func toggle(photo: PHAsset) {
@@ -408,11 +531,32 @@ extension PhotoGridView: UICollectionViewDelegate {
         let photo = assets[indexPath.item]
         handleDeselection(at: indexPath, in: collectionView, with: photo)
     }
+    
+    // 新增：重写 scrollViewWillBeginDragging 方法来控制滚动
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        // 如果正在滑动选择，则阻止滚动
+        if isSlidingSelectionEnabled {
+            scrollView.isScrollEnabled = false
+        }
+        scrollDelegate?.scrollViewWillBeginDragging?(scrollView)
+    }
+    
+    // 新增：重写 scrollViewDidEndDragging 方法来恢复滚动
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        // 如果不是在滑动选择状态，则恢复滚动
+        if !isSlidingSelectionEnabled {
+            scrollView.isScrollEnabled = true
+        }
+        scrollDelegate?.scrollViewDidEndDragging?(scrollView, willDecelerate: decelerate)
+    }
 }
 
 // MARK: - Helper Methods
 extension PhotoGridView {
     private func handleMultipleSelection(at indexPath: IndexPath, in collectionView: UICollectionView, with photo: PHAsset) {
+        // 如果启用了滑动选择，则不处理点击选择
+        guard !isSlidingSelectionEnabled else { return }
+        
         let wasSelected = selectedMap[photo.localIdentifier] != nil
         collectionView.performBatchUpdates {
             toggle(photo: photo)
@@ -465,6 +609,9 @@ extension PhotoGridView {
     }
     
     private func handleDeselection(at indexPath: IndexPath, in collectionView: UICollectionView, with photo: PHAsset) {
+        // 如果启用了滑动选择，则不处理点击取消选择
+        guard !isSlidingSelectionEnabled else { return }
+        
         collectionView.performBatchUpdates {
             toggle(photo: photo)
             collectionView.reloadItems(at: [indexPath])
@@ -493,7 +640,10 @@ extension PhotoGridView: UICollectionViewDelegateFlowLayout {
     // MARK: - UIScrollViewDelegate
     
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        scrollDelegate?.scrollViewDidScroll?(scrollView)
+        // 只有在非滑动选择状态下才通知代理
+        if !isSlidingSelectionEnabled {
+            scrollDelegate?.scrollViewDidScroll?(scrollView)
+        }
     }
 }
 
@@ -534,4 +684,16 @@ extension PhotoGridView {
     }
 }
 
-
+// MARK: - UIGestureRecognizerDelegate
+extension PhotoGridView: UIGestureRecognizerDelegate {
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
+        // 允许滑动手势和滚动同时进行
+        return true
+    }
+    
+    // 新增：控制手势识别的条件
+    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
+        // 只有在多选模式下才允许滑动手势开始
+        return selectionMode == .multiple
+    }
+}
