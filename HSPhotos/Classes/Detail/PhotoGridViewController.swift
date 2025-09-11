@@ -29,6 +29,7 @@ class PhotoGridViewController: UIViewController {
         let indicator = PhotoPreviewIndicator()
         indicator.translatesAutoresizingMaskIntoConstraints = false
         indicator.delegate = self
+        indicator.isHidden = true
         return indicator
     }()
     
@@ -511,14 +512,14 @@ extension PhotoGridViewController: UIScrollViewDelegate {
             
             lastContentOffsetY = currentOffsetY
             
+            previewIndicator.updateScrollPosition(
+                basedOn: scrollView.contentOffset.y,
+                mainContentHeight: scrollView.contentSize.height,
+                mainVisibleHeight: scrollView.bounds.height
+            )
         }
         
         // 同步 previewIndicator 的滚动位置
-        previewIndicator.updateScrollPosition(
-            basedOn: scrollView.contentOffset.y,
-            mainContentHeight: scrollView.contentSize.height,
-            mainVisibleHeight: scrollView.bounds.height
-        )
     }
     
     private func moveSearchBarToVisible() {

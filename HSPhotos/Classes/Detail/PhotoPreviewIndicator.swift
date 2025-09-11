@@ -28,6 +28,19 @@ class PhotoPreviewIndicator: UIView {
     private var sortPreference: PhotoSortPreference = .custom
     private var isUserScrolling = false // 跟踪用户是否正在滚动指示器
     
+    // 将缓存改为fileprivate级别，以便ThumbnailCell可以访问
+    fileprivate var thumbnailCache: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.countLimit = 50 // 限制缓存数量
+        return cache
+    }()
+    
+    // 添加滚动优化相关属性
+    private var lastScrollUpdate: CFTimeInterval = 0
+    private let scrollUpdateInterval: CFTimeInterval = 1.0/60.0 // 60fps
+    
+    private let scrollSensitivity: CGFloat = 3.0 // 滚动灵敏度倍数，越大越灵敏
+    
     // MARK: - UI Components
     
     private lazy var collectionView: UICollectionView = {
@@ -47,6 +60,19 @@ class PhotoPreviewIndicator: UIView {
         collectionView.clipsToBounds = true
         collectionView.layer.cornerRadius = 10
         collectionView.isScrollEnabled = true // 启用滚动
+        
+        // 性能优化配置
+        collectionView.prefetchDataSource = self // 启用预加载
+        collectionView.isPrefetchingEnabled = true
+        collectionView.decelerationRate = .fast // 快速减速
+        collectionView.canCancelContentTouches = true
+        collectionView.delaysContentTouches = false
+    
+        // 添加更多性能优化
+        collectionView.contentInsetAdjustmentBehavior = .never
+        collectionView.alwaysBounceVertical = true
+        collectionView.bounces = true
+    
         collectionView.register(ThumbnailCell.self, forCellWithReuseIdentifier: "ThumbnailCell")
         
         return collectionView
@@ -131,6 +157,13 @@ class PhotoPreviewIndicator: UIView {
         // 如果用户正在滚动指示器，不进行同步
         guard !isUserScrolling else { return }
         
+        // 限制更新频率，提高性能
+        let currentTime = CACurrentMediaTime()
+        if currentTime - lastScrollUpdate < scrollUpdateInterval {
+            return
+        }
+        lastScrollUpdate = currentTime
+        
         // 计算主相册的滚动进度 (0.0 到 1.0)
         let mainScrollableHeight = mainContentHeight - mainVisibleHeight
         guard mainScrollableHeight > 0 else { return }
@@ -147,7 +180,7 @@ class PhotoPreviewIndicator: UIView {
         // 根据主相册的滚动进度计算指示器应该滚动到的位置
         let targetOffset = mainProgress * indicatorScrollableHeight
         
-        // 更新指示器的滚动位置
+        // 更新指示器的滚动位置，使用动画优化
         self.collectionView.setContentOffset(CGPoint(x: 0, y: targetOffset), animated: false)
     }
     
@@ -217,6 +250,7 @@ extension PhotoPreviewIndicator: UICollectionViewDelegateFlowLayout {
         return CGSize(width: cellWidth, height: cellHeight)
     }
     
+    // 优化布局方法，减少不必要的计算
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, minimumInteritemSpacingForSectionAt section: Int) -> CGFloat {
         return 0
     }
@@ -227,6 +261,18 @@ extension PhotoPreviewIndicator: UICollectionViewDelegateFlowLayout {
     
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, insetForSectionAt section: Int) -> UIEdgeInsets {
         return .zero
+    }
+    
+    // 添加布局优化
+    func collectionView(_ collectionView: UICollectionView, willDisplay cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+        // 减少离屏渲染
+        cell.layer.shouldRasterize = true
+        cell.layer.rasterizationScale = UIScreen.main.scale
+    }
+    
+    func collectionView(_ collectionView: UICollectionView, didEndDisplaying cell: UICollectionViewCell, forItemAt indexPath: IndexPath) {
+        // 清理离屏渲染
+        cell.layer.shouldRasterize = false
     }
 }
 
@@ -330,6 +376,10 @@ class ThumbnailCell: UICollectionViewCell {
         contentView.addSubview(imageView)
         setupConstraints()
         setupGestures()
+        
+        // 性能优化
+        contentView.layer.shouldRasterize = true
+        contentView.layer.rasterizationScale = UIScreen.main.scale
     }
     
     private func setupConstraints() {
@@ -358,19 +408,31 @@ class ThumbnailCell: UICollectionViewCell {
         updateText()
     }
     
+    // 添加更新图片的方法
+    func updateImage(_ image: UIImage) {
+        self.imageView.image = image
+    }
+    
     // MARK: - Private Methods
     
     private func loadImage() {
         guard let asset = asset else { return }
         
-        // 使用固定的目标尺寸，不变化
-        let targetSize = CGSize(width: 40 * UIScreen.main.scale, height: 40 * UIScreen.main.scale)
+        // 使用更小的目标尺寸，提高性能
+        let targetSize = CGSize(width: 20 * UIScreen.main.scale, height: 20 * UIScreen.main.scale)
         
         let options = PHImageRequestOptions()
         options.isSynchronous = false
-        options.deliveryMode = .fastFormat
+        options.deliveryMode = .opportunistic // 使用opportunistic模式提高性能
         options.resizeMode = .fast
         options.isNetworkAccessAllowed = true
+        
+        // 检查缓存 (现在可以正确访问thumbnailCache)
+        if let previewIndicator = superview?.superview as? PhotoPreviewIndicator,
+           let cachedImage = previewIndicator.thumbnailCache.object(forKey: NSString(string: asset.localIdentifier)) {
+            self.imageView.image = cachedImage
+            return
+        }
         
         PHImageManager.default().requestImage(for: asset, targetSize: targetSize, contentMode: .aspectFill, options: options) { [weak self] image, _ in
             DispatchQueue.main.async {
@@ -394,5 +456,58 @@ class ThumbnailCell: UICollectionViewCell {
     
     @objc private func handleTap() {
         delegate?.thumbnailCell(self, didSelectAt: index)
+    }
+    
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        imageView.image = nil
+        // 重置其他状态
+    }
+}
+
+// MARK: - UICollectionViewDataSourcePrefetching
+
+extension PhotoPreviewIndicator: UICollectionViewDataSourcePrefetching {
+    func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
+        // 预加载缩略图
+        for indexPath in indexPaths {
+            guard indexPath.item < assets.count else { continue }
+            let asset = assets[indexPath.item]
+            let cacheKey = NSString(string: asset.localIdentifier)
+            
+            // 如果缓存中没有，则开始加载
+            if thumbnailCache.object(forKey: cacheKey) == nil {
+                loadThumbnail(for: asset, at: indexPath.item)
+            }
+        }
+    }
+    
+    func collectionView(_ collectionView: UICollectionView, cancelPrefetchingForItemsAt indexPaths: [IndexPath]) {
+        // 取消预加载任务（如果需要的话）
+    }
+    
+    private func loadThumbnail(for asset: PHAsset, at index: Int) {
+        // 使用更小的尺寸来提高性能
+        let targetSize = CGSize(width: 20 * UIScreen.main.scale, height: 20 * UIScreen.main.scale)
+        
+        let options = PHImageRequestOptions()
+        options.isSynchronous = false
+        options.deliveryMode = .opportunistic // 使用opportunistic模式提高性能
+        options.resizeMode = .fast
+        options.isNetworkAccessAllowed = true
+        options.isSynchronous = false
+        
+        PHImageManager.default().requestImage(for: asset, targetSize: targetSize, contentMode: .aspectFill, options: options) { [weak self] image, _ in
+            guard let self = self, let image = image else { return }
+            let cacheKey = NSString(string: asset.localIdentifier)
+            self.thumbnailCache.setObject(image, forKey: cacheKey)
+            
+            // 如果对应的cell还在显示，更新它
+            DispatchQueue.main.async {
+                if let cell = self.collectionView.cellForItem(at: IndexPath(item: index, section: 0)) as? ThumbnailCell {
+                    cell.updateImage(image)
+                }
+            }
+        }
     }
 }
