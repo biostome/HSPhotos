@@ -129,6 +129,14 @@ class PhotoGridView: UIView {
         return collectionView
     }()
     
+    lazy var verticalScrollIndicator: CustomVerticalScrollIndicator = {
+        let view = CustomVerticalScrollIndicator()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.alpha = 0.0 // 初始隐藏
+        view.backgroundColor = .clear
+        return view
+    }()
+    
     override init(frame: CGRect) {
         super.init(frame: frame)
         setupUI()
@@ -153,7 +161,18 @@ class PhotoGridView: UIView {
             collectionView.trailingAnchor.constraint(equalTo: trailingAnchor),
             collectionView.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
+        
+        addSubview(verticalScrollIndicator)
+        
+        NSLayoutConstraint.activate([
+            verticalScrollIndicator.topAnchor.constraint(equalTo: topAnchor),
+            verticalScrollIndicator.trailingAnchor.constraint(equalTo: trailingAnchor),
+            verticalScrollIndicator.widthAnchor.constraint(equalToConstant: 30),
+            verticalScrollIndicator.bottomAnchor.constraint(equalTo: safeAreaLayoutGuide.bottomAnchor)
+        ])
+        
     }
+    
     
     private func setupGestures() {
         let pinchGesture = UIPinchGestureRecognizer(target: self, action: #selector(handlePinchGesture(_:)))
@@ -561,23 +580,6 @@ extension PhotoGridView: UICollectionViewDelegate {
         handleDeselection(at: indexPath, in: collectionView, with: photo)
     }
     
-    // 新增：重写 scrollViewWillBeginDragging 方法来控制滚动
-    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
-        // 如果正在滑动选择，则阻止滚动
-        if isSlidingSelectionEnabled {
-            scrollView.isScrollEnabled = false
-        }
-        scrollDelegate?.scrollViewWillBeginDragging?(scrollView)
-    }
-    
-    // 新增：重写 scrollViewDidEndDragging 方法来恢复滚动
-    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-        // 如果不是在滑动选择状态，则恢复滚动
-        if !isSlidingSelectionEnabled {
-            scrollView.isScrollEnabled = true
-        }
-        scrollDelegate?.scrollViewDidEndDragging?(scrollView, willDecelerate: decelerate)
-    }
 }
 
 // MARK: - Helper Methods
@@ -704,6 +706,34 @@ extension PhotoGridView: UICollectionViewDelegateFlowLayout {
         if !isSlidingSelectionEnabled {
             scrollDelegate?.scrollViewDidScroll?(scrollView)
         }
+    }
+        
+    // 新增：重写 scrollViewWillBeginDragging 方法来控制滚动
+    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
+        // 如果正在滑动选择，则阻止滚动
+        if isSlidingSelectionEnabled {
+            scrollView.isScrollEnabled = false
+        }
+        
+        scrollDelegate?.scrollViewWillBeginDragging?(scrollView)
+    }
+    
+    // 新增：重写 scrollViewDidEndDragging 方法来恢复滚动
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        // 如果不是在滑动选择状态，则恢复滚动
+        if !isSlidingSelectionEnabled {
+            scrollView.isScrollEnabled = true
+        }
+        
+        scrollDelegate?.scrollViewDidEndDragging?(scrollView, willDecelerate: decelerate)
+    }
+    
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        // 滚动完全停止时的处理
+    }
+    
+    func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        
     }
 }
 
