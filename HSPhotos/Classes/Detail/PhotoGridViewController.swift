@@ -135,6 +135,9 @@ class PhotoGridViewController: UIViewController {
         setupUI()
         loadPhoto()
         setupUndoManager()
+        
+        // 同步初始排序偏好到 PhotoGridView
+        gridView.sortPreference = sortPreference
     }
     
     private func setupUI() {
@@ -276,6 +279,9 @@ class PhotoGridViewController: UIViewController {
             newAssets.append(asset)
         }
         self.assets = newAssets
+        
+        // 同步排序偏好到 PhotoGridView
+        gridView.sortPreference = preference
         
         // 保存排序偏好
         preference.set(preference: self.collection)

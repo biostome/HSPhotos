@@ -111,6 +111,8 @@ class PhotoGridView: UIView {
     // 当前锚点照片
     private var anchorPhoto: PHAsset?
     
+    // 当前排序方式
+    public var sortPreference: PhotoSortPreference = .custom
     
     private var columns: Int = PhotoGridConstants.defaultColumns
     
@@ -134,6 +136,7 @@ class PhotoGridView: UIView {
         view.translatesAutoresizingMaskIntoConstraints = false
         view.alpha = 0.0 // 初始隐藏
         view.backgroundColor = .clear
+        view.delegate = self
         return view
     }()
     
@@ -785,6 +788,46 @@ extension PhotoGridView {
               let cell = collectionView.cellForItem(at: identifier) else { return nil }
         
         return UITargetedPreview(view: cell)
+    }
+}
+
+// MARK: - CustomVerticalScrollIndicatorDelegate
+extension PhotoGridView: CustomVerticalScrollIndicatorDelegate {
+    func scrollIndicator(_ indicator: CustomVerticalScrollIndicator, textForScrollProgress scrollProgress: CGFloat) -> String? {
+        guard !assets.isEmpty else { return nil }
+        
+        // 根据滚动进度计算当前显示的照片索引
+        let totalItems = assets.count
+        let currentIndex = Int(scrollProgress * CGFloat(totalItems - 1))
+        let clampedIndex = max(0, min(currentIndex, totalItems - 1))
+        
+        let asset = assets[clampedIndex]
+        
+        switch sortPreference {
+        case .creationDate, .modificationDate, .recentDate:
+            // 日期排序：显示日期
+            return formatDate(for: asset)
+        case .custom:
+            // 自定义排序：显示下标（从1开始）
+            return "\(clampedIndex + 1)"
+        }
+    }
+    
+    private func formatDate(for asset: PHAsset) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        
+        let date: Date
+        switch sortPreference {
+        case .creationDate:
+            date = asset.creationDate ?? Date()
+        case .modificationDate, .recentDate:
+            date = asset.modificationDate ?? asset.creationDate ?? Date()
+        case .custom:
+            date = asset.creationDate ?? Date()
+        }
+        
+        return formatter.string(from: date)
     }
 }
 

@@ -1,5 +1,28 @@
 import UIKit
 
+/// UILabel 扩展，支持文字内边距
+class PaddedLabel: UILabel {
+    var textInsets = UIEdgeInsets.zero
+    
+    override func drawText(in rect: CGRect) {
+        super.drawText(in: rect.inset(by: textInsets))
+    }
+    
+    override var intrinsicContentSize: CGSize {
+        let size = super.intrinsicContentSize
+        return CGSize(width: size.width + textInsets.left + textInsets.right,
+                     height: size.height + textInsets.top + textInsets.bottom)
+    }
+}
+
+/// 委托协议，用于获取当前滚动位置对应的照片信息
+protocol CustomVerticalScrollIndicatorDelegate: AnyObject {
+    /// 获取当前滚动位置对应的照片信息
+    /// - Parameter scrollProgress: 滚动进度 (0.0 到 1.0)
+    /// - Returns: 显示的文字内容
+    func scrollIndicator(_ indicator: CustomVerticalScrollIndicator, textForScrollProgress scrollProgress: CGFloat) -> String?
+}
+
 /// 自定义垂直滚动指示器
 class CustomVerticalScrollIndicator: UIView {
     //轨道
@@ -24,11 +47,30 @@ class CustomVerticalScrollIndicator: UIView {
         return view
     }()
     
+    /// 文字标签
+    private let textLabel: PaddedLabel = {
+        let label = PaddedLabel()
+        label.font = UIFont.systemFont(ofSize: 12, weight: .medium)
+        label.textColor = .white
+        label.textAlignment = .right
+        label.backgroundColor = UIColor.black.withAlphaComponent(0.6)
+        label.layer.cornerRadius = 4
+        label.layer.masksToBounds = true
+        label.textInsets = UIEdgeInsets(top: 2, left: 6, bottom: 2, right: 6)
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.alpha = 0.0
+        return label
+    }()
+    
     private let indicatorWidth: CGFloat = 60
     
     // 约束属性
     private var indicatorTopConstraint: NSLayoutConstraint?
     private var indicatorHeightConstraint: NSLayoutConstraint?
+    private var textLabelTopConstraint: NSLayoutConstraint?
+    
+    // 委托
+    weak var delegate: CustomVerticalScrollIndicatorDelegate?
     
     // 滚动相关属性
     private weak var scrollView: UIScrollView?
@@ -70,6 +112,7 @@ class CustomVerticalScrollIndicator: UIView {
     private func setupUI() {
         addSubview(trackView)
         addSubview(indicatorView)
+        addSubview(textLabel)
         setupIndicatorGesture()
     }
     
@@ -148,6 +191,14 @@ class CustomVerticalScrollIndicator: UIView {
             indicatorView.trailingAnchor.constraint(equalTo: trailingAnchor),
             indicatorTopConstraint!,
             indicatorHeightConstraint!
+        ])
+        
+        // 文字标签约束
+        textLabelTopConstraint = textLabel.centerYAnchor.constraint(equalTo: indicatorView.centerYAnchor)
+        
+        NSLayoutConstraint.activate([
+            textLabel.trailingAnchor.constraint(equalTo: indicatorView.leadingAnchor, constant: -8),
+            textLabelTopConstraint!
         ])
     }
     
@@ -316,12 +367,27 @@ class CustomVerticalScrollIndicator: UIView {
         
         // 更新指示器位置
         indicatorTopConstraint?.constant = indicatorOffset
+        
+        // 更新文字内容
+        updateTextContent(for: scrollProgress)
+    }
+    
+    /// 更新文字内容
+    private func updateTextContent(for scrollProgress: CGFloat) {
+        guard let text = delegate?.scrollIndicator(self, textForScrollProgress: scrollProgress) else {
+            textLabel.alpha = 0.0
+            return
+        }
+        
+        textLabel.text = text
+        textLabel.alpha = 1.0
     }
     
     /// 显示指示器
     func show() {
         UIView.animate(withDuration: 0.3) {
             self.alpha = 1.0
+            self.textLabel.alpha = 1.0
         }
     }
     
@@ -329,6 +395,7 @@ class CustomVerticalScrollIndicator: UIView {
     func hide() {
         UIView.animate(withDuration: 0.3) {
             self.alpha = 0.0
+            self.textLabel.alpha = 0.0
         }
     }
     
