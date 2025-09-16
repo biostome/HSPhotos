@@ -114,6 +114,9 @@ class PhotoGridView: UIView {
     // 当前排序方式
     public var sortPreference: PhotoSortPreference = .custom
     
+    // 当前相册引用，用于获取自定义排序数据
+    public var currentCollection: PHAssetCollection?
+    
     private var columns: Int = PhotoGridConstants.defaultColumns
     
     
@@ -433,6 +436,31 @@ class PhotoGridView: UIView {
         return selectedMap[photo.localIdentifier].map { $0 + 1 }
     }
     
+    /// 获取照片在自定义排序中的下标位置
+    /// - Parameter photo: 要查询的照片
+    /// - Returns: 自定义排序中的下标位置（从0开始），如果未找到则返回-1
+    private func getCustomOrderIndex(for photo: PHAsset) -> Int {
+        guard let collection = currentCollection else { 
+            print("❌ getCustomOrderIndex: currentCollection is nil")
+            return -1 
+        }
+        
+        // 获取自定义排序数据
+        let customOrder = PhotoOrder.order(for: collection)
+        print("🔍 getCustomOrderIndex: customOrder count = \(customOrder.count)")
+        print("🔍 getCustomOrderIndex: looking for photo = \(photo.localIdentifier)")
+        
+        // 在自定义排序中查找照片的位置
+        if let index = customOrder.firstIndex(of: photo.localIdentifier) {
+            print("✅ getCustomOrderIndex: found at index = \(index)")
+            return index
+        }
+        
+        // 如果在自定义排序中未找到，返回-1表示不在自定义排序中
+        print("❌ getCustomOrderIndex: photo not found in custom order")
+        return -1
+    }
+    
     func sort() throws -> [PHAsset] {
         guard selectedPhotos.count > 1 else {
             throw PhotoSortError.notEnoughPhotosSelected
@@ -556,7 +584,19 @@ extension PhotoGridView: UICollectionViewDataSource {
         let isSelected = selectedMap[photo.localIdentifier] != nil
         let selectionIndex = index(of: photo)
         let isAnchor = anchorPhoto?.localIdentifier == photo.localIdentifier
-        cell.configure(with: photo, isSelected: isSelected, selectionIndex: selectionIndex, selectionMode: selectionMode, index: indexPath.item, isAnchor: isAnchor)
+        
+        // 根据排序方式决定显示的下标
+        let displayIndex: Int
+        switch sortPreference {
+        case .creationDate, .modificationDate, .recentDate:
+            // 时间排序：显示自定义排序的下标
+            displayIndex = getCustomOrderIndex(for: photo)
+        case .custom:
+            // 自定义排序：显示顺序下标
+            displayIndex = indexPath.item
+        }
+        
+        cell.configure(with: photo, isSelected: isSelected, selectionIndex: selectionIndex, selectionMode: selectionMode, index: displayIndex, isAnchor: isAnchor)
         return cell
     }
 }

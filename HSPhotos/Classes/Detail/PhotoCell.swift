@@ -194,7 +194,12 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         
         // 设置索引标签
         if let index = index {
-            indexLabel.text = "\(index + 1)"
+            if index >= 0 {
+                indexLabel.text = "\(index + 1)"
+            } else {
+                // 如果index为-1，表示不在自定义排序中，显示"-"
+                indexLabel.text = "-"
+            }
         }
 
         // 设置锚点标识

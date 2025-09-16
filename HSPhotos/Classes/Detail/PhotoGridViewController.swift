@@ -138,6 +138,8 @@ class PhotoGridViewController: UIViewController {
         
         // 同步初始排序偏好到 PhotoGridView
         gridView.sortPreference = sortPreference
+        // 设置当前相册引用
+        gridView.currentCollection = collection
     }
     
     private func setupUI() {
@@ -263,6 +265,19 @@ class PhotoGridViewController: UIViewController {
         assets.enumerateObjects { asset, _, _ in
             newAssets.append(asset)
         }
+        
+        // 检查是否有自定义排序数据，如果没有则创建默认的
+        let customOrder = PhotoOrder.order(for: collection)
+        if customOrder.isEmpty && !newAssets.isEmpty {
+            print("📝 初始化自定义排序数据")
+            PhotoOrder.set(order: newAssets, for: collection)
+        }
+        
+        // 如果是自定义排序，应用自定义排序
+        if sortPreference == .custom {
+            newAssets = PhotoOrder.apply(to: newAssets, for: collection)
+        }
+        
         self.assets = newAssets
     }
     
@@ -278,6 +293,12 @@ class PhotoGridViewController: UIViewController {
         assets.enumerateObjects { asset, _, _ in
             newAssets.append(asset)
         }
+        
+        // 如果是自定义排序，应用自定义排序
+        if preference == .custom {
+            newAssets = PhotoOrder.apply(to: newAssets, for: collection)
+        }
+        
         self.assets = newAssets
         
         // 同步排序偏好到 PhotoGridView
@@ -301,6 +322,8 @@ class PhotoGridViewController: UIViewController {
                 let duration = Date().timeIntervalSince(start)
                 loadingAlert.dismiss(animated: true) {
                     if success {
+                        // 保存自定义排序数据到 UserDefaults
+                        PhotoOrder.set(order: sortedAssets, for: self.collection)
                         let message = "排序耗时: \(String(format: "%.2f", duration))秒"
                         self.syncSuccess(message: message)
                     } else {
