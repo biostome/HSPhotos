@@ -46,3 +46,8 @@ class MainViewController: UIViewController {
     
 }
 
+
+#Preview {
+    MainViewController()
+}
+

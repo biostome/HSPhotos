@@ -89,6 +89,41 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         return label
     }()
     
+    private lazy var headerLabel: UILabel = {
+        let label = UILabel()
+        label.text = "首"
+        label.textColor = UIColor.white
+        label.backgroundColor = UIColor.systemRed
+        label.font = UIFont.systemFont(ofSize: 12, weight: .bold)
+        label.textAlignment = .center
+        label.layer.cornerRadius = 8
+        label.clipsToBounds = true
+        label.isHidden = true
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
+    private lazy var headerBorderView: UIView = {
+        let view = UIView()
+        view.backgroundColor = .clear
+        view.layer.borderWidth = 3
+        view.layer.borderColor = UIColor.systemRed.cgColor
+        view.layer.cornerRadius = 4
+        view.isHidden = true
+        view.translatesAutoresizingMaskIntoConstraints = false
+        return view
+    }()
+    
+    private lazy var topLabelsStackView: UIStackView = {
+        let stackView = UIStackView()
+        stackView.axis = .horizontal
+        stackView.spacing = 4
+        stackView.alignment = .center
+        stackView.distribution = .fill
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        return stackView
+    }()
+    
     // MARK: - 数据缓存
     private var currentAssetID: String?
     private var requestID: PHImageRequestID?
@@ -132,7 +167,12 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         ])
         
         contentView.addSubview(indexLabel)
-        contentView.addSubview(anchorLabel)
+        contentView.addSubview(topLabelsStackView)
+        contentView.addSubview(headerBorderView)
+        
+        // 将锚点和首图label添加到StackView
+        topLabelsStackView.addArrangedSubview(anchorLabel)
+        topLabelsStackView.addArrangedSubview(headerLabel)
         
         // 设置约束
         NSLayoutConstraint.activate([
@@ -141,10 +181,19 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
             indexLabel.widthAnchor.constraint(equalToConstant: 32),
             indexLabel.heightAnchor.constraint(equalToConstant: 20),
             
-            anchorLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 6),
-            anchorLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 6),
+            topLabelsStackView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 6),
+            topLabelsStackView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 6),
+            
             anchorLabel.widthAnchor.constraint(equalToConstant: 20),
-            anchorLabel.heightAnchor.constraint(equalToConstant: 20)
+            anchorLabel.heightAnchor.constraint(equalToConstant: 20),
+            
+            headerLabel.widthAnchor.constraint(equalToConstant: 20),
+            headerLabel.heightAnchor.constraint(equalToConstant: 20),
+            
+            headerBorderView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            headerBorderView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            headerBorderView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            headerBorderView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
         ])
     }
     
@@ -171,7 +220,7 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
     }()
 
     // MARK: - 配置
-    func configure(with asset: PHAsset, isSelected: Bool, selectionIndex: Int?, selectionMode: PhotoSelectionMode, index: Int? = nil, isAnchor: Bool = false) {
+    func configure(with asset: PHAsset, isSelected: Bool, selectionIndex: Int?, selectionMode: PhotoSelectionMode, index: Int? = nil, isAnchor: Bool = false, isHeader: Bool = false) {
         
         // 保存当前资产
         currentAsset = asset
@@ -204,6 +253,10 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
 
         // 设置锚点标识
         anchorLabel.isHidden = !isAnchor
+        
+        // 设置首图标识
+        headerLabel.isHidden = !isHeader
+        headerBorderView.isHidden = !isHeader
         switch selectionMode {
         case .none:
             selectionOverlay.isHidden = true
@@ -232,6 +285,8 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         selectionOverlay.isHidden = true
         selectionNumberLabel.isHidden = true
         anchorLabel.isHidden = true
+        headerLabel.isHidden = true
+        headerBorderView.isHidden = true
         currentAssetID = nil
         currentAsset = nil
         if let requestID = requestID {

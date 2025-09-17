@@ -278,6 +278,9 @@ class PhotoGridViewController: UIViewController {
             newAssets = PhotoOrder.apply(to: newAssets, for: collection)
         }
         
+        // 清理无效的首图数据
+        PhotoHeaderService.shared.cleanupInvalidHeaders(for: collection)
+        
         self.assets = newAssets
     }
     

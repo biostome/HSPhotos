@@ -59,6 +59,51 @@ class PhotoOrder {
         UserDefaults.standard.clear(order: collection)
     }
     
+    // MARK: - 首图管理扩展
+    
+    /// 获取首图列表
+    /// - Parameter collection: 相册
+    /// - Returns: 首图标识符数组
+    static func getHeaderAssets(for collection: PHAssetCollection) -> [String] {
+        let key = "header_photos_\(collection.localIdentifier)"
+        return UserDefaults.standard.stringArray(forKey: key) ?? []
+    }
+    
+    /// 设置首图列表
+    /// - Parameters:
+    ///   - headerIdentifiers: 首图标识符数组
+    ///   - collection: 相册
+    static func setHeaderAssets(_ headerIdentifiers: [String], for collection: PHAssetCollection) {
+        let key = "header_photos_\(collection.localIdentifier)"
+        UserDefaults.standard.set(headerIdentifiers, forKey: key)
+    }
+    
+    /// 获取段落折叠状态
+    /// - Parameter collection: 相册
+    /// - Returns: 段落折叠状态字典
+    static func getParagraphCollapseStates(for collection: PHAssetCollection) -> [String: Bool] {
+        let key = "paragraph_collapse_\(collection.localIdentifier)"
+        return UserDefaults.standard.dictionary(forKey: key) as? [String: Bool] ?? [:]
+    }
+    
+    /// 设置段落折叠状态
+    /// - Parameters:
+    ///   - states: 段落折叠状态字典
+    ///   - collection: 相册
+    static func setParagraphCollapseStates(_ states: [String: Bool], for collection: PHAssetCollection) {
+        let key = "paragraph_collapse_\(collection.localIdentifier)"
+        UserDefaults.standard.set(states, forKey: key)
+    }
+    
+    /// 清除首图相关数据
+    /// - Parameter collection: 相册
+    static func clearHeaderData(for collection: PHAssetCollection) {
+        let headerKey = "header_photos_\(collection.localIdentifier)"
+        let collapseKey = "paragraph_collapse_\(collection.localIdentifier)"
+        UserDefaults.standard.removeObject(forKey: headerKey)
+        UserDefaults.standard.removeObject(forKey: collapseKey)
+    }
+    
     /// 应用自定义排序到照片数组
     /// - Parameters:
     ///   - assets: 原始照片数组
