@@ -133,13 +133,14 @@ class PhotoGridViewController: UIViewController {
         navigationItem.largeTitleDisplayMode = .never
 
         setupUI()
-        loadPhoto()
-        setupUndoManager()
         
         // 同步初始排序偏好到 PhotoGridView
         gridView.sortPreference = sortPreference
-        // 设置当前相册引用
+        // 设置当前相册引用（必须在loadPhoto之前设置）
         gridView.currentCollection = collection
+        
+        loadPhoto()
+        setupUndoManager()
     }
     
     private func setupUI() {
