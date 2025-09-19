@@ -118,10 +118,8 @@ class PhotoGridView: UIView {
         return selectedMap.values.sorted { $0.0 < $1.0 }.map { $0.1 }
     }
     
-    // 照片ID -> (选中顺序, 资产)
+    // 照片ID -> (选中序号(从1开始且连续), 资产)
     private var selectedMap: [String: (Int, PHAsset)] = [:]
-    // 选中顺序计数器（用于分配递增的选中顺序）
-    private var selectionSequence: Int = 0
     
     // 当前锚点照片
     private var anchorPhoto: PHAsset?
@@ -380,30 +378,41 @@ class PhotoGridView: UIView {
     }
     
     func toggle(photo: PHAsset) {
-        if selectedMap[photo.localIdentifier] != nil {
+        if let (removedRank, _) = selectedMap[photo.localIdentifier] {
+            // 取消选择：移除并将比它序号大的全部-1，保持连续
             selectedMap.removeValue(forKey: photo.localIdentifier)
+            for (id, value) in selectedMap {
+                if value.0 > removedRank {
+                    selectedMap[id] = (value.0 - 1, value.1)
+                }
+            }
             // 如果删除的是锚点照片，清除锚点
             if anchorPhoto?.localIdentifier == photo.localIdentifier {
                 anchorPhoto = nil
             }
         } else {
-            selectedMap[photo.localIdentifier] = (selectionSequence, photo)
-            selectionSequence += 1
+            // 新选：序号为当前数量+1
+            let newRank = selectedMap.count + 1
+            selectedMap[photo.localIdentifier] = (newRank, photo)
         }
     }
     
     /// 选择指定范围的照片（根据方向分配顺序）
-    private func selectRange(from startIndex: Int, to endIndex: Int) {
+    private func selectRange(from startIndex: Int, to endIndex: Int, reverse: Bool) {
         var indexPaths: [IndexPath] = []
-        // 根据方向决定追加顺序
-        let indices = startIndex <= endIndex ? Array(startIndex...endIndex) : Array(endIndex...startIndex).reversed()
+        // 归一化范围并根据方向决定追加顺序
+        let low = min(startIndex, endIndex)
+        let high = max(startIndex, endIndex)
+        let baseRange = low...high
+        let indices: [Int] = reverse ? Array(baseRange.reversed()) : Array(baseRange)
+        var nextRank = selectedMap.count + 1
         
         for index in indices {
             guard index < visibleAssets.count else { continue }
             let asset = visibleAssets[index]
             if selectedMap[asset.localIdentifier] == nil {
-                selectedMap[asset.localIdentifier] = (selectionSequence, asset)
-                selectionSequence += 1
+                selectedMap[asset.localIdentifier] = (nextRank, asset)
+                nextRank += 1
                 indexPaths.append(IndexPath(item: index, section: 0))
                 delegate?.photoGridView(self, didSelectItemAt: IndexPath(item: index, section: 0))
                 delegate?.photoGridView(self, didSelectItemAt: asset)
@@ -445,13 +454,7 @@ class PhotoGridView: UIView {
         }
     }
     
-    func index(of photo: PHAsset) -> Int? {
-        guard let (order, _) = selectedMap[photo.localIdentifier] else { return nil }
-        let rank = selectedMap.values.reduce(0) { partialResult, entry in
-            return partialResult + (entry.0 < order ? 1 : 0)
-        } + 1
-        return rank
-    }
+    // 已不需要按次序计算排名，直接从 selectedMap 中读取
     
     /// 获取照片在自定义排序中的下标位置
     /// - Parameter photo: 要查询的照片
@@ -512,7 +515,7 @@ class PhotoGridView: UIView {
         selectedStart = nil
         selectedEnd = nil
         anchorPhoto = nil  // 清除锚点
-        selectionSequence = 0
+        // 清空后序号从1开始（由 selectedMap.count + 1 决定），无需重置计数器
         delegate?.photoGridView(self, didSelectedItems: selectedPhotos)
         collectionView.reloadData()
     }
@@ -609,7 +612,7 @@ extension PhotoGridView: UICollectionViewDataSource {
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "PhotoCell", for: indexPath) as! PhotoCell
         let photo = visibleAssets[indexPath.item]
         let isSelected = selectedMap[photo.localIdentifier] != nil
-        let selectionIndex = index(of: photo)
+        let selectionIndex = selectedMap[photo.localIdentifier]?.0
         let isAnchor = anchorPhoto?.localIdentifier == photo.localIdentifier
         
         // 检查是否为首图
@@ -734,7 +737,8 @@ extension PhotoGridView {
                 deselectRange(from: startIndex, to: endIndex)
             } else {
                 // 范围内有未选中的照片，执行选中
-                selectRange(from: startIndex, to: endIndex)
+                let reverse = selectedEnd! < selectedStart!
+                selectRange(from: startIndex, to: endIndex, reverse: reverse)
             }
             
             selectedStart = nil
