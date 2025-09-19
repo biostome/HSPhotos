@@ -113,11 +113,15 @@ class PhotoGridView: UIView {
     private var hasStartedSelection = false
     private let selectionThreshold: CGFloat = 10.0 // 开始选中的阈值
     
-    // 选中照片
-    private var selectedPhotos: [PHAsset] = []
+    // 选中照片（根据选中顺序排序的派生数组）
+    private var selectedPhotos: [PHAsset] {
+        return selectedMap.values.sorted { $0.0 < $1.0 }.map { $0.1 }
+    }
     
-    // 本地ID -> 数组索引，用于快速查找选中照片在数组中的位置
-    private var selectedMap: [String: Int] = [:]
+    // 照片ID -> (选中顺序, 资产)
+    private var selectedMap: [String: (Int, PHAsset)] = [:]
+    // 选中顺序计数器（用于分配递增的选中顺序）
+    private var selectionSequence: Int = 0
     
     // 当前锚点照片
     private var anchorPhoto: PHAsset?
@@ -376,20 +380,15 @@ class PhotoGridView: UIView {
     }
     
     func toggle(photo: PHAsset) {
-        if let index = selectedMap[photo.localIdentifier] {
-            selectedPhotos.remove(at: index)
+        if selectedMap[photo.localIdentifier] != nil {
             selectedMap.removeValue(forKey: photo.localIdentifier)
-            // 更新后续索引
-            for i in index..<selectedPhotos.count {
-                selectedMap[selectedPhotos[i].localIdentifier] = i
-            }
             // 如果删除的是锚点照片，清除锚点
             if anchorPhoto?.localIdentifier == photo.localIdentifier {
                 anchorPhoto = nil
             }
         } else {
-            selectedPhotos.append(photo)
-            selectedMap[photo.localIdentifier] = selectedPhotos.count - 1
+            selectedMap[photo.localIdentifier] = (selectionSequence, photo)
+            selectionSequence += 1
         }
     }
     
@@ -403,8 +402,8 @@ class PhotoGridView: UIView {
             guard index < visibleAssets.count else { continue }
             let asset = visibleAssets[index]
             if selectedMap[asset.localIdentifier] == nil {
-                selectedPhotos.append(asset)
-                selectedMap[asset.localIdentifier] = selectedPhotos.count - 1
+                selectedMap[asset.localIdentifier] = (selectionSequence, asset)
+                selectionSequence += 1
                 indexPaths.append(IndexPath(item: index, section: 0))
                 delegate?.photoGridView(self, didSelectItemAt: IndexPath(item: index, section: 0))
                 delegate?.photoGridView(self, didSelectItemAt: asset)
@@ -447,7 +446,11 @@ class PhotoGridView: UIView {
     }
     
     func index(of photo: PHAsset) -> Int? {
-        return selectedMap[photo.localIdentifier].map { $0 + 1 }
+        guard let (order, _) = selectedMap[photo.localIdentifier] else { return nil }
+        let rank = selectedMap.values.reduce(0) { partialResult, entry in
+            return partialResult + (entry.0 < order ? 1 : 0)
+        } + 1
+        return rank
     }
     
     /// 获取照片在自定义排序中的下标位置
@@ -505,11 +508,11 @@ class PhotoGridView: UIView {
     }
     
     func clearSelected() {
-        selectedPhotos.removeAll()
         selectedMap.removeAll()
         selectedStart = nil
         selectedEnd = nil
         anchorPhoto = nil  // 清除锚点
+        selectionSequence = 0
         delegate?.photoGridView(self, didSelectedItems: selectedPhotos)
         collectionView.reloadData()
     }
@@ -577,15 +580,10 @@ class PhotoGridView: UIView {
                 assetsToDeleteSet.contains(asset.localIdentifier)
             }
             
-            // 从选中列表中移除并更新索引
+            // 从选中列表中移除
             for asset in assetsToDelete {
-                if let selectedIndex = self.selectedMap[asset.localIdentifier] {
-                    self.selectedPhotos.remove(at: selectedIndex)
+                if self.selectedMap[asset.localIdentifier] != nil {
                     self.selectedMap.removeValue(forKey: asset.localIdentifier)
-                    // 更新后续索引
-                    for i in selectedIndex..<self.selectedPhotos.count {
-                        self.selectedMap[self.selectedPhotos[i].localIdentifier] = i
-                    }
                     // 如果删除的是锚点照片，清除锚点
                     if self.anchorPhoto?.localIdentifier == asset.localIdentifier {
                         self.anchorPhoto = nil
