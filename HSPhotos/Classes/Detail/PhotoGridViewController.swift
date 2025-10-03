@@ -198,8 +198,8 @@ class PhotoGridViewController: UIViewController {
     }
     
     private func updateUndoRedoButtons() {
-        undoBarButton.isEnabled = UndoManagerService.shared.canUndo
-        redoBarButton.isEnabled = UndoManagerService.shared.canRedo
+        undoBarButton.isEnabled = canUndo
+        redoBarButton.isEnabled = canRedo
     }
     
     @objc private func undoAction() {
@@ -257,6 +257,9 @@ class PhotoGridViewController: UIViewController {
         case .copy(let sourceAssets, let destinationCollection):
             // 重做复制操作，再次将照片复制到目标相册
             PhotoChangesService.copy(assets: sourceAssets, to: destinationCollection, completion: completion)
+        case .paste(let assets, let collection, let index):
+            // 重做粘贴操作，再次将照片粘贴到相册
+            PhotoChangesService.paste(assets: assets, into: collection, at: index, completion: completion)
         }
     }
     
@@ -328,6 +331,12 @@ class PhotoGridViewController: UIViewController {
                     if success {
                         // 保存自定义排序数据到 UserDefaults
                         PhotoOrder.set(order: sortedAssets, for: self.collection)
+                        
+                        // 记录撤销操作
+                        let originalAssets = self.assets // 保存原始顺序用于撤销
+                        let undoAction = UndoAction.sort(collection: self.collection, originalAssets: originalAssets, sortedAssets: sortedAssets)
+                        self.addAction(undoAction)
+                        
                         let message = "排序耗时: \(String(format: "%.2f", duration))秒"
                         self.syncSuccess(message: message)
                     } else {
@@ -363,8 +372,8 @@ class PhotoGridViewController: UIViewController {
             let title = success ? "粘贴成功" : "粘贴失败"
             let message = success ? "已粘贴到相册" : (error ?? "无法粘贴到相册")
             self.showAlert(title: title, message: message)
-            if success { 
-                self.loadPhoto() 
+            if success {
+                self.loadPhoto()
                 // 更新按钮状态
                 self.updateUndoRedoButtons()
             }
@@ -441,6 +450,10 @@ class PhotoGridViewController: UIViewController {
             guard let self = self else { return }
             loadingAlert.dismiss(animated: true) {
                 if success {
+                    // 记录撤销操作
+                    let undoAction = UndoAction.move(sourceCollection: self.collection, destinationCollection: destinationCollection, assets: assets)
+                    self.addAction(undoAction)
+                    
                     let count = assets.count
                     let message = count == 1 ? "已移动 1 张照片" : "已移动 \(count) 张照片"
                     self.showAlert(title: "移动成功", message: message)
@@ -480,6 +493,10 @@ class PhotoGridViewController: UIViewController {
             PhotoChangesService.delete(assets: selectedAssets, for: self.collection) { success, error in
                 loadingAlert.dismiss(animated: true) {
                     if success {
+                        // 记录撤销操作
+                        let undoAction = UndoAction.delete(collection: self.collection, assets: selectedAssets)
+                        self.addAction(undoAction)
+                        
                         let count = assets.count
                         let message = count == 1 ? "已删除 1 张照片" : "已删除 \(count) 张照片"
                         self.showAlert(title: "删除成功", message: message)
@@ -508,6 +525,20 @@ class PhotoGridViewController: UIViewController {
     
     private func updateNavigationBar() {
         selectBarButton.menu = createSelectionMenu()
+    }
+    
+    // MARK: - Undo Manager Helper Methods
+    
+    private func addAction(_ action: UndoAction) {
+        UndoManagerService.shared.addUndoAction(action)
+    }
+    
+    private var canUndo: Bool {
+        return UndoManagerService.shared.canUndo
+    }
+    
+    private var canRedo: Bool {
+        return UndoManagerService.shared.canRedo
     }
     
     // MARK: - Menu Creation Methods
@@ -603,6 +634,14 @@ class PhotoGridViewController: UIViewController {
         showAlert(title: "同步失败", message: message)
     }
     
+    // MARK: - Helper Methods
+    
+    private func showAlert(title: String, message: String) {
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "确定", style: .default))
+        present(alert, animated: true)
+    }
+    
     // MARK: - Search Methods
     
     private func performSearch(with text: String) {
@@ -635,13 +674,70 @@ extension PhotoGridViewController: PhotoGridViewDelegate {
     func photoGridView(_ photoGridView: PhotoGridView, didSetAnchor asset: PHAsset) {
         updateOperationMenu()
     }
-}
-
-extension PhotoGridViewController {
-    func showAlert(title: String, message: String) {
-        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "确定", style: .default, handler: nil))
-        present(alert, animated: true, completion: nil)
+    
+    func photoGridView(_ photoGridView: PhotoGridView, didPasteAssets assets: [PHAsset], after: PHAsset) {
+        guard let index = self.assets.firstIndex(of: after) else {
+            showAlert(title: "粘贴失败", message: "无法找到目标照片")
+            return
+        }
+        
+        let insertIndex = index + 1
+        
+        let loadingAlert = UIAlertController(title: "粘贴中", message: "正在粘贴照片...", preferredStyle: .alert)
+        present(loadingAlert, animated: true)
+        
+        // 先更新本地数据和自定义排序
+        var newAssets = self.assets
+        newAssets.insert(contentsOf: assets, at: insertIndex)
+        
+        // 立即更新自定义排序数据
+        PhotoOrder.set(order: newAssets, for: self.collection)
+        
+        // 提交到系统相册
+        PHPhotoLibrary.shared().performChanges({
+            guard let changeRequest = PHAssetCollectionChangeRequest(for: self.collection) else {
+                return
+            }
+            changeRequest.insertAssets(assets as NSArray, at: IndexSet(integer: insertIndex))
+        }, completionHandler: { [weak self] success, error in
+            DispatchQueue.main.async {
+                loadingAlert.dismiss(animated: true)
+                
+                guard let self = self else { return }
+                
+                if success {
+                    // 直接使用我们维护的顺序，不重新加载
+                    self.assets = newAssets
+                    
+                    // 记录撤销操作
+                    let undoAction = UndoAction.paste(assets: assets, into: self.collection, at: insertIndex)
+                    self.addAction(undoAction)
+                    
+                    // 清除选中状态
+                    self.gridView.clearSelected()
+                    
+                    // 重要：粘贴操作后，自动切换到自定义排序模式
+                    if self.sortPreference != .custom {
+                        self.sortPreference = .custom
+                        // 同步排序偏好到 PhotoGridView
+                        self.gridView.sortPreference = .custom
+                        // 保存排序偏好
+                        PhotoSortPreference.custom.set(preference: self.collection)
+                        // 更新排序按钮菜单
+                        self.sortButton.menu = self.createSortMenu()
+                    }
+                    
+                    self.showAlert(title: "粘贴成功", message: "已成功粘贴 \(assets.count) 张照片")
+                } else {
+                    // 失败时回滚自定义排序数据
+                    PhotoOrder.set(order: self.assets, for: self.collection)
+                    self.showAlert(title: "粘贴失败", message: error?.localizedDescription ?? "无法粘贴照片")
+                }
+                
+                self.updateUndoRedoButtons()
+                self.updateOperationMenu()
+            }
+        })
     }
 }
 

@@ -37,6 +37,7 @@ protocol PhotoGridViewDelegate {
     func photoGridView(_ photoGridView: PhotoGridView, didDeselectItemAt asset: PHAsset)
     func photoGridView(_ photoGridView: PhotoGridView, didSelectedItems assets: [PHAsset])
     func photoGridView(_ photoGridView: PhotoGridView, didSetAnchor asset: PHAsset)
+    func photoGridView(_ photoGridView: PhotoGridView, didPasteAssets assets: [PHAsset], after: PHAsset)
 }
 
 extension PhotoGridViewDelegate {
@@ -889,6 +890,14 @@ extension PhotoGridView {
                 actions.append(setHeaderAction)
             }
             
+            // 粘贴到此后方操作
+            if let pasteAssets = AssetPasteboard.assetsFromPasteboard(), !pasteAssets.isEmpty {
+                let pasteAction = UIAction(title: "粘贴到此后方", image: UIImage(systemName: "doc.on.clipboard")) { [weak self] _ in
+                    self?.handlePasteToAfter(asset: asset, assets: pasteAssets)
+                }
+                actions.append(pasteAction)
+            }
+            
             return UIMenu(title: "", children: actions)
         }
     }
@@ -938,6 +947,12 @@ extension PhotoGridView: CustomVerticalScrollIndicatorDelegate {
         }
         
         return formatter.string(from: date)
+    }
+    
+    // MARK: - 粘贴到此后方处理
+    private func handlePasteToAfter(asset: PHAsset, assets: [PHAsset]) {
+        guard let collection = currentCollection else { return }
+        self.delegate?.photoGridView(self, didPasteAssets: assets, after: asset)
     }
 }
 
