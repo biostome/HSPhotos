@@ -162,6 +162,7 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
             
             selectionNumberLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 6),
             selectionNumberLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -6),
+            selectionNumberLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 20),
             selectionNumberLabel.heightAnchor.constraint(equalToConstant: 20)
         ])
         
@@ -177,7 +178,7 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         NSLayoutConstraint.activate([
             indexLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -2),
             indexLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 2),
-            indexLabel.widthAnchor.constraint(equalToConstant: 32),
+            indexLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 32),
             indexLabel.heightAnchor.constraint(equalToConstant: 20),
             
             topLabelsStackView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 6),
