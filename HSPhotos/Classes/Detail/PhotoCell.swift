@@ -162,7 +162,6 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
             
             selectionNumberLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 6),
             selectionNumberLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -6),
-            selectionNumberLabel.widthAnchor.constraint(equalToConstant: 20),
             selectionNumberLabel.heightAnchor.constraint(equalToConstant: 20)
         ])
         
