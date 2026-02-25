@@ -36,6 +36,12 @@ class PhotoGridViewController: UIViewController {
         return button
     }()
     
+    private lazy var menuBarButton: UIBarButtonItem = {
+        let button = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), style: .plain, target: nil, action: nil)
+        button.menu = createOperationMenu()
+        return button
+    }()
+    
     private lazy var undoBarButton: UIBarButtonItem = {
         let button = UIBarButtonItem(
             image: UIImage(systemName: "arrow.uturn.left"),
@@ -76,7 +82,7 @@ class PhotoGridViewController: UIViewController {
     private lazy var sortButton: UIButton = {
         // iOS 26 新增的 Glass 样式
         var config = UIButton.Configuration.glass()
-        config.image = UIImage(systemName: "line.3.horizontal.decrease")
+        config.image = UIImage(systemName: "arrow.up.arrow.down")
         config.baseForegroundColor = UIColor.systemBlue
         config.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10)
         
@@ -171,24 +177,16 @@ class PhotoGridViewController: UIViewController {
             gridView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
         
-        // 初始状态下的按钮顺序
-        navigationItem.rightBarButtonItems = [selectBarButton, redoBarButton, undoBarButton]
+        // 初始状态下的按钮顺序，包含menuBarButton
+        navigationItem.rightBarButtonItems = [selectBarButton, menuBarButton, redoBarButton, undoBarButton]
         
         // 设置 gridView 的滚动委托
         gridView.scrollDelegate = self
         
-        view.addSubview(menuButton)
-        NSLayoutConstraint.activate([
-            menuButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
-            menuButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            menuButton.heightAnchor.constraint(equalToConstant: 44),
-            menuButton.widthAnchor.constraint(equalToConstant: 60)
-        ])
-        
         view.addSubview(sortButton)
         NSLayoutConstraint.activate([
-            sortButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
-            sortButton.trailingAnchor.constraint(equalTo: menuButton.leadingAnchor, constant: -12),
+            sortButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
+            sortButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
             sortButton.heightAnchor.constraint(equalToConstant: 44),
             sortButton.widthAnchor.constraint(equalToConstant: 44)
         ])
@@ -536,16 +534,12 @@ class PhotoGridViewController: UIViewController {
             // 进入多选模式
             setSelectionMode(.multiple)
             selectBarButton.title = "取消"
-            // 关闭全屏侧滑返回
-            navigationController?.interactivePopGestureRecognizer?.isEnabled = false
         } else {
             // 退出选择模式
             setSelectionMode(.none)
             selectBarButton.title = "选择"
             // 同时关闭范围选择
             toggleRangeSelection(forceOff: true)
-            // 开启全屏侧滑返回
-            navigationController?.interactivePopGestureRecognizer?.isEnabled = true
         }
         updateNavigationBar()
     }
@@ -575,11 +569,11 @@ class PhotoGridViewController: UIViewController {
         if selectionMode == .none {
             selectBarButton.title = "选择"
             // 退出选择模式时，隐藏范围选择开关
-            navigationItem.rightBarButtonItems = [selectBarButton, redoBarButton, undoBarButton]
+            navigationItem.rightBarButtonItems = [selectBarButton, menuBarButton, redoBarButton, undoBarButton]
         } else {
             selectBarButton.title = "取消"
-            // 进入选择模式时，显示范围选择开关
-            navigationItem.rightBarButtonItems = [selectBarButton, rangeSwitchItem, redoBarButton, undoBarButton]
+            // 进入选择模式时，显示范围选择开关，与menuBarButton交换位置
+            navigationItem.rightBarButtonItems = [selectBarButton, rangeSwitchItem, menuBarButton, redoBarButton, undoBarButton]
         }
     }
     
