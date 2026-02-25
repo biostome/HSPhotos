@@ -568,12 +568,12 @@ class PhotoGridViewController: UIViewController {
         // 根据选择模式更新按钮状态
         if selectionMode == .none {
             selectBarButton.title = "选择"
-            // 退出选择模式时，隐藏范围选择开关
-            navigationItem.rightBarButtonItems = [selectBarButton, menuBarButton, redoBarButton, undoBarButton]
+            // 退出选择模式时，隐藏范围选择开关，使用动画效果
+            navigationItem.setRightBarButtonItems([selectBarButton, menuBarButton, redoBarButton, undoBarButton], animated: true)
         } else {
             selectBarButton.title = "取消"
-            // 进入选择模式时，显示范围选择开关，与menuBarButton交换位置
-            navigationItem.rightBarButtonItems = [selectBarButton, rangeSwitchItem, menuBarButton, redoBarButton, undoBarButton]
+            // 进入选择模式时，显示范围选择开关，与menuBarButton交换位置，使用动画效果
+            navigationItem.setRightBarButtonItems([selectBarButton, rangeSwitchItem, menuBarButton, redoBarButton, undoBarButton], animated: true)
         }
     }
     
