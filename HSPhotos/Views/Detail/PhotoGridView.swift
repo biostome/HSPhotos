@@ -630,7 +630,11 @@ extension PhotoGridView: UICollectionViewDataSource {
             displayIndex = indexPath.item
         }
         
-        cell.configure(with: photo, isSelected: isSelected, selectionIndex: selectionIndex, selectionMode: selectionMode, index: displayIndex, isAnchor: isAnchor, isHeader: isHeader)
+        // 检查是否为范围选择的开始或结束位置
+        let isStart = selectedStart == indexPath.item
+        let isEnd = selectedEnd == indexPath.item
+        
+        cell.configure(with: photo, isSelected: isSelected, selectionIndex: selectionIndex, selectionMode: selectionMode, index: displayIndex, isAnchor: isAnchor, isHeader: isHeader, isStart: isStart, isEnd: isEnd)
         return cell
     }
 }

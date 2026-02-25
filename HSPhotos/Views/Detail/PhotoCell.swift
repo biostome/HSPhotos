@@ -103,6 +103,34 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         return label
     }()
     
+    private lazy var startLabel: UILabel = {
+        let label = UILabel()
+        label.text = "始"
+        label.textColor = UIColor.white
+        label.backgroundColor = UIColor.systemGreen
+        label.font = UIFont.systemFont(ofSize: 12, weight: .bold)
+        label.textAlignment = .center
+        label.layer.cornerRadius = 8
+        label.clipsToBounds = true
+        label.isHidden = true
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
+    private lazy var endLabel: UILabel = {
+        let label = UILabel()
+        label.text = "末"
+        label.textColor = UIColor.white
+        label.backgroundColor = UIColor.systemPurple
+        label.font = UIFont.systemFont(ofSize: 12, weight: .bold)
+        label.textAlignment = .center
+        label.layer.cornerRadius = 8
+        label.clipsToBounds = true
+        label.isHidden = true
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
     private lazy var headerBorderView: UIView = {
         let view = UIView()
         view.backgroundColor = .clear
@@ -170,9 +198,11 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         contentView.addSubview(topLabelsStackView)
         contentView.addSubview(headerBorderView)
         
-        // 将锚点和首图label添加到StackView
+        // 将锚点、首图、开始和结束label添加到StackView
         topLabelsStackView.addArrangedSubview(anchorLabel)
         topLabelsStackView.addArrangedSubview(headerLabel)
+        topLabelsStackView.addArrangedSubview(startLabel)
+        topLabelsStackView.addArrangedSubview(endLabel)
         
         // 设置约束
         NSLayoutConstraint.activate([
@@ -189,6 +219,12 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
             
             headerLabel.widthAnchor.constraint(equalToConstant: 20),
             headerLabel.heightAnchor.constraint(equalToConstant: 20),
+            
+            startLabel.widthAnchor.constraint(equalToConstant: 20),
+            startLabel.heightAnchor.constraint(equalToConstant: 20),
+            
+            endLabel.widthAnchor.constraint(equalToConstant: 20),
+            endLabel.heightAnchor.constraint(equalToConstant: 20),
             
             headerBorderView.topAnchor.constraint(equalTo: contentView.topAnchor),
             headerBorderView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
@@ -220,7 +256,7 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
     }()
 
     // MARK: - 配置
-    func configure(with asset: PHAsset, isSelected: Bool, selectionIndex: Int?, selectionMode: PhotoSelectionMode, index: Int? = nil, isAnchor: Bool = false, isHeader: Bool = false) {
+    func configure(with asset: PHAsset, isSelected: Bool, selectionIndex: Int?, selectionMode: PhotoSelectionMode, index: Int? = nil, isAnchor: Bool = false, isHeader: Bool = false, isStart: Bool = false, isEnd: Bool = false) {
         
         // 保存当前资产
         currentAsset = asset
@@ -257,6 +293,10 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         // 设置首图标识
         headerLabel.isHidden = !isHeader
         headerBorderView.isHidden = !isHeader
+        
+        // 设置范围选择的开始和结束标记
+        startLabel.isHidden = !isStart
+        endLabel.isHidden = !isEnd
         switch selectionMode {
         case .none:
             selectionOverlay.isHidden = true
