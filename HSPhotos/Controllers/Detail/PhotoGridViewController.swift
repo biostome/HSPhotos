@@ -574,8 +574,11 @@ class PhotoGridViewController: UIViewController {
             navigationItem.rightBarButtonItems = [selectBarButton, redoBarButton, undoBarButton]
         } else {
             selectBarButton.title = "取消"
+            // 添加固定宽度的空格
+            let space = UIBarButtonItem(barButtonSystemItem: .fixedSpace, target: nil, action: nil)
+            space.width = 20 // 空格宽度
             // 进入选择模式时，显示范围选择开关
-            navigationItem.rightBarButtonItems = [selectBarButton, rangeSwitchItem, redoBarButton, undoBarButton]
+            navigationItem.rightBarButtonItems = [selectBarButton, space, rangeSwitchItem, redoBarButton, undoBarButton]
         }
     }
     
