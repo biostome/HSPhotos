@@ -54,15 +54,14 @@ class PhotoGridViewController: UIViewController {
     }()
     
     private lazy var menuButton: UIButton = {
+        // iOS 26 新增的 Glass 样式
+        var config = UIButton.Configuration.glass()
+        config.image = UIImage(systemName: "ellipsis")
+        config.baseForegroundColor = UIColor.systemBlue
+        config.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10)
+        
         let button = UIButton(type: .custom)
-        button.setImage(UIImage(systemName: "ellipsis"), for: .normal)
-        button.setTitleColor(.white, for: .normal)
-        button.layer.cornerRadius = 44 / 2.0
-        button.backgroundColor = .white
-        button.layer.shadowColor = UIColor.lightGray.cgColor
-        button.layer.shadowRadius = 44 / 2.0
-        button.layer.shadowOffset = CGSize(width: 0, height: 4)
-        button.layer.shadowOpacity = 0.5
+        button.configuration = config
         button.translatesAutoresizingMaskIntoConstraints = false
         button.showsMenuAsPrimaryAction = true
         button.menu = createOperationMenu()
@@ -70,15 +69,14 @@ class PhotoGridViewController: UIViewController {
     }()
     
     private lazy var sortButton: UIButton = {
+        // iOS 26 新增的 Glass 样式
+        var config = UIButton.Configuration.glass()
+        config.image = UIImage(systemName: "arrow.up.arrow.down")
+        config.baseForegroundColor = UIColor.systemBlue
+        config.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10)
+        
         let button = UIButton(type: .custom)
-        button.setImage(UIImage(systemName: "arrow.up.arrow.down"), for: .normal)
-        button.tintColor = UIColor.systemBlue
-        button.layer.cornerRadius = 44 / 2.0
-        button.backgroundColor = .white
-        button.layer.shadowColor = UIColor.lightGray.cgColor
-        button.layer.shadowRadius = 44 / 2.0
-        button.layer.shadowOffset = CGSize(width: 0, height: 4)
-        button.layer.shadowOpacity = 0.5
+        button.configuration = config
         button.translatesAutoresizingMaskIntoConstraints = false
         button.showsMenuAsPrimaryAction = true
         button.menu = createSortMenu()
