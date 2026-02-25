@@ -188,7 +188,7 @@ class PhotoGridView: UIView {
         addSubview(verticalScrollIndicator)
         
         NSLayoutConstraint.activate([
-            verticalScrollIndicator.topAnchor.constraint(equalTo: topAnchor),
+            verticalScrollIndicator.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor),
             verticalScrollIndicator.trailingAnchor.constraint(equalTo: trailingAnchor),
             verticalScrollIndicator.widthAnchor.constraint(equalToConstant: 30),
             verticalScrollIndicator.bottomAnchor.constraint(equalTo: safeAreaLayoutGuide.bottomAnchor)

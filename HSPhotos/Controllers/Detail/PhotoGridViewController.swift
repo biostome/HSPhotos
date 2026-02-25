@@ -131,6 +131,10 @@ class PhotoGridViewController: UIViewController {
         
         // 禁用大标题模式
         navigationItem.largeTitleDisplayMode = .never
+        
+        // 允许视图内容延伸到四周
+        extendedLayoutIncludesOpaqueBars = true
+        edgesForExtendedLayout = .all
 
         setupUI()
         
@@ -158,7 +162,7 @@ class PhotoGridViewController: UIViewController {
             searchTextField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
             searchTextField.heightAnchor.constraint(equalToConstant: 44),
             
-            gridView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor),
+            gridView.topAnchor.constraint(equalTo: view.topAnchor),
             gridView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             gridView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             gridView.bottomAnchor.constraint(equalTo: view.bottomAnchor),

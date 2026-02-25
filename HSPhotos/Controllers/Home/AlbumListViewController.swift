@@ -44,6 +44,10 @@ class AlbumListViewController: UIViewController {
         navigationController?.navigationBar.largeTitleTextAttributes = [
             .foregroundColor: UIColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0)
         ]
+        
+        // 允许视图内容延伸到四周
+        extendedLayoutIncludesOpaqueBars = true
+        edgesForExtendedLayout = .all
     }
     
     private func checkPermissionStatus() {
