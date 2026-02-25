@@ -568,26 +568,14 @@ class PhotoGridViewController: UIViewController {
     
     private func updateNavigationBar() {
         // 根据选择模式更新按钮状态
-        UIView.animate(withDuration: 0.3) { [weak self] in
-            guard let self = self else { return }
-            
-            if self.selectionMode == .none {
-                self.selectBarButton.title = "选择"
-                // 退出选择模式时，隐藏范围选择开关
-                self.navigationItem.rightBarButtonItems = [self.selectBarButton, self.redoBarButton, self.undoBarButton]
-                // 清空左侧按钮
-                self.navigationItem.leftBarButtonItem = nil
-            } else {
-                self.selectBarButton.title = "取消"
-                // 将选择按钮和范围选择开关分开
-                // 右侧按钮组：选择/取消按钮
-                self.navigationItem.rightBarButtonItems = [self.selectBarButton, self.redoBarButton, self.undoBarButton]
-                // 左侧按钮组：范围选择开关
-                self.navigationItem.leftBarButtonItem = self.rangeSwitchItem
-            }
-            
-            // 强制导航栏布局更新
-            self.navigationController?.navigationBar.layoutIfNeeded()
+        if selectionMode == .none {
+            selectBarButton.title = "选择"
+            // 退出选择模式时，隐藏范围选择开关
+            navigationItem.rightBarButtonItems = [selectBarButton, redoBarButton, undoBarButton]
+        } else {
+            selectBarButton.title = "取消"
+            // 进入选择模式时，显示范围选择开关
+            navigationItem.rightBarButtonItems = [selectBarButton, rangeSwitchItem, redoBarButton, undoBarButton]
         }
     }
     
