@@ -58,22 +58,7 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         return label
     }()
     
-    private lazy var indexLabel: UILabel = {
-        let label = UILabel()
-        
-        // 使用更轻量级的背景效果替代虚化
-        label.backgroundColor = UIColor.black.withAlphaComponent(0.5)
-        label.textColor = .white
-        label.font = UIFont.systemFont(ofSize: 12, weight: .semibold)
-        label.textAlignment = .center
-        label.layer.cornerRadius = 10
-        label.clipsToBounds = true
-        
-        label.translatesAutoresizingMaskIntoConstraints = false
-        label.alpha = 1
-        
-        return label
-    }()
+
     
     private lazy var anchorLabel: UILabel = {
         let label = UILabel()
@@ -166,7 +151,6 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
             selectionNumberLabel.heightAnchor.constraint(equalToConstant: 20)
         ])
         
-        contentView.addSubview(indexLabel)
         contentView.addSubview(topLabelsStackView)
         contentView.addSubview(headerBorderView)
         
@@ -176,19 +160,14 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         
         // 设置约束
         NSLayoutConstraint.activate([
-            indexLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -2),
-            indexLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 2),
-            indexLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 32),
-            indexLabel.heightAnchor.constraint(equalToConstant: 20),
-            
             topLabelsStackView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 6),
             topLabelsStackView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 6),
             
-            anchorLabel.widthAnchor.constraint(equalToConstant: 20),
-            anchorLabel.heightAnchor.constraint(equalToConstant: 20),
+            anchorLabel.widthAnchor.constraint(equalToConstant: 24),
+            anchorLabel.heightAnchor.constraint(equalToConstant: 24),
             
-            headerLabel.widthAnchor.constraint(equalToConstant: 20),
-            headerLabel.heightAnchor.constraint(equalToConstant: 20),
+            headerLabel.widthAnchor.constraint(equalToConstant: 24),
+            headerLabel.heightAnchor.constraint(equalToConstant: 24),
             
             headerBorderView.topAnchor.constraint(equalTo: contentView.topAnchor),
             headerBorderView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
@@ -241,15 +220,7 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
             }
         }
         
-        // 设置索引标签
-        if let index = index {
-            if index >= 0 {
-                indexLabel.text = "\(index + 1)"
-            } else {
-                // 如果index为-1，表示不在自定义排序中，显示"-"
-                indexLabel.text = "-"
-            }
-        }
+
 
         // 设置锚点标识
         anchorLabel.isHidden = !isAnchor
