@@ -208,8 +208,11 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         if currentAssetID != asset.localIdentifier {
             currentAssetID = asset.localIdentifier
 
-            let targetSize = CGSize(width: bounds.width * UIScreen.main.scale,
-                                    height: bounds.height * UIScreen.main.scale)
+            // 计算合理的目标大小，避免请求过大的图片
+            // 使用最小边长100作为基准，确保图片质量的同时避免过大
+            let maxDimension: CGFloat = 200
+            let targetSize = CGSize(width: maxDimension * UIScreen.main.scale,
+                                    height: maxDimension * UIScreen.main.scale)
             requestID = PHImageManager.default().requestImage(
                 for: asset,
                 targetSize: targetSize,
