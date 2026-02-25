@@ -31,7 +31,7 @@ class PhotoGridViewController: UIViewController {
     }()
     
     private lazy var cancelSelectBarButton: UIBarButtonItem = {
-        let button = UIBarButtonItem(title: "取消", style: .plain, target: self, action: #selector(toggleSelectionMode))
+        let button = UIBarButtonItem(image: UIImage(systemName: "xmark"), style: .plain, target: self, action: #selector(toggleSelectionMode))
         return button
     }()
     
