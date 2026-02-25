@@ -630,19 +630,7 @@ extension PhotoGridView: UICollectionViewDataSource {
             displayIndex = indexPath.item
         }
         
-        // 范围选择标记逻辑
-        let isRangeStart = selectedStart == indexPath.item
-        let isRangeEnd = selectedEnd == indexPath.item
-        
-        cell.configure(with: photo, 
-                       isSelected: isSelected, 
-                       selectionIndex: selectionIndex,
-                       selectionMode: selectionMode,
-                       index: displayIndex,
-                       isAnchor: isAnchor,
-                       isHeader: isHeader,
-                       isRangeStart: isRangeStart,
-                       isRangeEnd: isRangeEnd)
+        cell.configure(with: photo, isSelected: isSelected, selectionIndex: selectionIndex, selectionMode: selectionMode, index: displayIndex, isAnchor: isAnchor, isHeader: isHeader)
         return cell
     }
 }
@@ -726,8 +714,8 @@ extension PhotoGridView {
                 self.delegate?.photoGridView(self, didSelectItemAt: photo)
                 self.delegate?.photoGridView(self, didSelectedItems: self.selectedPhotos)
             }
-        } else if selectedEnd == nil {
-            // 第二次点击：设置结束位置，选中范围
+        } else {
+            // 第二次点击：设置结束位置，选中范围，重设范围
             selectedEnd = index
             
             // 检查范围内是否所有照片都已选中，如果是则执行反选，否则执行选中
@@ -748,29 +736,13 @@ extension PhotoGridView {
             if allSelected {
                 // 范围内所有照片都已选中，执行反选
                 deselectRange(from: startIndex, to: endIndex)
-                selectedStart = nil
-                selectedEnd = nil
             } else {
                 // 范围内有未选中的照片，执行选中
                 let reverse = selectedEnd! < selectedStart!
                 selectRange(from: startIndex, to: endIndex, reverse: reverse)
-                // 保留selectedStart和selectedEnd，以便显示范围标记
             }
-        } else {
-            // 第三次点击：清空之前所有已显示的标记，然后将当前点击的照片标记为新的"始"标记
-            collectionView.performBatchUpdates {
-                // 清空之前的选择
-                clearSelected()
-                // 选中当前照片
-                toggle(photo: photo)
-                collectionView.reloadItems(at: [indexPath])
-            } completion: { _ in
-                self.delegate?.photoGridView(self, didSelectItemAt: indexPath)
-                self.delegate?.photoGridView(self, didSelectItemAt: photo)
-                self.delegate?.photoGridView(self, didSelectedItems: self.selectedPhotos)
-            }
-            // 设置新的开始位置
-            selectedStart = index
+            
+            selectedStart = nil
             selectedEnd = nil
         }
     }

@@ -30,6 +30,11 @@ class PhotoGridViewController: UIViewController {
         return button
     }()
     
+    private lazy var cancelSelectBarButton: UIBarButtonItem = {
+        let button = UIBarButtonItem(title: "取消", style: .plain, target: self, action: #selector(toggleSelectionMode))
+        return button
+    }()
+    
     private lazy var rangeSwitchItem: UIBarButtonItem = {
         let button = UIBarButtonItem(image: UIImage(systemName: "checkmark.seal"), style: .plain, target: self, action: #selector(toggleRangeSelection))
         button.tag = 0 // 0: 未选中, 1: 选中
@@ -533,13 +538,15 @@ class PhotoGridViewController: UIViewController {
         if selectionMode == .none {
             // 进入多选模式
             setSelectionMode(.multiple)
-            selectBarButton.title = "取消"
+            // 关闭全屏侧滑返回
+            navigationController?.interactivePopGestureRecognizer?.isEnabled = false
         } else {
             // 退出选择模式
             setSelectionMode(.none)
-            selectBarButton.title = "选择"
             // 同时关闭范围选择
             toggleRangeSelection(forceOff: true)
+            // 开启全屏侧滑返回
+            navigationController?.interactivePopGestureRecognizer?.isEnabled = true
         }
         updateNavigationBar()
     }
@@ -567,13 +574,11 @@ class PhotoGridViewController: UIViewController {
     private func updateNavigationBar() {
         // 根据选择模式更新按钮状态
         if selectionMode == .none {
-            selectBarButton.title = "选择"
-            // 退出选择模式时，隐藏范围选择开关，使用动画效果
+            // 退出选择模式时，显示选择按钮，隐藏范围选择开关，使用动画效果
             navigationItem.setRightBarButtonItems([selectBarButton, menuBarButton, redoBarButton, undoBarButton], animated: true)
         } else {
-            selectBarButton.title = "取消"
-            // 进入选择模式时，显示范围选择开关，与menuBarButton交换位置，使用动画效果
-            navigationItem.setRightBarButtonItems([selectBarButton, rangeSwitchItem, menuBarButton, redoBarButton, undoBarButton], animated: true)
+            // 进入选择模式时，显示取消按钮和范围选择开关，使用动画效果
+            navigationItem.setRightBarButtonItems([cancelSelectBarButton, rangeSwitchItem, menuBarButton, redoBarButton, undoBarButton], animated: true)
         }
     }
     
