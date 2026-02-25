@@ -76,7 +76,7 @@ class PhotoGridViewController: UIViewController {
     private lazy var sortButton: UIButton = {
         // iOS 26 新增的 Glass 样式
         var config = UIButton.Configuration.glass()
-        config.image = UIImage(systemName: "arrow.up.arrow.down")
+        config.image = UIImage(systemName: "line.3.horizontal.decrease")
         config.baseForegroundColor = UIColor.systemBlue
         config.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10)
         
@@ -179,16 +179,16 @@ class PhotoGridViewController: UIViewController {
         
         view.addSubview(menuButton)
         NSLayoutConstraint.activate([
-            menuButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
-            menuButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+            menuButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            menuButton.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
             menuButton.heightAnchor.constraint(equalToConstant: 44),
             menuButton.widthAnchor.constraint(equalToConstant: 60)
         ])
         
         view.addSubview(sortButton)
         NSLayoutConstraint.activate([
-            sortButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
-            sortButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            sortButton.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            sortButton.trailingAnchor.constraint(equalTo: menuButton.leadingAnchor, constant: -12),
             sortButton.heightAnchor.constraint(equalToConstant: 44),
             sortButton.widthAnchor.constraint(equalToConstant: 44)
         ])
