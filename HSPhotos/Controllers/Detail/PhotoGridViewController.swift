@@ -536,12 +536,16 @@ class PhotoGridViewController: UIViewController {
             // 进入多选模式
             setSelectionMode(.multiple)
             selectBarButton.title = "取消"
+            // 关闭全屏侧滑返回
+            navigationController?.interactivePopGestureRecognizer?.isEnabled = false
         } else {
             // 退出选择模式
             setSelectionMode(.none)
             selectBarButton.title = "选择"
             // 同时关闭范围选择
             toggleRangeSelection(forceOff: true)
+            // 开启全屏侧滑返回
+            navigationController?.interactivePopGestureRecognizer?.isEnabled = true
         }
         updateNavigationBar()
     }
