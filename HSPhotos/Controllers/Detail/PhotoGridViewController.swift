@@ -26,8 +26,13 @@ class PhotoGridViewController: UIViewController {
     }()
     
     private lazy var selectBarButton: UIBarButtonItem = {
-        let button = UIBarButtonItem(title: "选择", style: .plain, target: self, action: nil)
-        button.menu = createSelectionMenu()
+        let button = UIBarButtonItem(title: "选择", style: .plain, target: self, action: #selector(toggleSelectionMode))
+        return button
+    }()
+    
+    private lazy var rangeSwitchItem: UIBarButtonItem = {
+        let button = UIBarButtonItem(image: UIImage(systemName: "checkmark.seal"), style: .plain, target: self, action: #selector(toggleRangeSelection))
+        button.tag = 0 // 0: 未选中, 1: 选中
         return button
     }()
     
@@ -166,7 +171,7 @@ class PhotoGridViewController: UIViewController {
             gridView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
         
-        // 将撤销和重做按钮放在导航栏右侧，选择按钮的左侧
+        // 初始状态下的按钮顺序
         navigationItem.rightBarButtonItems = [selectBarButton, redoBarButton, undoBarButton]
         
         // 设置 gridView 的滚动委托
@@ -525,8 +530,53 @@ class PhotoGridViewController: UIViewController {
         selectionMode = mode
     }
     
+    /// 切换选择模式：点击进入多选模式，再次点击退出选择模式
+    @objc private func toggleSelectionMode() {
+        if selectionMode == .none {
+            // 进入多选模式
+            setSelectionMode(.multiple)
+            selectBarButton.title = "取消"
+        } else {
+            // 退出选择模式
+            setSelectionMode(.none)
+            selectBarButton.title = "选择"
+            // 同时关闭范围选择
+            toggleRangeSelection(forceOff: true)
+        }
+        updateNavigationBar()
+    }
+    
+    /// 切换范围选择开关
+    @objc private func toggleRangeSelection(forceOff: Bool = false) {
+        let isCurrentlyOn = rangeSwitchItem.tag == 1
+        let shouldTurnOn = !isCurrentlyOn && !forceOff
+        
+        if shouldTurnOn {
+            // 打开范围选择
+            rangeSwitchItem.image = UIImage(systemName: "checkmark.seal.fill")
+            rangeSwitchItem.tag = 1
+            setSelectionMode(.range)
+        } else {
+            // 关闭范围选择
+            rangeSwitchItem.image = UIImage(systemName: "checkmark.seal")
+            rangeSwitchItem.tag = 0
+            if selectionMode == .range {
+                setSelectionMode(.multiple)
+            }
+        }
+    }
+    
     private func updateNavigationBar() {
-        selectBarButton.menu = createSelectionMenu()
+        // 根据选择模式更新按钮状态
+        if selectionMode == .none {
+            selectBarButton.title = "选择"
+            // 退出选择模式时，隐藏范围选择开关
+            navigationItem.rightBarButtonItems = [selectBarButton, redoBarButton, undoBarButton]
+        } else {
+            selectBarButton.title = "取消"
+            // 进入选择模式时，显示范围选择开关
+            navigationItem.rightBarButtonItems = [selectBarButton, rangeSwitchItem, redoBarButton, undoBarButton]
+        }
     }
     
     // MARK: - Undo Manager Helper Methods
@@ -544,25 +594,6 @@ class PhotoGridViewController: UIViewController {
     }
     
     // MARK: - Menu Creation Methods
-    
-    private func createSelectionMenu() -> UIMenu {
-        let multipleSelectAction = UIAction(title: "多选", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
-            self?.setSelectionMode(.multiple)
-        }
-        
-        let rangeSelectAction = UIAction(title: "范围选择", image: UIImage(systemName: "square.grid.2x2")) { [weak self] _ in
-            self?.setSelectionMode(.range)
-        }
-        
-        let cancelAction = UIAction(title: "取消", image: UIImage(systemName: "xmark"), attributes: .destructive) { [weak self] _ in
-            self?.setSelectionMode(.none)
-        }
-        
-        return UIMenu(
-            title: "选择模式",
-            children: [multipleSelectAction, rangeSelectAction, cancelAction]
-        )
-    }
     
     private func createSortMenu() -> UIMenu {
         let creationDateAction = UIAction(
