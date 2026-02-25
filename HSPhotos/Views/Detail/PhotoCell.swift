@@ -103,7 +103,19 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         return label
     }()
     
-    private lazy var startLabel: UILabel = {
+    private lazy var headerBorderView: UIView = {
+        let view = UIView()
+        view.backgroundColor = .clear
+        view.layer.borderWidth = 3
+        view.layer.borderColor = UIColor.systemRed.cgColor
+        view.layer.cornerRadius = 4
+        view.isHidden = true
+        view.translatesAutoresizingMaskIntoConstraints = false
+        return view
+    }()
+    
+    // 范围选择标记：始
+    private lazy var rangeStartLabel: UILabel = {
         let label = UILabel()
         label.text = "始"
         label.textColor = UIColor.white
@@ -117,7 +129,8 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         return label
     }()
     
-    private lazy var endLabel: UILabel = {
+    // 范围选择标记：末
+    private lazy var rangeEndLabel: UILabel = {
         let label = UILabel()
         label.text = "末"
         label.textColor = UIColor.white
@@ -129,17 +142,6 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         label.isHidden = true
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
-    }()
-    
-    private lazy var headerBorderView: UIView = {
-        let view = UIView()
-        view.backgroundColor = .clear
-        view.layer.borderWidth = 3
-        view.layer.borderColor = UIColor.systemRed.cgColor
-        view.layer.cornerRadius = 4
-        view.isHidden = true
-        view.translatesAutoresizingMaskIntoConstraints = false
-        return view
     }()
     
     private lazy var topLabelsStackView: UIStackView = {
@@ -198,11 +200,11 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         contentView.addSubview(topLabelsStackView)
         contentView.addSubview(headerBorderView)
         
-        // 将锚点、首图、开始和结束label添加到StackView
+        // 将锚点、首图和范围标记label添加到StackView
         topLabelsStackView.addArrangedSubview(anchorLabel)
         topLabelsStackView.addArrangedSubview(headerLabel)
-        topLabelsStackView.addArrangedSubview(startLabel)
-        topLabelsStackView.addArrangedSubview(endLabel)
+        topLabelsStackView.addArrangedSubview(rangeStartLabel)
+        topLabelsStackView.addArrangedSubview(rangeEndLabel)
         
         // 设置约束
         NSLayoutConstraint.activate([
@@ -220,11 +222,11 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
             headerLabel.widthAnchor.constraint(equalToConstant: 20),
             headerLabel.heightAnchor.constraint(equalToConstant: 20),
             
-            startLabel.widthAnchor.constraint(equalToConstant: 20),
-            startLabel.heightAnchor.constraint(equalToConstant: 20),
+            rangeStartLabel.widthAnchor.constraint(equalToConstant: 20),
+            rangeStartLabel.heightAnchor.constraint(equalToConstant: 20),
             
-            endLabel.widthAnchor.constraint(equalToConstant: 20),
-            endLabel.heightAnchor.constraint(equalToConstant: 20),
+            rangeEndLabel.widthAnchor.constraint(equalToConstant: 20),
+            rangeEndLabel.heightAnchor.constraint(equalToConstant: 20),
             
             headerBorderView.topAnchor.constraint(equalTo: contentView.topAnchor),
             headerBorderView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
@@ -256,7 +258,7 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
     }()
 
     // MARK: - 配置
-    func configure(with asset: PHAsset, isSelected: Bool, selectionIndex: Int?, selectionMode: PhotoSelectionMode, index: Int? = nil, isAnchor: Bool = false, isHeader: Bool = false, isStart: Bool = false, isEnd: Bool = false) {
+    func configure(with asset: PHAsset, isSelected: Bool, selectionIndex: Int?, selectionMode: PhotoSelectionMode, index: Int? = nil, isAnchor: Bool = false, isHeader: Bool = false, isRangeStart: Bool = false, isRangeEnd: Bool = false) {
         
         // 保存当前资产
         currentAsset = asset
@@ -294,9 +296,9 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         headerLabel.isHidden = !isHeader
         headerBorderView.isHidden = !isHeader
         
-        // 设置范围选择的开始和结束标记
-        startLabel.isHidden = !isStart
-        endLabel.isHidden = !isEnd
+        // 设置范围选择标记
+        rangeStartLabel.isHidden = !isRangeStart
+        rangeEndLabel.isHidden = !isRangeEnd
         switch selectionMode {
         case .none:
             selectionOverlay.isHidden = true
@@ -327,6 +329,8 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         anchorLabel.isHidden = true
         headerLabel.isHidden = true
         headerBorderView.isHidden = true
+        rangeStartLabel.isHidden = true
+        rangeEndLabel.isHidden = true
         currentAssetID = nil
         currentAsset = nil
         if let requestID = requestID {
