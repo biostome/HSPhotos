@@ -135,6 +135,7 @@ class PhotoGridViewController: UIViewController {
     
     private var lastContentOffsetY: CGFloat = 0
     private var searchTextFieldTopConstraint: NSLayoutConstraint!
+    private let backgroundGradientLayer = CAGradientLayer()
     
     init(collection: PHAssetCollection) {
         self.collection = collection
@@ -172,7 +173,21 @@ class PhotoGridViewController: UIViewController {
     }
     
     private func setupUI() {
-        view.backgroundColor = UIColor(red: 0.96, green: 0.96, blue: 0.97, alpha: 1.0)
+        // 配置渐变背景
+        let lightColors: [CGColor] = [
+            UIColor(red: 0.91, green: 0.96, blue: 1.00, alpha: 1.0).cgColor,
+            UIColor(red: 0.97, green: 0.98, blue: 0.96, alpha: 1.0).cgColor,
+            UIColor(red: 0.99, green: 0.98, blue: 0.94, alpha: 1.0).cgColor
+        ]
+        let darkColors: [CGColor] = [
+            UIColor(red: 0.11, green: 0.11, blue: 0.12, alpha: 1.0).cgColor,
+            UIColor(red: 0.08, green: 0.08, blue: 0.09, alpha: 1.0).cgColor,
+            UIColor(red: 0.06, green: 0.06, blue: 0.07, alpha: 1.0).cgColor
+        ]
+        let isDark = traitCollection.userInterfaceStyle == .dark
+        backgroundGradientLayer.colors = isDark ? darkColors : lightColors
+        backgroundGradientLayer.locations = [0.0, 0.45, 1.0]
+        view.layer.insertSublayer(backgroundGradientLayer, at: 0)
         
         view.addSubview(gridView)
         view.addSubview(searchTextField)
@@ -214,6 +229,31 @@ class PhotoGridViewController: UIViewController {
             DispatchQueue.main.async {
                 self.updateUndoRedoButtons()
             }
+        }
+    }
+    
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // 更新渐变层的frame
+        backgroundGradientLayer.frame = view.bounds
+    }
+    
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        // 当界面模式改变时，更新渐变背景颜色
+        if traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) {
+            let lightColors: [CGColor] = [
+                UIColor(red: 0.91, green: 0.96, blue: 1.00, alpha: 1.0).cgColor,
+                UIColor(red: 0.97, green: 0.98, blue: 0.96, alpha: 1.0).cgColor,
+                UIColor(red: 0.99, green: 0.98, blue: 0.94, alpha: 1.0).cgColor
+            ]
+            let darkColors: [CGColor] = [
+                UIColor(red: 0.11, green: 0.11, blue: 0.12, alpha: 1.0).cgColor,
+                UIColor(red: 0.08, green: 0.08, blue: 0.09, alpha: 1.0).cgColor,
+                UIColor(red: 0.06, green: 0.06, blue: 0.07, alpha: 1.0).cgColor
+            ]
+            let isDark = traitCollection.userInterfaceStyle == .dark
+            backgroundGradientLayer.colors = isDark ? darkColors : lightColors
         }
     }
     

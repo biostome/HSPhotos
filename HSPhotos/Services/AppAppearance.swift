@@ -28,12 +28,12 @@ class AppAppearance {
         
         // 配置大标题样式
         navigationBarAppearance.largeTitleTextAttributes = [
-            .foregroundColor: UIColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0)
+            .foregroundColor: UIColor.label
         ]
         
         // 配置普通标题样式
         navigationBarAppearance.titleTextAttributes = [
-            .foregroundColor: UIColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0)
+            .foregroundColor: UIColor.label
         ]
         
         // 应用配置到所有导航栏
