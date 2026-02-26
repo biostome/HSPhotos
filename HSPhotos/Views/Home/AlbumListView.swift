@@ -25,9 +25,9 @@ class AlbumListView: UIView{
     
     private let collectionView: UICollectionView = {
         let layout = UICollectionViewFlowLayout()
-        layout.minimumInteritemSpacing = 12
-        layout.minimumLineSpacing = 16
-        layout.sectionInset = UIEdgeInsets(top: 16, left: 16, bottom: 16, right: 16)
+        layout.minimumInteritemSpacing = 8
+        layout.minimumLineSpacing = 12
+        layout.sectionInset = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
         
         let collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
         collectionView.backgroundColor = UIColor(red: 0.96, green: 0.96, blue: 0.97, alpha: 1.0) // #f5f5f7
@@ -79,7 +79,7 @@ extension AlbumListView: UICollectionViewDataSource {
 // MARK: - UICollectionViewDelegateFlowLayout
 extension AlbumListView: UICollectionViewDelegateFlowLayout {
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
-        let width = (collectionView.bounds.width - 44) / 2 // 2列，左右各16px间距，中间12px间距
+        let width = (collectionView.bounds.width - 32) / 2 // 2列，左右各12px间距，中间8px间距
         let height = width // 正方形
         return CGSize(width: width, height: height)
     }
