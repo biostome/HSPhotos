@@ -80,7 +80,7 @@ extension AlbumListView: UICollectionViewDataSource {
 extension AlbumListView: UICollectionViewDelegateFlowLayout {
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
         let width = (collectionView.bounds.width - 44) / 2 // 2列，左右各16px间距，中间12px间距
-        let height = width * 1.3 // 增加高度以容纳相册名称
+        let height = width // 正方形
         return CGSize(width: width, height: height)
     }
 }

@@ -68,22 +68,22 @@ class AlbumCell: UICollectionViewCell {
         // Layout - 左图右文
         NSLayoutConstraint.activate([
             // 图片视图：左侧，固定宽高
-            imageView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
-            imageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
-            imageView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12),
+            imageView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
+            imageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
+            imageView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
             imageView.widthAnchor.constraint(equalTo: imageView.heightAnchor), // 正方形
             
             // 标题标签：右侧，垂直居中
-            titleLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
-            titleLabel.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 16),
-            titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
-            titleLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor, constant: -10),
+            titleLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
+            titleLabel.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 12),
+            titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8),
+            titleLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor, constant: -5),
             
             // 计数标签：右侧，标题下方
-            countLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 8),
-            countLabel.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 16),
-            countLabel.heightAnchor.constraint(equalToConstant: 20),
-            countLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 30)
+            countLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
+            countLabel.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 12),
+            countLabel.heightAnchor.constraint(equalToConstant: 16),
+            countLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 24)
         ])
     }
 
