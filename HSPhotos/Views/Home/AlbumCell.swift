@@ -38,53 +38,50 @@ class AlbumCell: UICollectionViewCell {
         contentView.layer.borderWidth = 0.5
         contentView.layer.borderColor = UIColor(white: 0.9, alpha: 1.0).cgColor
         
-        // Image View
+        // Image View（先添加，在底层）
         imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
-        imageView.layer.cornerRadius = 8
+        imageView.layer.cornerRadius = 12
         imageView.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(imageView)
         
-        // Count Label
-        countLabel.backgroundColor = .white
-        countLabel.textColor = UIColor(white: 0.2, alpha: 1.0)
-        countLabel.font = .systemFont(ofSize: 13, weight: .semibold)
-        countLabel.textAlignment = .center
-        countLabel.layer.cornerRadius = 10
-        countLabel.clipsToBounds = true
-        countLabel.layer.borderWidth = 0.5
-        countLabel.layer.borderColor = UIColor(white: 0.9, alpha: 1.0).cgColor
-        countLabel.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(countLabel)
-        
-        // Title Label
-        titleLabel.textColor = UIColor(white: 0.2, alpha: 1.0)
+        // Title Label（后添加，在中层）
+        titleLabel.textColor = .white
         titleLabel.font = .systemFont(ofSize: 15, weight: .medium)
         titleLabel.numberOfLines = 2
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(titleLabel)
         
-        // Layout - 上Label下图片
+        // Count Label（最后添加，在上层）
+        countLabel.backgroundColor = UIColor(white: 0, alpha: 0.5)
+        countLabel.textColor = .white
+        countLabel.font = .systemFont(ofSize: 13, weight: .semibold)
+        countLabel.textAlignment = .center
+        countLabel.layer.cornerRadius = 10
+        countLabel.clipsToBounds = true
+        countLabel.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(countLabel)
+        
+        // Layout - Label浮在图片上方
         NSLayoutConstraint.activate([
-            // 标题标签：上方，左侧对齐
+            // 图片视图：填充整个Cell
+            imageView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            imageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            imageView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            
+            // 标题标签：左上角，浮在图片上方
             titleLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
             titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
             titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8),
             titleLabel.heightAnchor.constraint(equalToConstant: 20),
             
-            // 计数标签：标题下方，左侧对齐
-            countLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
+            // 计数标签：左下角，浮在图片上方
+            countLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
             countLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
             countLabel.heightAnchor.constraint(equalToConstant: 16),
-            countLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 24),
-            
-            // 图片视图：下方，填充到边缘
-            imageView.topAnchor.constraint(equalTo: countLabel.bottomAnchor, constant: 8),
-            imageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            imageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            imageView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-            imageView.heightAnchor.constraint(equalTo: imageView.widthAnchor) // 正方形
+            countLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 24)
         ])
     }
 
