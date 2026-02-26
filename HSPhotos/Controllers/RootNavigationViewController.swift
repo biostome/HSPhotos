@@ -29,4 +29,12 @@ class RootNavigationViewController: UINavigationController {
             .foregroundColor: UIColor.label
         ]
     }
+    
+    override func pushViewController(_ viewController: UIViewController, animated: Bool) {
+        // 只有当导航控制器已经有子视图控制器时才隐藏tabbar
+        if viewControllers.count > 0 {
+            viewController.hidesBottomBarWhenPushed = true
+        }
+        super.pushViewController(viewController, animated: animated)
+    }
 }
