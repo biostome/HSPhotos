@@ -14,7 +14,6 @@ import Photos
 class AlbumCell: UICollectionViewCell {
     private let imageView = UIImageView()
     private let placeholderView = UIImageView()
-    private let countLabel = UILabel()
     private let titleLabel = UILabel()
     private let gradientView = UIView()
     
@@ -56,11 +55,15 @@ class AlbumCell: UICollectionViewCell {
         
         // 渐变阴影View（添加在placeholderView上方，Label下方）
         gradientView.translatesAutoresizingMaskIntoConstraints = false
-        gradientView.backgroundColor = .clear // 移除临时背景色
+        gradientView.backgroundColor = .clear
         gradientView.layer.cornerRadius = 12
         gradientView.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner] // 左下角和右下角圆角
         gradientView.clipsToBounds = true
         contentView.addSubview(gradientView)
+        
+        // 确保gradientView在正确的层级
+        contentView.bringSubviewToFront(gradientView)
+        contentView.bringSubviewToFront(titleLabel)
         
         // 添加渐变层
         let gradientLayer = CAGradientLayer()
@@ -76,6 +79,9 @@ class AlbumCell: UICollectionViewCell {
         gradientLayer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner] // 左下角和右下角圆角
         gradientView.layer.insertSublayer(gradientLayer, at: 0)
         
+        // 确保gradientView可见
+        gradientView.isHidden = false
+        
         // Title Label（添加在gradientView上方）
         titleLabel.textColor = .white
         titleLabel.font = .systemFont(ofSize: 17, weight: .semibold) // 增大字体
@@ -84,15 +90,7 @@ class AlbumCell: UICollectionViewCell {
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(titleLabel)
         
-        // Count Label（最后添加，在上层）
-        countLabel.backgroundColor = UIColor(white: 0, alpha: 0.5)
-        countLabel.textColor = .white
-        countLabel.font = .systemFont(ofSize: 13, weight: .semibold)
-        countLabel.textAlignment = .center
-        countLabel.layer.cornerRadius = 8
-        countLabel.clipsToBounds = true
-        countLabel.translatesAutoresizingMaskIntoConstraints = false
-        contentView.addSubview(countLabel)
+
         
         // 设置占位图
         setPlaceholderImage()
@@ -120,14 +118,8 @@ class AlbumCell: UICollectionViewCell {
             // 标题标签：左下角，浮在渐变阴影View上
             titleLabel.bottomAnchor.constraint(equalTo: gradientView.bottomAnchor, constant: -8), // 底部对齐
             titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12), // 增加左边距
+            titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12), // 增加右边距
             titleLabel.heightAnchor.constraint(equalToConstant: 24), // 增加高度以适应更大的字体
-            
-            // 计数标签：标题右后方，浮在渐变阴影View上
-            countLabel.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor), // 垂直居中对齐
-            countLabel.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 8), // 跟随在标题右后方
-            countLabel.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -12), // 不超过右侧边缘
-            countLabel.heightAnchor.constraint(equalToConstant: 20), // 适当高度
-            countLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 40)
         ])
     }
 
@@ -136,7 +128,6 @@ class AlbumCell: UICollectionViewCell {
         let assets = PHAsset.fetchAssets(in: collection, options: nil)
         
         titleLabel.text = collection.localizedTitle
-        countLabel.text = "\(assets.count)"
         setPlaceholderImage() // 设置占位图
 
         guard let coverAsset = assets.firstObject else { return }
@@ -195,7 +186,6 @@ class AlbumCell: UICollectionViewCell {
     override func prepareForReuse() {
         super.prepareForReuse()
         titleLabel.text = ""
-        countLabel.text = ""
         setPlaceholderImage()
         currentAssetID = nil
         if let requestID = requestID {
