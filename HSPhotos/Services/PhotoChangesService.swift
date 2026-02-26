@@ -209,100 +209,139 @@ class PhotoChangesService {
         }
         
         // 使用Photos框架的批量操作来创建副本
-        var newAssets: [PHAsset] = []
+        var newAssetIdentifiers: [String] = []
         let dispatchGroup = DispatchGroup()
         
         for asset in assets {
             dispatchGroup.enter()
             
-            // 获取资产资源
-            let resources = PHAssetResource.assetResources(for: asset)
-            guard let resource = resources.first else {
-                dispatchGroup.leave()
-                continue
-            }
-            
-            // 创建临时文件URL
-            let temporaryDirectory = URL(fileURLWithPath: NSTemporaryDirectory())
-            let fileName = UUID().uuidString + "." + (resource.originalFilename as NSString).pathExtension
-            let fileURL = temporaryDirectory.appendingPathComponent(fileName)
-            
-            // 导出资产数据到临时文件
-            let options = PHAssetResourceRequestOptions()
-            options.isNetworkAccessAllowed = true
-            
-            var receivedData = Data()
-            
-            PHAssetResourceManager.default().requestData(for: resource, options: options, dataReceivedHandler: { data in
-                receivedData.append(data)
-            }, completionHandler: { error in
-                defer {
-                    // 清理临时文件
-                    try? FileManager.default.removeItem(at: fileURL)
-                    dispatchGroup.leave()
+            // 在PHPhotoLibrary的变更块中创建新资产
+            PHPhotoLibrary.shared().performChanges({ 
+                let creationRequest = PHAssetCreationRequest.forAsset()
+                
+                // 复制元数据
+                if let creationDate = asset.creationDate {
+                    creationRequest.creationDate = creationDate
                 }
                 
-                guard error == nil else {
-                    return
+                if let location = asset.location {
+                    creationRequest.location = location
                 }
                 
-                do {
-                    // 写入临时文件
-                    try receivedData.write(to: fileURL)
+                creationRequest.isFavorite = asset.isFavorite
+                creationRequest.isHidden = asset.isHidden
+                
+                // 获取资产资源并添加到创建请求
+                let resources = PHAssetResource.assetResources(for: asset)
+                for resource in resources {
+                    if resource.type == .adjustmentData || resource.type == .adjustmentBasePhoto {
+                        continue
+                    }
                     
-                    // 在PHPhotoLibrary的变更块中创建新资产
-                    var localPlaceholder: PHObjectPlaceholder?
+                    let semaphore = DispatchSemaphore(value: 0)
+                    var accumulatedData = Data()
+                    var resourceError: Error?
                     
-                    PHPhotoLibrary.shared().performChanges({ 
-                        // 从文件URL创建资产
-                        let creationRequest = PHAssetCreationRequest.creationRequestForAssetFromImage(atFileURL: fileURL)
-                        // 设置创建日期为原始资产的创建日期
-                        creationRequest?.creationDate = asset.creationDate
-                        
-                        // 获取新创建的资产的占位符
-                        localPlaceholder = creationRequest?.placeholderForCreatedAsset
-                    }, completionHandler: { success, error in
-                        if success, let placeholder = localPlaceholder {
-                            // 解析占位符获取实际的PHAsset
-                            let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: [placeholder.localIdentifier], options: nil)
-                            if let newAsset = fetchResult.firstObject {
-                                newAssets.append(newAsset)
+                    let requestOptions = PHAssetResourceRequestOptions()
+                    requestOptions.isNetworkAccessAllowed = true
+                    
+                    PHAssetResourceManager.default().requestData(for: resource, options: requestOptions, 
+                        dataReceivedHandler: { data in
+                            accumulatedData.append(data)
+                        },
+                        completionHandler: { error in
+                            if let error = error {
+                                resourceError = error
+                                semaphore.signal()
+                                return
                             }
+                            creationRequest.addResource(with: resource.type, data: accumulatedData, options: nil)
+                            semaphore.signal()
                         }
-                    })
-                } catch {
-                    // 错误处理
+                    )
+                    
+                    semaphore.wait()
+                    
+                    if let error = resourceError {
+                        print("获取资产资源数据失败: \(error.localizedDescription)")
+                        continue
+                    }
                 }
+                
+                // 保存新资产的占位符
+                if let placeholder = creationRequest.placeholderForCreatedAsset {
+                    newAssetIdentifiers.append(placeholder.localIdentifier)
+                }
+            }, completionHandler: { success, error in
+                if success {
+                    print("资产创建成功")
+                } else {
+                    print("资产创建失败: \(error?.localizedDescription ?? "未知错误")")
+                }
+                dispatchGroup.leave()
             })
         }
         
         dispatchGroup.notify(queue: .main) {
-            if !newAssets.isEmpty {
-                // 将所有新创建的资产添加到目标相册
-                PHPhotoLibrary.shared().performChanges({ 
-                    if let collectionChangeRequest = PHAssetCollectionChangeRequest(for: destinationCollection) {
-                        collectionChangeRequest.addAssets(newAssets as NSArray)
-                    }
-                }, completionHandler: { success, error in
-                    DispatchQueue.main.async {
-                        if success {
-                            // 添加撤销操作（仅当不是撤销操作时）
-                            if !isUndoOperation {
-                                let undoAction = UndoAction(
-                                    type: .copy(sourceAssets: newAssets, destinationCollection: destinationCollection),
-                                    timestamp: Date(),
-                                    description: "创建 \(newAssets.count) 张照片的副本"
-                                )
-                                UndoManagerService.shared.addUndoAction(undoAction)
+            print("所有资产处理完成，新资产标识符数量: \(newAssetIdentifiers.count)")
+            if !newAssetIdentifiers.isEmpty {
+                // 尝试获取新创建的资产，最多重试3次
+                self.fetchNewlyCreatedAssets(identifiers: newAssetIdentifiers, maxRetries: 3, currentRetry: 0) { newAssets in
+                    if !newAssets.isEmpty {
+                        // 将所有新创建的资产添加到目标相册
+                        PHPhotoLibrary.shared().performChanges({ 
+                            if let collectionChangeRequest = PHAssetCollectionChangeRequest(for: destinationCollection) {
+                                collectionChangeRequest.addAssets(newAssets as NSArray)
+                                print("将新资产添加到相册成功")
+                            } else {
+                                print("无法获取相册变更请求")
                             }
-                            completion(true, "已创建 \(newAssets.count) 张照片的副本")
-                        } else {
-                            completion(false, error?.localizedDescription ?? "无法将照片添加到相册")
-                        }
+                        }, completionHandler: { success, error in
+                            DispatchQueue.main.async {
+                                if success {
+                                    // 添加撤销操作（仅当不是撤销操作时）
+                                    if !isUndoOperation {
+                                        let undoAction = UndoAction(
+                                            type: .copy(sourceAssets: newAssets, destinationCollection: destinationCollection),
+                                            timestamp: Date(),
+                                            description: "创建 \(newAssets.count) 张照片的副本"
+                                        )
+                                        UndoManagerService.shared.addUndoAction(undoAction)
+                                    }
+                                    completion(true, "已创建 \(newAssets.count) 张照片的副本")
+                                } else {
+                                    print("将新资产添加到相册失败: \(error?.localizedDescription ?? "未知错误")")
+                                    completion(false, error?.localizedDescription ?? "无法将照片添加到相册")
+                                }
+                            }
+                        })
+                    } else {
+                        completion(false, "无法获取新创建的资产")
                     }
-                })
+                }
             } else {
                 completion(false, "无法创建照片副本")
+            }
+        }
+    }
+    
+    // 尝试获取新创建的资产，支持重试
+    private static func fetchNewlyCreatedAssets(identifiers: [String], maxRetries: Int, currentRetry: Int, completion: @escaping ([PHAsset]) -> Void) {
+        // 获取新创建的资产
+        let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: nil)
+        var newAssets: [PHAsset] = []
+        fetchResult.enumerateObjects { asset, _, _ in
+            newAssets.append(asset)
+        }
+        
+        if !newAssets.isEmpty || currentRetry >= maxRetries {
+            print("获取新创建的资产完成，重试次数: \(currentRetry)，成功获取: \(newAssets.count) 个")
+            completion(newAssets)
+        } else {
+            print("获取新创建的资产失败，正在重试... (\(currentRetry + 1)/\(maxRetries))")
+            // 延迟100毫秒后重试
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                self.fetchNewlyCreatedAssets(identifiers: identifiers, maxRetries: maxRetries, currentRetry: currentRetry + 1, completion: completion)
             }
         }
     }

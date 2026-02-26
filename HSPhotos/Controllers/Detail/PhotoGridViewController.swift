@@ -366,9 +366,10 @@ class PhotoGridViewController: UIViewController {
     private func onCopy() {
         AssetPasteboard.copyAssets(gridView.selectedAssets) { [weak self] success, message in
             guard let self = self else { return }
-            let title = success ? "复制成功" : "复制失败"
-            let alertMessage = success ? "已复制到剪切板" : (message ?? "无法复制到剪切板")
-            self.showAlert(title: title, message: alertMessage)
+            if !success {
+                let alertMessage = message ?? "无法复制到剪切板"
+                self.showAlert(title: "复制失败", message: alertMessage)
+            }
         }
     }
     
@@ -385,10 +386,10 @@ class PhotoGridViewController: UIViewController {
         PhotoChangesService.duplicate(assets: selectedAssets, to: self.collection) { [weak self] success, message in
             guard let self = self else { return }
             loadingAlert.dismiss(animated: true) {
-                let title = success ? "复制成功" : "复制失败"
-                let alertMessage = success ? (message ?? "已创建照片副本") : (message ?? "无法创建照片副本")
-                self.showAlert(title: title, message: alertMessage)
-                if success {
+                if !success {
+                    let alertMessage = message ?? "无法创建照片副本"
+                    self.showAlert(title: "复制失败", message: alertMessage)
+                } else {
                     self.loadPhoto()
                     // 更新按钮状态
                     self.updateUndoRedoButtons()
@@ -532,9 +533,6 @@ class PhotoGridViewController: UIViewController {
                         let undoAction = UndoAction.delete(collection: self.collection, assets: selectedAssets)
                         self.addAction(undoAction)
                         
-                        let count = assets.count
-                        let message = count == 1 ? "已删除 1 张照片" : "已删除 \(count) 张照片"
-                        self.showAlert(title: "删除成功", message: message)
                         self.gridView.clearSelected()
                         self.loadPhoto() // 重新加载照片列表
                     } else {
