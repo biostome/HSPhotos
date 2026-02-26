@@ -159,9 +159,6 @@ class PhotoGridViewController: UIViewController {
         
         loadPhoto()
         setupUndoManager()
-        
-        // 初始化排序按钮状态
-        updateSortButton()
     }
     
     private func setupUI() {
@@ -663,11 +660,7 @@ class PhotoGridViewController: UIViewController {
     
     private func updateOperationMenu() {
         menuButton.menu = createOperationMenu()
-        updateSortButton()
-    }
-    
-    private func updateSortButton() {
-        sortButton.isEnabled = !gridView.selectedAssets.isEmpty
+        menuBarButton.menu = createOperationMenu()
     }
     
     private func syncSuccess(message: String) {
