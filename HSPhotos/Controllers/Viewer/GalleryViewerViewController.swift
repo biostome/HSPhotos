@@ -8,6 +8,7 @@
 import UIKit
 import Photos
 import AVFoundation
+import MobileCoreServices
 
 class GalleryViewerViewController: UIViewController {
     private var assets: [PHAsset]
@@ -23,12 +24,14 @@ class GalleryViewerViewController: UIViewController {
     // 工具栏
     private let closeButton = UIButton(type: .system)
     private let titleButton = UIButton(type: .system)
-    private let editButton = UIButton(type: .system)
     private let shareButton = UIButton(type: .system)
     private let favoriteButton = UIButton(type: .system)
     private let deleteButton = UIButton(type: .system)
     private let topBar = UIView()
     private let bottomBar = UIVisualEffectView(effect: UIBlurEffect(style: .systemMaterial))
+    
+    // 页面指示器
+    private let pageIndicator = UILabel()
     
     // 状态
     private var currentIndex: Int
@@ -66,12 +69,10 @@ class GalleryViewerViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .black
         
-        // 重新获取所有资产的最新信息，确保收藏状态正确
-        updateAssetsWithLatestInfo()
-        
         setupPageViewController()
         setupTopBar()
         setupBottomBar()
+        setupPageIndicator()
         updateTitleAndFavorite()
         
         // 添加点击手势，用于显示/隐藏工具栏
@@ -92,6 +93,26 @@ class GalleryViewerViewController: UIViewController {
                 break
             }
         }
+    }
+    
+    private func setupPageIndicator() {
+        // 配置页面指示器
+        pageIndicator.textColor = .white
+        pageIndicator.font = .systemFont(ofSize: 14, weight: .medium)
+        pageIndicator.textAlignment = .center
+        pageIndicator.backgroundColor = UIColor.black.withAlphaComponent(0.6)
+        pageIndicator.layer.cornerRadius = 12
+        pageIndicator.clipsToBounds = true
+        pageIndicator.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(pageIndicator)
+        
+        // 设置约束
+        NSLayoutConstraint.activate([
+            pageIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            pageIndicator.bottomAnchor.constraint(equalTo: bottomBar.topAnchor, constant: -12),
+            pageIndicator.widthAnchor.constraint(equalToConstant: 60),
+            pageIndicator.heightAnchor.constraint(equalToConstant: 24)
+        ])
     }
     
     // MARK: - 页面控制器设置
@@ -146,27 +167,15 @@ class GalleryViewerViewController: UIViewController {
         titleButton.titleLabel?.font = .systemFont(ofSize: 14, weight: .medium)
         titleButton.addTarget(self, action: #selector(infoTapped), for: .touchUpInside)
         
-        // 编辑按钮
-        editButton.setTitle("编辑", for: .normal)
-        editButton.setTitleColor(.label, for: .normal)
-        editButton.titleLabel?.font = .systemFont(ofSize: 15, weight: .medium)
-        editButton.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.85)
-        editButton.layer.cornerRadius = 16
-        editButton.contentEdgeInsets = UIEdgeInsets(top: 6, left: 14, bottom: 6, right: 14)
-        editButton.addTarget(self, action: #selector(editTapped), for: .touchUpInside)
-        
         // 添加按钮到顶部栏
         closeButton.translatesAutoresizingMaskIntoConstraints = false
-        editButton.translatesAutoresizingMaskIntoConstraints = false
         titleButton.translatesAutoresizingMaskIntoConstraints = false
         topBar.addSubview(closeButton)
-        topBar.addSubview(editButton)
         topBar.addSubview(titleButton)
         
         // 设置约束
         closeButton.widthAnchor.constraint(equalToConstant: 36).isActive = true
         closeButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
-        editButton.setContentHuggingPriority(.required, for: .horizontal)
         
         NSLayoutConstraint.activate([
             topBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
@@ -175,12 +184,9 @@ class GalleryViewerViewController: UIViewController {
             topBar.heightAnchor.constraint(equalToConstant: 44),
             closeButton.leadingAnchor.constraint(equalTo: topBar.leadingAnchor, constant: 4),
             closeButton.centerYAnchor.constraint(equalTo: topBar.centerYAnchor),
-            editButton.trailingAnchor.constraint(equalTo: topBar.trailingAnchor, constant: -4),
-            editButton.centerYAnchor.constraint(equalTo: topBar.centerYAnchor),
             titleButton.centerXAnchor.constraint(equalTo: topBar.centerXAnchor),
             titleButton.centerYAnchor.constraint(equalTo: topBar.centerYAnchor),
-            titleButton.leadingAnchor.constraint(greaterThanOrEqualTo: closeButton.trailingAnchor, constant: 8),
-            titleButton.trailingAnchor.constraint(lessThanOrEqualTo: editButton.leadingAnchor, constant: -8)
+            titleButton.leadingAnchor.constraint(greaterThanOrEqualTo: closeButton.trailingAnchor, constant: 8)
         ])
     }
     
@@ -245,6 +251,7 @@ class GalleryViewerViewController: UIViewController {
         UIView.animate(withDuration: 0.3, delay: 0, options: .curveEaseInOut, animations: {
             self.topBar.alpha = alpha
             self.bottomBar.alpha = alpha
+            self.pageIndicator.alpha = alpha
         })
     }
     
@@ -253,33 +260,122 @@ class GalleryViewerViewController: UIViewController {
         guard currentIndex >= 0, currentIndex < assets.count else { return }
         let asset = assets[currentIndex]
         
-        let alert = UIAlertController(title: "图片信息", message: getAssetInfo(asset), preferredStyle: .alert)
-        alert.addAction(UIAlertAction(title: "确定", style: .default))
-        present(alert, animated: true)
+        // 创建信息展示视图
+        let infoView = createInfoView(asset: asset)
+        view.addSubview(infoView)
+        
+        // 设置初始状态
+        infoView.alpha = 0
+        infoView.transform = CGAffineTransform(scaleX: 0.9, y: 0.9)
+        
+        // 动画显示
+        UIView.animate(withDuration: 0.3, delay: 0, options: .curveEaseOut, animations: {
+            infoView.alpha = 1
+            infoView.transform = .identity
+        })
     }
     
-    @objc private func editTapped() {
-        // 编辑操作
-        guard currentIndex >= 0, currentIndex < assets.count else { return }
-        let asset = assets[currentIndex]
+    private func createInfoView(asset: PHAsset) -> UIView {
+        // 创建容器视图
+        let containerView = UIView()
+        containerView.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.95)
+        containerView.layer.cornerRadius = 16
+        containerView.clipsToBounds = true
+        containerView.translatesAutoresizingMaskIntoConstraints = false
         
-        let alert = UIAlertController(title: "编辑", message: nil, preferredStyle: .actionSheet)
-        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
+        // 创建标题
+        let titleLabel = UILabel()
+        titleLabel.text = "照片信息"
+        titleLabel.font = .systemFont(ofSize: 18, weight: .bold)
+        titleLabel.textAlignment = .center
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        containerView.addSubview(titleLabel)
         
-        if let popover = alert.popoverPresentationController {
-            popover.sourceView = view
-            popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.maxY, width: 1, height: 1)
-        }
+        // 创建信息内容
+        let infoLabel = UILabel()
+        infoLabel.text = getAssetInfo(asset)
+        infoLabel.font = .systemFont(ofSize: 14)
+        infoLabel.numberOfLines = 0
+        infoLabel.textAlignment = .left
+        infoLabel.translatesAutoresizingMaskIntoConstraints = false
+        containerView.addSubview(infoLabel)
         
-        present(alert, animated: true)
+        // 创建关闭按钮
+        let closeButton = UIButton(type: .system)
+        // 使用NSAttributedString设置带字体的标题
+        let attributedTitle = NSAttributedString(
+            string: "关闭",
+            attributes: [
+                .font: UIFont.systemFont(ofSize: 16, weight: .medium),
+                .foregroundColor: UIColor.systemBlue
+            ]
+        )
+        closeButton.setAttributedTitle(attributedTitle, for: .normal)
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        closeButton.addTarget(self, action: #selector(closeInfoView(_:)), for: .touchUpInside)
+        containerView.addSubview(closeButton)
+        
+        // 设置约束
+        NSLayoutConstraint.activate([
+            containerView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            containerView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            containerView.widthAnchor.constraint(equalTo: view.widthAnchor, multiplier: 0.8),
+            containerView.heightAnchor.constraint(lessThanOrEqualTo: view.heightAnchor, multiplier: 0.6),
+            
+            titleLabel.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 20),
+            titleLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 20),
+            titleLabel.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -20),
+            
+            infoLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 20),
+            infoLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 20),
+            infoLabel.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -20),
+            
+            closeButton.topAnchor.constraint(equalTo: infoLabel.bottomAnchor, constant: 20),
+            closeButton.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
+            closeButton.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -20),
+            closeButton.widthAnchor.constraint(equalToConstant: 80),
+            closeButton.heightAnchor.constraint(equalToConstant: 40)
+        ])
+        
+        // 添加点击手势，点击背景关闭
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(closeInfoView(_:)))
+        tapGesture.delegate = self
+        view.addGestureRecognizer(tapGesture)
+        
+        return containerView
     }
+    
+    @objc private func closeInfoView(_ sender: Any) {
+        // 移除所有信息视图
+        for subview in view.subviews {
+            if subview.backgroundColor == UIColor.systemBackground.withAlphaComponent(0.95) && subview.layer.cornerRadius == 16 {
+                UIView.animate(withDuration: 0.3, delay: 0, options: .curveEaseIn, animations: {
+                    subview.alpha = 0
+                    subview.transform = CGAffineTransform(scaleX: 0.9, y: 0.9)
+                }, completion: { _ in
+                    subview.removeFromSuperview()
+                })
+            }
+        }
+    }
+    
+
     
     @objc private func shareTapped() {
         // 分享操作
         guard currentIndex >= 0, currentIndex < assets.count else { return }
         let asset = assets[currentIndex]
         
-        // 获取图片
+        if asset.mediaType == .image {
+            // 分享图片
+            shareImage(asset: asset)
+        } else if asset.mediaType == .video {
+            // 分享视频
+            shareVideo(asset: asset)
+        }
+    }
+    
+    private func shareImage(asset: PHAsset) {
         let options = PHImageRequestOptions()
         options.isSynchronous = true
         options.deliveryMode = .highQualityFormat
@@ -301,10 +397,46 @@ class GalleryViewerViewController: UIViewController {
         }
     }
     
+    private func shareVideo(asset: PHAsset) {
+        let options = PHVideoRequestOptions()
+        options.deliveryMode = .highQualityFormat
+        options.isNetworkAccessAllowed = true
+        
+        PHImageManager.default().requestAVAsset(forVideo: asset, options: options) { avAsset, audioMix, info in
+            DispatchQueue.main.async {
+                guard let avAsset = avAsset else {
+                    self.presentAlert(title: "分享失败", message: "无法获取视频")
+                    return
+                }
+                
+                // 将AVAsset转换为URL
+                if let urlAsset = avAsset as? AVURLAsset {
+                    let activity = UIActivityViewController(activityItems: [urlAsset.url], applicationActivities: nil)
+                    if let popover = activity.popoverPresentationController {
+                        popover.sourceView = self.view
+                        popover.sourceRect = CGRect(x: self.view.bounds.midX, y: self.view.bounds.maxY, width: 1, height: 1)
+                    }
+                    self.present(activity, animated: true)
+                } else {
+                    self.presentAlert(title: "分享失败", message: "无法处理视频资产")
+                }
+            }
+        }
+    }
+    
     @objc private func favoriteTapped() {
         // 收藏操作
         guard currentIndex >= 0, currentIndex < assets.count else { return }
         let asset = assets[currentIndex]
+        
+        // 添加收藏按钮动画
+        UIView.animate(withDuration: 0.2, delay: 0, options: .curveEaseInOut, animations: {
+            self.favoriteButton.transform = CGAffineTransform(scaleX: 1.2, y: 1.2)
+        }, completion: { _ in
+            UIView.animate(withDuration: 0.2, delay: 0, options: .curveEaseInOut, animations: {
+                self.favoriteButton.transform = .identity
+            })
+        })
         
         // 使用PhotoChangesService处理收藏操作
         PhotoChangesService.toggleFavorite(asset: asset) { [weak self] success, error in
@@ -331,43 +463,87 @@ class GalleryViewerViewController: UIViewController {
         guard currentIndex >= 0, currentIndex < assets.count else { return }
         let asset = assets[currentIndex]
         
-        let alert = UIAlertController(title: "删除照片", message: "确定要删除这张照片吗？", preferredStyle: .alert)
+        let alert = UIAlertController(title: "删除媒体", message: "确定要删除这个媒体文件吗？", preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "取消", style: .cancel))
         alert.addAction(UIAlertAction(title: "删除", style: .destructive) { [weak self] _ in
             guard let self = self else { return }
             
-            // 删除照片
-            PHPhotoLibrary.shared().performChanges {
-                PHAssetChangeRequest.deleteAssets([asset] as NSArray)
-            } completionHandler: { success, error in
-                DispatchQueue.main.async {
-                    if success {
-                        // 从数组中移除
-                        var newAssets = self.assets
-                        newAssets.remove(at: self.currentIndex)
-                        
-                        if newAssets.isEmpty {
-                            self.dismiss(animated: true)
-                            return
-                        }
-                        
-                        // 更新当前索引
-                        self.currentIndex = min(self.currentIndex, newAssets.count - 1)
-                        
-                        // 更新页面
-                        if let page = self.pageForIndex(self.currentIndex) {
-                            self.pageViewController.setViewControllers([page], direction: .forward, animated: false)
-                        }
-                        
-                        self.updateTitleAndFavorite()
-                    } else {
-                        self.presentAlert(title: "删除失败", message: "无法删除照片")
+            // 检查相册权限
+            PHPhotoLibrary.requestAuthorization { [weak self] status in
+                guard let self = self else { return }
+                
+                if status == .authorized {
+                    // 有权限，执行删除
+                    self.performDelete(asset: asset)
+                } else {
+                    // 无权限，提示用户
+                    DispatchQueue.main.async {
+                        self.presentAlert(title: "权限不足", message: "需要相册权限才能删除媒体文件")
                     }
                 }
             }
         })
         
         present(alert, animated: true)
+    }
+    
+    private func performDelete(asset: PHAsset) {
+        // 删除照片
+        PHPhotoLibrary.shared().performChanges {
+            PHAssetChangeRequest.deleteAssets([asset] as NSArray)
+        } completionHandler: { [weak self] success, error in
+            guard let self = self else { return }
+            DispatchQueue.main.async {
+                if success {
+                    // 从数组中移除
+                    var newAssets = self.assets
+                    newAssets.remove(at: self.currentIndex)
+                    
+                    if newAssets.isEmpty {
+                        self.dismiss(animated: true)
+                        return
+                    }
+                    
+                    // 获取当前显示的页面
+                    if let currentPage = self.pageViewController.viewControllers?.first as? PhotoPageViewController {
+                        // 添加淡出动画
+                        UIView.animate(withDuration: 0.3, delay: 0, options: .curveEaseIn, animations: {
+                            currentPage.view.alpha = 0
+                            currentPage.view.transform = CGAffineTransform(scaleX: 0.8, y: 0.8)
+                        }, completion: { [weak self] _ in
+                            guard let self = self else { return }
+                            
+                            // 更新当前索引
+                            self.currentIndex = min(self.currentIndex, newAssets.count - 1)
+                            
+                            // 更新assets数组
+                            self.assets = newAssets
+                            
+                            // 更新页面
+                            if let page = self.pageForIndex(self.currentIndex) {
+                                self.pageViewController.setViewControllers([page], direction: .forward, animated: false)
+                            }
+                            
+                            // 更新UI
+                            self.updateTitleAndFavorite()
+                        })
+                    } else {
+                        // 如果没有当前页面，直接更新
+                        self.assets = newAssets
+                        self.currentIndex = min(self.currentIndex, newAssets.count - 1)
+                        
+                        if let page = self.pageForIndex(self.currentIndex) {
+                            self.pageViewController.setViewControllers([page], direction: .forward, animated: false)
+                        }
+                        
+                        self.updateTitleAndFavorite()
+                    }
+                } else {
+                    let errorMessage = error?.localizedDescription ?? "无法删除媒体文件"
+                    self.presentAlert(title: "删除失败", message: errorMessage)
+                }
+            }
+        }
     }
     
     // MARK: - 辅助方法
@@ -387,6 +563,9 @@ class GalleryViewerViewController: UIViewController {
             config.image = UIImage(systemName: asset.isFavorite ? "heart.fill" : "heart")
             favoriteButton.configuration = config
         }
+        
+        // 更新页面指示器
+        pageIndicator.text = "\(currentIndex + 1)/\(assets.count)"
     }
     
     private func getAssetInfo(_ asset: PHAsset) -> String {
@@ -468,15 +647,11 @@ class GalleryViewerViewController: UIViewController {
             
         case .changed:
             let ty = translation.y
-            
-            // 只处理向下拖动
-            if ty < 0 {
-                return
-            }
+            let tx = translation.x
             
             // 计算缩放比例和透明度
             let maxDistance: CGFloat = 300
-            let progress = min(1.0, ty / maxDistance)
+            let progress = min(1.0, abs(ty) / maxDistance)
             
             // 缩放：从 1.0 缩小到 0.7
             let scale = 1.0 - (progress * 0.3)
@@ -484,22 +659,24 @@ class GalleryViewerViewController: UIViewController {
             // 黑色背景透明度：从 1.0 渐变到 0
             let backgroundAlpha = 1.0 - (progress * 0.95)
             
-            // 应用变换
-            pageViewController.view.transform = CGAffineTransform(translationX: 0, y: ty)
+            // 应用变换，允许任意方向拖动
+            pageViewController.view.transform = CGAffineTransform(translationX: tx, y: ty)
                 .scaledBy(x: scale, y: scale)
             
             // 控制整个视图的背景透明度
             view.backgroundColor = UIColor.black.withAlphaComponent(backgroundAlpha)
             
-            // 顶部、底部栏跟随渐隐
+            // 顶部、底部栏和页面指示器跟随渐隐
             let chromeAlpha = isChromeHidden ? 0 : (1.0 - progress)
             topBar.alpha = chromeAlpha
             bottomBar.alpha = chromeAlpha
+            pageIndicator.alpha = chromeAlpha
             
         case .ended, .cancelled:
             let ty = translation.y
+            let tx = translation.x
             
-            // 判断是否应该关闭
+            // 判断是否应该关闭（仍然只在向下拖动时关闭）
             let distanceThreshold: CGFloat = 120
             let velocityThreshold: CGFloat = 800
             
@@ -515,12 +692,13 @@ class GalleryViewerViewController: UIViewController {
                     options: [.curveEaseOut, .beginFromCurrentState],
                     animations: {
                         // 继续移动并缩小
-                        self.pageViewController.view.transform = CGAffineTransform(translationX: 0, y: self.view.bounds.height)
+                        self.pageViewController.view.transform = CGAffineTransform(translationX: tx, y: self.view.bounds.height)
                             .scaledBy(x: 0.3, y: 0.3)
                         // 背景变透明
                         self.view.backgroundColor = .clear
                         self.topBar.alpha = 0
                         self.bottomBar.alpha = 0
+                        self.pageIndicator.alpha = 0
                     },
                     completion: { _ in
                         // 关闭
@@ -542,6 +720,7 @@ class GalleryViewerViewController: UIViewController {
                         let chromeAlpha: CGFloat = self.isChromeHidden ? 0 : 1
                         self.topBar.alpha = chromeAlpha
                         self.bottomBar.alpha = chromeAlpha
+                        self.pageIndicator.alpha = chromeAlpha
                     },
                     completion: nil
                 )
@@ -582,12 +761,20 @@ extension GalleryViewerViewController: UIGestureRecognizerDelegate {
     }
     
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        // 如果点击在底部工具栏上，不触发 toggleChrome
         let location = touch.location(in: view)
         
         // 检查是否点击在底部工具栏上
         if bottomBar.frame.contains(location) {
             return false
+        }
+        
+        // 检查是否点击在信息视图上
+        for subview in view.subviews {
+            if subview.backgroundColor == UIColor.systemBackground.withAlphaComponent(0.95) && subview.layer.cornerRadius == 16 {
+                if subview.frame.contains(location) {
+                    return false
+                }
+            }
         }
         
         return true
@@ -622,6 +809,17 @@ private class PhotoPageViewController: UIViewController {
     private let playerContainerView = UIView()
     private var playerLayer: AVPlayerLayer?
     private(set) var player: AVPlayer?
+    
+    // 视频控制元素
+    private let playPauseButton = UIButton(type: .system)
+    private let progressSlider = UISlider()
+    private let timeLabel = UILabel()
+    private let videoControlView = UIView()
+    
+    // 状态
+    private var isControlsVisible = false
+    private var isPlaying = false
+    private var timeObserver: Any?
     
     let asset: PHAsset
     var index: Int = 0
@@ -661,6 +859,9 @@ private class PhotoPageViewController: UIViewController {
         playerContainerView.translatesAutoresizingMaskIntoConstraints = false
         scrollView.addSubview(playerContainerView)
         
+        // 设置视频控制视图
+        setupVideoControls()
+        
         // 设置约束
         NSLayoutConstraint.activate([
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -686,11 +887,70 @@ private class PhotoPageViewController: UIViewController {
         doubleTapGesture.numberOfTapsRequired = 2
         scrollView.addGestureRecognizer(doubleTapGesture)
         
+        // 添加单击手势，用于显示/隐藏控制条
+        let singleTapGesture = UITapGestureRecognizer(target: self, action: #selector(handleSingleTap(_:)))
+        singleTapGesture.numberOfTapsRequired = 1
+        singleTapGesture.require(toFail: doubleTapGesture)
+        scrollView.addGestureRecognizer(singleTapGesture)
+        
         // 默认只显示 imageView
         playerContainerView.isHidden = true
         
         // 加载媒体
         loadMedia()
+    }
+    
+    /// 设置视频控制元素
+    private func setupVideoControls() {
+        // 视频控制视图
+        videoControlView.backgroundColor = UIColor.black.withAlphaComponent(0.6)
+        videoControlView.translatesAutoresizingMaskIntoConstraints = false
+        playerContainerView.addSubview(videoControlView)
+        
+        // 播放/暂停按钮
+        playPauseButton.setImage(UIImage(systemName: "pause.fill"), for: .normal)
+        playPauseButton.tintColor = .white
+        playPauseButton.translatesAutoresizingMaskIntoConstraints = false
+        playPauseButton.addTarget(self, action: #selector(togglePlayPause), for: .touchUpInside)
+        videoControlView.addSubview(playPauseButton)
+        
+        // 进度条
+        progressSlider.minimumTrackTintColor = .white
+        progressSlider.maximumTrackTintColor = UIColor.white.withAlphaComponent(0.5)
+        progressSlider.thumbTintColor = .white
+        progressSlider.translatesAutoresizingMaskIntoConstraints = false
+        progressSlider.addTarget(self, action: #selector(sliderValueChanged(_:)), for: .valueChanged)
+        videoControlView.addSubview(progressSlider)
+        
+        // 时间标签
+        timeLabel.textColor = .white
+        timeLabel.font = .systemFont(ofSize: 12)
+        timeLabel.translatesAutoresizingMaskIntoConstraints = false
+        videoControlView.addSubview(timeLabel)
+        
+        // 设置约束
+        NSLayoutConstraint.activate([
+            videoControlView.leadingAnchor.constraint(equalTo: playerContainerView.leadingAnchor),
+            videoControlView.trailingAnchor.constraint(equalTo: playerContainerView.trailingAnchor),
+            videoControlView.bottomAnchor.constraint(equalTo: playerContainerView.bottomAnchor),
+            videoControlView.heightAnchor.constraint(equalToConstant: 60),
+            
+            playPauseButton.leadingAnchor.constraint(equalTo: videoControlView.leadingAnchor, constant: 16),
+            playPauseButton.centerYAnchor.constraint(equalTo: videoControlView.centerYAnchor),
+            playPauseButton.widthAnchor.constraint(equalToConstant: 30),
+            playPauseButton.heightAnchor.constraint(equalToConstant: 30),
+            
+            timeLabel.trailingAnchor.constraint(equalTo: videoControlView.trailingAnchor, constant: -16),
+            timeLabel.centerYAnchor.constraint(equalTo: videoControlView.centerYAnchor),
+            
+            progressSlider.leadingAnchor.constraint(equalTo: playPauseButton.trailingAnchor, constant: 16),
+            progressSlider.trailingAnchor.constraint(equalTo: timeLabel.leadingAnchor, constant: -16),
+            progressSlider.centerYAnchor.constraint(equalTo: videoControlView.centerYAnchor),
+            progressSlider.heightAnchor.constraint(equalToConstant: 40)
+        ])
+        
+        // 默认隐藏控制条
+        videoControlView.alpha = 0
     }
     
     /// 处理双击手势
@@ -707,6 +967,97 @@ private class PhotoPageViewController: UIViewController {
         }
     }
     
+    /// 处理单击手势
+    @objc private func handleSingleTap(_ gesture: UITapGestureRecognizer) {
+        if asset.mediaType == .video {
+            toggleControlsVisibility()
+        }
+    }
+    
+    /// 切换控制条可见性
+    private func toggleControlsVisibility() {
+        isControlsVisible.toggle()
+        UIView.animate(withDuration: 0.3) {
+            self.videoControlView.alpha = self.isControlsVisible ? 1 : 0
+        }
+    }
+    
+    /// 切换播放/暂停
+    @objc private func togglePlayPause() {
+        guard let player = player else { return }
+        
+        if isPlaying {
+            player.pause()
+            playPauseButton.setImage(UIImage(systemName: "play.fill"), for: .normal)
+        } else {
+            player.play()
+            playPauseButton.setImage(UIImage(systemName: "pause.fill"), for: .normal)
+        }
+        isPlaying.toggle()
+    }
+    
+    /// 进度条值变化
+    @objc private func sliderValueChanged(_ slider: UISlider) {
+        guard let player = player, let duration = player.currentItem?.duration else { return }
+        
+        let seekTime = CMTime(seconds: Double(slider.value) * duration.seconds, preferredTimescale: 600)
+        player.seek(to: seekTime) {
+            if $0 {
+                // 跳转成功
+            }
+        }
+    }
+    
+    /// 更新进度条和时间标签
+    private func updateProgress() {
+        guard let player = player, let currentItem = player.currentItem else { return }
+        
+        let duration = currentItem.duration.seconds
+        let currentTime = player.currentTime().seconds
+        
+        progressSlider.value = Float(currentTime / duration)
+        timeLabel.text = formatTime(currentTime) + " / " + formatTime(duration)
+    }
+    
+    /// 格式化时间
+    private func formatTime(_ seconds: Double) -> String {
+        let totalSeconds = Int(seconds)
+        let minutes = totalSeconds / 60
+        let remainingSeconds = totalSeconds % 60
+        return String(format: "%02d:%02d", minutes, remainingSeconds)
+    }
+    
+    /// 加载缩略图
+    private func loadThumbnail(targetSize: CGSize) {
+        let thumbnailOptions = PHImageRequestOptions()
+        thumbnailOptions.deliveryMode = .fastFormat
+        thumbnailOptions.isNetworkAccessAllowed = true
+        
+        PHImageManager.default().requestImage(for: asset, targetSize: targetSize, contentMode: .aspectFit, options: thumbnailOptions) { [weak self] image, info in
+            DispatchQueue.main.async { self?.imageView.image = image }
+        }
+    }
+    
+    /// 渐变过渡到高质量图片
+    private func transitionToHighQualityImage(image: UIImage) {
+        if imageView.image != nil {
+            let tempImageView = UIImageView(image: image)
+            tempImageView.contentMode = .scaleAspectFit
+            tempImageView.frame = imageView.frame
+            tempImageView.alpha = 0
+            imageView.superview?.addSubview(tempImageView)
+            
+            UIView.animate(withDuration: 0.3) {
+                tempImageView.alpha = 1
+            } completion: { _ in
+                self.imageView.image = image
+                tempImageView.removeFromSuperview()
+            }
+        } else {
+            imageView.image = image
+        }
+    }
+    
     private func loadMedia() {
         let targetSize = fullScreenPixelSize()
         
@@ -718,31 +1069,19 @@ private class PhotoPageViewController: UIViewController {
             options.isNetworkAccessAllowed = true
             
             // 先加载缩略图
-            PHImageManager.default().requestImage(for: asset, targetSize: CGSize(width: 200, height: 200), contentMode: .aspectFit, options: options) { [weak self] image, info in
-                DispatchQueue.main.async { self?.imageView.image = image }
-            }
+            loadThumbnail(targetSize: CGSize(width: 200, height: 200))
             
             // 再加载高质量图片
             PHImageManager.default().requestImage(for: asset, targetSize: targetSize, contentMode: .aspectFit, options: options) { [weak self] image, info in
                 DispatchQueue.main.async {
-                    guard let self, let image = image else { return }
+                    guard let self else { return }
                     
-                    // 渐变过渡到高质量图片
-                    if self.imageView.image != nil {
-                        let tempImageView = UIImageView(image: image)
-                        tempImageView.contentMode = .scaleAspectFit
-                        tempImageView.frame = self.imageView.frame
-                        tempImageView.alpha = 0
-                        self.imageView.superview?.addSubview(tempImageView)
-                        
-                        UIView.animate(withDuration: 0.3) {
-                            tempImageView.alpha = 1
-                        } completion: { _ in
-                            self.imageView.image = image
-                            tempImageView.removeFromSuperview()
-                        }
+                    if let image = image {
+                        // 渐变过渡到高质量图片
+                        self.transitionToHighQualityImage(image: image)
                     } else {
-                        self.imageView.image = image
+                        // 加载失败，显示错误占位图
+                        self.showErrorPlaceholder()
                     }
                 }
             }
@@ -751,56 +1090,83 @@ private class PhotoPageViewController: UIViewController {
             // 加载视频
             playerContainerView.isHidden = false
             
-            // 先加载缩略图
-            let options = PHImageRequestOptions()
-            options.deliveryMode = .highQualityFormat
-            
-            PHImageManager.default().requestImage(for: asset, targetSize: targetSize, contentMode: .aspectFit, options: options) { [weak self] image, info in
-                DispatchQueue.main.async { self?.imageView.image = image }
-            }
+            // 先加载缩略图（使用快速格式）
+            loadThumbnail(targetSize: targetSize)
+
             
             // 加载视频
             let videoOptions = PHVideoRequestOptions()
             videoOptions.deliveryMode = .highQualityFormat
             videoOptions.isNetworkAccessAllowed = true
             
-            PHImageManager.default().requestAVAsset(forVideo: asset, options: videoOptions) { [weak self] avAsset, audioMix, info in
-                DispatchQueue.main.async {
-                    guard let self, let avAsset else { return }
-                    
-                    let playerItem = AVPlayerItem(asset: avAsset)
-                    let player = AVPlayer(playerItem: playerItem)
-                    self.player = player
-                    
-                    let playerLayer = AVPlayerLayer(player: player)
-                    playerLayer.videoGravity = .resizeAspect
-                    playerLayer.frame = self.playerContainerView.bounds
-                    self.playerContainerView.layer.addSublayer(playerLayer)
-                    self.playerLayer = playerLayer
-                    
-                    // 开始播放
-                    player.play()
-                    
-                    // 延迟后渐变过渡到视频
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                        UIView.animate(withDuration: 0.3) {
-                            self?.imageView.alpha = 0
-                        } completion: { _ in
-                            self?.imageView.isHidden = true
-                            self?.imageView.alpha = 1
+            // 异步加载视频，避免阻塞UI
+            DispatchQueue.global(qos: .userInitiated).async {
+                PHImageManager.default().requestAVAsset(forVideo: self.asset, options: videoOptions) { [weak self] avAsset, audioMix, info in
+                    DispatchQueue.main.async {
+                        guard let self else { return }
+                        
+                        if let avAsset = avAsset {
+                            let playerItem = AVPlayerItem(asset: avAsset)
+                            let player = AVPlayer(playerItem: playerItem)
+                            self.player = player
+                            self.isPlaying = true
+                            
+                            let playerLayer = AVPlayerLayer(player: player)
+                            playerLayer.videoGravity = .resizeAspect
+                            playerLayer.frame = self.playerContainerView.bounds
+                            self.playerContainerView.layer.addSublayer(playerLayer)
+                            self.playerLayer = playerLayer
+                            
+                            // 开始播放
+                            player.play()
+                            
+                            // 添加时间观察者，更新进度
+                            let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
+                            self.timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] time in
+                                self?.updateProgress()
+                            }
+                            
+                            // 延迟后渐变过渡到视频
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                                UIView.animate(withDuration: 0.3) {
+                                    self?.imageView.alpha = 0
+                                } completion: { _ in
+                                    self?.imageView.isHidden = true
+                                    self?.imageView.alpha = 1
+                                }
+                            }
+                        } else {
+                            // 加载失败，显示错误占位图
+                            self.showErrorPlaceholder()
                         }
                     }
                 }
             }
             
         default:
+            // 不支持的媒体类型
+            showErrorPlaceholder()
             break
         }
     }
     
+    private func showErrorPlaceholder() {
+        // 显示错误占位图
+        imageView.image = UIImage(systemName: "exclamationmark.triangle")
+        imageView.tintColor = .systemRed
+        imageView.contentMode = .center
+        
+        // 如果是视频，隐藏视频容器
+        if asset.mediaType == .video {
+            playerContainerView.isHidden = true
+        }
+    }
+    
     private func fullScreenPixelSize() -> CGSize {
-        let size = UIScreen.main.bounds.size
-        let scale = UIScreen.main.scale
+        // 使用通过上下文获取的UIScreen实例，避免使用废弃的UIScreen.main
+        let screen = view.window?.windowScene?.screen ?? UIScreen.main
+        let size = screen.bounds.size
+        let scale = screen.scale
         return CGSize(width: size.width * scale, height: size.height * scale)
     }
     
@@ -811,7 +1177,22 @@ private class PhotoPageViewController: UIViewController {
     
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        
+        // 暂停播放器
         player?.pause()
+        
+        // 移除时间观察者
+        if let observer = timeObserver {
+            player?.removeTimeObserver(observer)
+            timeObserver = nil
+        }
+        
+        // 移除播放器图层
+        playerLayer?.removeFromSuperlayer()
+        playerLayer = nil
+        
+        // 释放播放器
+        player = nil
     }
 }
 
@@ -833,3 +1214,5 @@ extension PhotoPageViewController: UIScrollViewDelegate {
         }
     }
 }
+
+
