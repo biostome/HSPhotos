@@ -10,7 +10,7 @@ import Photos
 import AVFoundation
 
 class GalleryViewerViewController: UIViewController {
-    private let assets: [PHAsset]
+    private var assets: [PHAsset]
     private let initialIndex: Int
     
     // 页面控制器
@@ -65,6 +65,9 @@ class GalleryViewerViewController: UIViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = .black
+        
+        // 重新获取所有资产的最新信息，确保收藏状态正确
+        updateAssetsWithLatestInfo()
         
         setupPageViewController()
         setupTopBar()
@@ -310,6 +313,14 @@ class GalleryViewerViewController: UIViewController {
         } completionHandler: { success, error in
             DispatchQueue.main.async {
                 if success {
+                    // 重新获取最新的资产信息
+                    let fetchOptions = PHFetchOptions()
+                    let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: [asset.localIdentifier], options: fetchOptions)
+                    if let updatedAsset = fetchResult.firstObject {
+                        // 更新assets数组中的资产
+                        self.assets[self.currentIndex] = updatedAsset
+                    }
+                    // 更新UI
                     self.updateTitleAndFavorite()
                 } else {
                     self.presentAlert(title: "操作失败", message: "无法更新收藏状态")
@@ -416,6 +427,36 @@ class GalleryViewerViewController: UIViewController {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "知道了", style: .default))
         present(alert, animated: true)
+    }
+    
+    /// 重新获取所有资产的最新信息，确保收藏状态正确
+    private func updateAssetsWithLatestInfo() {
+        // 获取所有资产的本地标识符
+        let localIdentifiers = assets.map { $0.localIdentifier }
+        
+        // 根据本地标识符获取最新的资产信息
+        let fetchOptions = PHFetchOptions()
+        let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: localIdentifiers, options: fetchOptions)
+        
+        // 更新assets数组
+        var updatedAssets = [PHAsset]()
+        fetchResult.enumerateObjects { asset, _, _ in
+            updatedAssets.append(asset)
+        }
+        
+        // 确保更新后的数组与原数组顺序一致
+        if updatedAssets.count == assets.count {
+            // 按原顺序重新排列资产
+            var orderedAssets = [PHAsset]()
+            for localIdentifier in localIdentifiers {
+                if let asset = updatedAssets.first(where: { $0.localIdentifier == localIdentifier }) {
+                    orderedAssets.append(asset)
+                }
+            }
+            if orderedAssets.count == assets.count {
+                assets = orderedAssets
+            }
+        }
     }
     
     // MARK: - 拖动手势处理
