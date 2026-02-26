@@ -1,7 +1,7 @@
 {
   "images" : [
     {
-      "filename" : "image.png",
+      "filename" : "相册管理app图标设计.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
@@ -13,7 +13,7 @@
           "value" : "dark"
         }
       ],
-      "filename" : "image 1.png",
+      "filename" : "相册管理app图标设计 1.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
@@ -25,7 +25,7 @@
           "value" : "tinted"
         }
       ],
-      "filename" : "image 2.png",
+      "filename" : "相册管理app图标设计 2.png",
       "idiom" : "universal",
       "platform" : "ios",
       "size" : "1024x1024"
