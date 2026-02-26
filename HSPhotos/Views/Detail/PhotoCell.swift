@@ -109,6 +109,41 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         return stackView
     }()
     
+    private lazy var bottomStackView: UIStackView = {
+        let stackView = UIStackView()
+        stackView.axis = .horizontal
+        stackView.spacing = 6
+        stackView.alignment = .center
+        stackView.distribution = .fill
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        return stackView
+    }()
+    
+    private lazy var mediaIconView: UIImageView = {
+        let iv = UIImageView()
+        iv.tintColor = UIColor.white
+        iv.contentMode = .scaleAspectFit
+        iv.translatesAutoresizingMaskIntoConstraints = false
+        return iv
+    }()
+    
+    private lazy var mediaDurationLabel: UILabel = {
+        let label = UILabel()
+        label.font = UIFont.systemFont(ofSize: 10, weight: .medium)
+        label.textColor = UIColor.white
+        label.translatesAutoresizingMaskIntoConstraints = false
+        return label
+    }()
+    
+    private lazy var favoriteIcon: UIImageView = {
+        let iv = UIImageView()
+        iv.image = UIImage(systemName: "heart")
+        iv.tintColor = UIColor.white
+        iv.contentMode = .center
+        iv.translatesAutoresizingMaskIntoConstraints = false
+        return iv
+    }()
+    
     // MARK: - 数据缓存
     private var currentAssetID: String?
     private var requestID: PHImageRequestID?
@@ -152,16 +187,34 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         ])
         
         contentView.addSubview(topLabelsStackView)
+        contentView.addSubview(bottomStackView)
         contentView.addSubview(headerBorderView)
         
         // 将锚点和首图label添加到StackView
         topLabelsStackView.addArrangedSubview(anchorLabel)
         topLabelsStackView.addArrangedSubview(headerLabel)
         
+        // 将媒体图标、时长标签和收藏图标添加到底部StackView
+        bottomStackView.addArrangedSubview(mediaIconView)
+        bottomStackView.addArrangedSubview(mediaDurationLabel)
+        bottomStackView.addArrangedSubview(favoriteIcon)
+        
         // 设置约束
         NSLayoutConstraint.activate([
             topLabelsStackView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 6),
             topLabelsStackView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 6),
+            
+            // 底部StackView约束
+            bottomStackView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
+            bottomStackView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
+            
+            // 媒体图标约束
+            mediaIconView.widthAnchor.constraint(equalToConstant: 16),
+            mediaIconView.heightAnchor.constraint(equalToConstant: 16),
+            
+            // 收藏图标约束
+            favoriteIcon.widthAnchor.constraint(equalToConstant: 24),
+            favoriteIcon.heightAnchor.constraint(equalToConstant: 24),
             
             anchorLabel.widthAnchor.constraint(equalToConstant: 24),
             anchorLabel.heightAnchor.constraint(equalToConstant: 24),
@@ -231,6 +284,26 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         // 设置首图标识
         headerLabel.isHidden = !isHeader
         headerBorderView.isHidden = !isHeader
+        
+        // 设置收藏标识
+        favoriteIcon.isHidden = !asset.isFavorite
+        favoriteIcon.image = UIImage(systemName: asset.isFavorite ? "heart.fill" : "heart")
+        
+        // 设置媒体类型标识
+        if asset.mediaSubtypes.contains(.photoLive) {
+            mediaIconView.isHidden = false
+            mediaIconView.image = UIImage(systemName: "livephoto")
+            mediaDurationLabel.isHidden = true
+        } else if asset.mediaType == .video {
+            mediaIconView.isHidden = false
+            mediaIconView.image = UIImage(systemName: "play.fill")
+            mediaDurationLabel.isHidden = false
+            mediaDurationLabel.text = formatDuration(asset.duration)
+        } else {
+            mediaIconView.isHidden = true
+            mediaDurationLabel.isHidden = true
+        }
+        
         switch selectionMode {
         case .none:
             selectionOverlay.isHidden = true
@@ -261,12 +334,24 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         anchorLabel.isHidden = true
         headerLabel.isHidden = true
         headerBorderView.isHidden = true
+        mediaIconView.isHidden = true
+        mediaDurationLabel.isHidden = true
+        favoriteIcon.isHidden = true
         currentAssetID = nil
         currentAsset = nil
         if let requestID = requestID {
             PHImageManager.default().cancelImageRequest(requestID)
         }
         requestID = nil
+    }
+    
+    private func formatDuration(_ seconds: TimeInterval) -> String {
+        let m = Int(seconds) / 60
+        let s = Int(seconds) % 60
+        if m > 0 {
+            return String(format: "%d:%02d", m, s)
+        }
+        return String(format: "0:%02d", s)
     }
     
     /// 执行渐变柔光高亮效果
