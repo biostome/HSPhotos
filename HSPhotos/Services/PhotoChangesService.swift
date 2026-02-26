@@ -376,6 +376,39 @@ class PhotoChangesService {
         })
     }
     
+    // 切换照片收藏状态的方法
+    /// - Parameters:
+    ///   - asset: 要切换收藏状态的资源
+    ///   - isUndoOperation: 是否为撤销操作，撤销操作不添加新的撤销记录
+    static func toggleFavorite(asset: PHAsset, isUndoOperation: Bool = false, completion: @escaping SortCompletion) {
+        // Check permission
+        guard PHPhotoLibrary.authorizationStatus() == .authorized || PHPhotoLibrary.authorizationStatus() == .limited else {
+            completion(false, "No photo library access permission")
+            return
+        }
+        
+        let newFavoriteStatus = !asset.isFavorite
+        
+        PHPhotoLibrary.shared().performChanges({ 
+            let request = PHAssetChangeRequest(for: asset)
+            request.isFavorite = newFavoriteStatus
+        }, completionHandler: { success, error in
+            if success && !isUndoOperation {
+                // 添加撤销操作（仅当不是撤销操作时）
+                let undoAction = UndoAction(
+                    type: .favorite(asset: asset, isFavorite: newFavoriteStatus),
+                    timestamp: Date(),
+                    description: newFavoriteStatus ? "收藏照片" : "取消收藏照片"
+                )
+                UndoManagerService.shared.addUndoAction(undoAction)
+            }
+            
+            DispatchQueue.main.async {
+                completion(success, error?.localizedDescription ?? (success ? nil : "Toggle favorite operation failed"))
+            }
+        })
+    }
+    
     // MARK: - 撤销操作支持方法
     
     static func undoSort(originalAssets: [PHAsset], for collection: PHAssetCollection, completion: @escaping SortCompletion) {
@@ -430,6 +463,31 @@ class PhotoChangesService {
         paste(assets: assets, into: destinationCollection, at: insertIndex, isUndoOperation: true, completion: completion)
     }
     
+    static func undoFavorite(asset: PHAsset, isFavorite: Bool, completion: @escaping SortCompletion) {
+        // 撤销收藏操作，将状态恢复到相反状态
+        let newFavoriteStatus = !isFavorite
+        PHPhotoLibrary.shared().performChanges({ 
+            let request = PHAssetChangeRequest(for: asset)
+            request.isFavorite = newFavoriteStatus
+        }, completionHandler: { success, error in
+            DispatchQueue.main.async {
+                completion(success, error?.localizedDescription ?? (success ? nil : "Undo favorite operation failed"))
+            }
+        })
+    }
+    
+    static func redoFavorite(asset: PHAsset, isFavorite: Bool, completion: @escaping SortCompletion) {
+        // 重做收藏操作，恢复到原来的状态
+        PHPhotoLibrary.shared().performChanges({ 
+            let request = PHAssetChangeRequest(for: asset)
+            request.isFavorite = isFavorite
+        }, completionHandler: { success, error in
+            DispatchQueue.main.async {
+                completion(success, error?.localizedDescription ?? (success ? nil : "Redo favorite operation failed"))
+            }
+        })
+    }
+    
     // MARK: - 统一的撤销和重做方法
     
     // 撤销操作
@@ -445,6 +503,8 @@ class PhotoChangesService {
             undoCopy(assets: sourceAssets, from: destinationCollection, completion: completion)
         case .paste(let assets, let destinationCollection, _):
             undoPaste(assets: assets, from: destinationCollection, completion: completion)
+        case .favorite(let asset, let isFavorite):
+            undoFavorite(asset: asset, isFavorite: isFavorite, completion: completion)
         }
     }
     
@@ -461,6 +521,8 @@ class PhotoChangesService {
             redoCopy(assets: sourceAssets, to: destinationCollection, completion: completion)
         case .paste(let assets, let destinationCollection, let insertIndex):
             redoPaste(assets: assets, into: destinationCollection, at: insertIndex, completion: completion)
+        case .favorite(let asset, let isFavorite):
+            redoFavorite(asset: asset, isFavorite: isFavorite, completion: completion)
         }
     }
 }

@@ -306,25 +306,22 @@ class GalleryViewerViewController: UIViewController {
         guard currentIndex >= 0, currentIndex < assets.count else { return }
         let asset = assets[currentIndex]
         
-        // 切换收藏状态
-        PHPhotoLibrary.shared().performChanges {
-            let request = PHAssetChangeRequest(for: asset)
-            request.isFavorite = !asset.isFavorite
-        } completionHandler: { success, error in
-            DispatchQueue.main.async {
-                if success {
-                    // 重新获取最新的资产信息
-                    let fetchOptions = PHFetchOptions()
-                    let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: [asset.localIdentifier], options: fetchOptions)
-                    if let updatedAsset = fetchResult.firstObject {
-                        // 更新assets数组中的资产
-                        self.assets[self.currentIndex] = updatedAsset
-                    }
-                    // 更新UI
-                    self.updateTitleAndFavorite()
-                } else {
-                    self.presentAlert(title: "操作失败", message: "无法更新收藏状态")
+        // 使用PhotoChangesService处理收藏操作
+        PhotoChangesService.toggleFavorite(asset: asset) { [weak self] success, error in
+            guard let self = self else { return }
+            
+            if success {
+                // 重新获取最新的资产信息
+                let fetchOptions = PHFetchOptions()
+                let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: [asset.localIdentifier], options: fetchOptions)
+                if let updatedAsset = fetchResult.firstObject {
+                    // 更新assets数组中的资产
+                    self.assets[self.currentIndex] = updatedAsset
                 }
+                // 更新UI
+                self.updateTitleAndFavorite()
+            } else {
+                self.presentAlert(title: "操作失败", message: error ?? "无法更新收藏状态")
             }
         }
     }

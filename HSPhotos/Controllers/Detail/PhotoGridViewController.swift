@@ -320,6 +320,9 @@ class PhotoGridViewController: UIViewController {
         case .paste(let assets, let collection, let index):
             // 重做粘贴操作，再次将照片粘贴到相册
             PhotoChangesService.paste(assets: assets, into: collection, at: index, completion: completion)
+        case .favorite(let asset, let isFavorite):
+            // 重做收藏操作，恢复到原来的收藏状态
+            PhotoChangesService.redoFavorite(asset: asset, isFavorite: isFavorite, completion: completion)
         }
     }
     

@@ -15,6 +15,7 @@ enum UndoActionType {
     case move(sourceCollection: PHAssetCollection, destinationCollection: PHAssetCollection, assets: [PHAsset])
     case copy(sourceAssets: [PHAsset], destinationCollection: PHAssetCollection)
     case paste(assets: [PHAsset], into: PHAssetCollection, at: Int)
+    case favorite(asset: PHAsset, isFavorite: Bool)
 }
 
 /// 撤销操作记录
@@ -114,6 +115,14 @@ extension UndoAction {
             type: .paste(assets: assets, into: collection, at: index),
             timestamp: Date(),
             description: "粘贴 \(assets.count) 张照片"
+        )
+    }
+    
+    static func favorite(asset: PHAsset, isFavorite: Bool) -> UndoAction {
+        return UndoAction(
+            type: .favorite(asset: asset, isFavorite: isFavorite),
+            timestamp: Date(),
+            description: isFavorite ? "收藏照片" : "取消收藏照片"
         )
     }
 }
