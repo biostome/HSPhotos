@@ -635,7 +635,7 @@ class PhotoGridViewController: UIViewController {
     private func createOperationMenu() -> UIMenu {
         let attributes: UIMenuElement.Attributes = gridView.selectedAssets.isEmpty ? .disabled : []
         
-        let copy = UIAction(title: "复制", image: UIImage(systemName: "doc.on.doc"), attributes: attributes) { [weak self] _ in
+        let copy = UIAction(title: "拷贝", image: UIImage(systemName: "doc.on.doc"), attributes: attributes) { [weak self] _ in
             self?.onCopy()
         }
         
