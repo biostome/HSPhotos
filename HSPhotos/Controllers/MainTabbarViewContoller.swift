@@ -13,10 +13,10 @@ class MainTabbarViewContoller: UITabBarController {
         let galleryNavController = RootNavigationViewController(rootViewController: galleryViewController)
         galleryNavController.tabBarItem = UITabBarItem(title: "图库", image: UIImage(systemName: "photo.on.rectangle"), tag: 0)
         
-        // 创建第二个页面：首页
-        let homeViewController = MainViewController()
+        // 创建第二个页面：相册
+        let homeViewController = AlbumListViewController()
         let homeNavController = RootNavigationViewController(rootViewController: homeViewController)
-        homeNavController.tabBarItem = UITabBarItem(title: "首页", image: UIImage(systemName: "house"), tag: 1)
+        homeNavController.tabBarItem = UITabBarItem(title: "相册", image: UIImage(systemName: "photo.stack"), tag: 1)
         
         // 设置标签栏控制器的子控制器
         viewControllers = [galleryNavController, homeNavController]
