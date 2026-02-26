@@ -30,7 +30,7 @@ class AlbumListView: UIView{
         layout.sectionInset = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
         
         let collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
-        collectionView.backgroundColor = UIColor(red: 0.96, green: 0.96, blue: 0.97, alpha: 1.0) // #f5f5f7
+        collectionView.backgroundColor = .clear // 设置为透明，显示渐变背景
         collectionView.register(AlbumCell.self, forCellWithReuseIdentifier: "AlbumCell")
         collectionView.showsVerticalScrollIndicator = false
         return collectionView
@@ -46,7 +46,7 @@ class AlbumListView: UIView{
     }
     
     private func setupUI() {
-        backgroundColor = UIColor(red: 0.96, green: 0.96, blue: 0.97, alpha: 1.0)
+        backgroundColor = .clear // 设置为透明，显示渐变背景
         
         collectionView.delegate = self
         collectionView.dataSource = self

@@ -12,6 +12,7 @@ import Photos
 class AlbumListViewController: UIViewController {
 
     private var albums: [PHAssetCollection] = []
+    private let backgroundGradientLayer = CAGradientLayer()
     
     lazy var albumListView: AlbumListView = {
         let view = AlbumListView()
@@ -28,7 +29,22 @@ class AlbumListViewController: UIViewController {
     }
     
     private func setupUI(){
-        view.backgroundColor = .systemBackground
+        // 配置渐变背景
+        let lightColors: [CGColor] = [
+            UIColor(red: 0.91, green: 0.96, blue: 1.00, alpha: 1.0).cgColor,
+            UIColor(red: 0.97, green: 0.98, blue: 0.96, alpha: 1.0).cgColor,
+            UIColor(red: 0.99, green: 0.98, blue: 0.94, alpha: 1.0).cgColor
+        ]
+        let darkColors: [CGColor] = [
+            UIColor(red: 0.11, green: 0.11, blue: 0.12, alpha: 1.0).cgColor,
+            UIColor(red: 0.08, green: 0.08, blue: 0.09, alpha: 1.0).cgColor,
+            UIColor(red: 0.06, green: 0.06, blue: 0.07, alpha: 1.0).cgColor
+        ]
+        let isDark = traitCollection.userInterfaceStyle == .dark
+        backgroundGradientLayer.colors = isDark ? darkColors : lightColors
+        backgroundGradientLayer.locations = [0.0, 0.45, 1.0]
+        view.layer.insertSublayer(backgroundGradientLayer, at: 0)
+        
         view.addSubview(albumListView)
         NSLayoutConstraint.activate([
             albumListView.topAnchor.constraint(equalTo: view.topAnchor),
@@ -41,13 +57,29 @@ class AlbumListViewController: UIViewController {
     private func setupNavigationBar() {
         title = "相册"
         navigationController?.navigationBar.prefersLargeTitles = true
-        navigationController?.navigationBar.largeTitleTextAttributes = [
-            .foregroundColor: UIColor(red: 0.2, green: 0.2, blue: 0.2, alpha: 1.0)
-        ]
         
         // 允许视图内容延伸到四周
         extendedLayoutIncludesOpaqueBars = true
         edgesForExtendedLayout = .all
+    }
+    
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        // 当界面模式改变时，更新渐变背景颜色
+        if traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) {
+            let lightColors: [CGColor] = [
+                UIColor(red: 0.91, green: 0.96, blue: 1.00, alpha: 1.0).cgColor,
+                UIColor(red: 0.97, green: 0.98, blue: 0.96, alpha: 1.0).cgColor,
+                UIColor(red: 0.99, green: 0.98, blue: 0.94, alpha: 1.0).cgColor
+            ]
+            let darkColors: [CGColor] = [
+                UIColor(red: 0.11, green: 0.11, blue: 0.12, alpha: 1.0).cgColor,
+                UIColor(red: 0.08, green: 0.08, blue: 0.09, alpha: 1.0).cgColor,
+                UIColor(red: 0.06, green: 0.06, blue: 0.07, alpha: 1.0).cgColor
+            ]
+            let isDark = traitCollection.userInterfaceStyle == .dark
+            backgroundGradientLayer.colors = isDark ? darkColors : lightColors
+        }
     }
     
     private func checkPermissionStatus() {
@@ -75,6 +107,12 @@ class AlbumListViewController: UIViewController {
             self.albums.append(collection)
         }
         self.albumListView.collections = self.albums
+    }
+    
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        // 更新渐变层的frame
+        backgroundGradientLayer.frame = view.bounds
     }
 }
 

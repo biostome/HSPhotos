@@ -153,7 +153,7 @@ class PhotoGridView: UIView {
     private lazy var collectionView: UICollectionView = {
         let initialLayout = createLayout(for: columns)
         let collectionView = UICollectionView(frame: .zero, collectionViewLayout: initialLayout)
-        collectionView.backgroundColor = UIColor(red: 0.96, green: 0.96, blue: 0.97, alpha: 1.0)
+        collectionView.backgroundColor = .clear
         collectionView.register(PhotoCell.self, forCellWithReuseIdentifier: "PhotoCell")
         collectionView.showsVerticalScrollIndicator = false
         collectionView.delegate = self
@@ -182,7 +182,7 @@ class PhotoGridView: UIView {
     }
     
     private func setupUI() {
-        backgroundColor = UIColor(red: 0.96, green: 0.96, blue: 0.97, alpha: 1.0)
+        backgroundColor = .clear
         collectionView.delegate = self
         collectionView.dataSource = self
         collectionView.translatesAutoresizingMaskIntoConstraints = false

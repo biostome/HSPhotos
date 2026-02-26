@@ -68,7 +68,7 @@ class AlbumCell: UICollectionViewCell {
         // 添加渐变层
         let gradientLayer = CAGradientLayer()
         gradientLayer.colors = [
-            UIColor(red: 0, green: 0, blue: 0, alpha: 0.7).cgColor,  // 底部深色（增加不透明度）
+            UIColor(red: 0, green: 0, blue: 0, alpha: 0.7).cgColor,  // 底部深色
             UIColor(red: 0, green: 0, blue: 0, alpha: 0).cgColor     // 顶部透明
         ]
         gradientLayer.locations = [0, 1]
@@ -83,17 +83,25 @@ class AlbumCell: UICollectionViewCell {
         gradientView.isHidden = false
         
         // Title Label（添加在gradientView上方）
-        titleLabel.textColor = .white
+        titleLabel.textColor = .white // 保持白色，在渐变背景上更清晰
         titleLabel.font = .systemFont(ofSize: 17, weight: .semibold) // 增大字体
         titleLabel.numberOfLines = 2
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(titleLabel)
         
+        // 设置Cell背景色，支持深色模式
+        contentView.backgroundColor = UIColor { traitCollection in
+            return traitCollection.userInterfaceStyle == .dark ? .systemGray6 : .systemBackground
+        }
+        // 确保Cell的layer有圆角
+        contentView.layer.cornerRadius = 12
+        contentView.layer.masksToBounds = true
+        
 
         
         // 设置占位图
-        setPlaceholderImage()
+        showPlaceholder()
         
         // Layout - Label浮在图片上方
         NSLayoutConstraint.activate([
@@ -128,22 +136,23 @@ class AlbumCell: UICollectionViewCell {
         let assets = PHAsset.fetchAssets(in: collection, options: nil)
         
         titleLabel.text = collection.localizedTitle
-        setPlaceholderImage() // 设置占位图
+        showPlaceholder() // 显示占位图
 
         guard let coverAsset = assets.firstObject else { return }
         if coverAsset.localIdentifier == currentAssetID { return }
         
         currentAssetID = coverAsset.localIdentifier
         
-        // 确保使用Cell的实际大小来计算目标尺寸
+        // 适当增加目标图片大小，提高图片质量，同时保持较好的加载速度
         let cellSize = contentView.bounds.size
-        let targetSize = CGSize(width: cellSize.width * UIScreen.main.scale,
-                                height: cellSize.height * UIScreen.main.scale)
+        // 使用适中的目标尺寸，在速度和质量之间取得平衡
+        let targetSize = CGSize(width: cellSize.width * 2,
+                                height: cellSize.height * 2)
         
-        // 创建图片请求选项，确保图片质量
+        // 创建图片请求选项，使用均衡模式
         let options = PHImageRequestOptions()
-        options.resizeMode = .exact
-        options.deliveryMode = .highQualityFormat
+        options.resizeMode = .fast
+        options.deliveryMode = .opportunistic
         
         requestID = PHImageManager.default().requestImage(
             for: coverAsset,
@@ -153,8 +162,8 @@ class AlbumCell: UICollectionViewCell {
         ) { [weak self] image, _ in
             if let image = image {
                 self?.imageView.image = image
-                // 有封面图片时，隐藏占位图
-                self?.placeholderView.isHidden = true
+                // 有封面图片时，显示图片视图，隐藏占位图
+                self?.showImage()
             }
         }
     }
@@ -171,26 +180,57 @@ class AlbumCell: UICollectionViewCell {
     }
     
     /// 设置占位图，确保在不同大小的Cell中都能正确显示
-    private func setPlaceholderImage() {
+    private func updatePlaceholderImage() {
         // 创建一个配置对象，指定渲染模式、大小和颜色
-        let configuration = UIImage.SymbolConfiguration(pointSize: 44, weight: .regular)
-            .applying(UIImage.SymbolConfiguration(paletteColors: [.lightGray]))
+        let configuration = UIImage.SymbolConfiguration(pointSize: 22, weight: .regular)
+        // 根据当前界面模式设置占位图颜色
+        let placeholderColor: UIColor = traitCollection.userInterfaceStyle == .dark ? .lightGray : .darkGray
+        let coloredConfiguration = configuration.applying(UIImage.SymbolConfiguration(paletteColors: [placeholderColor]))
         // 使用配置创建系统图标
-        let placeholderImage = UIImage(systemName: "photo.on.rectangle", withConfiguration: configuration)
+        let placeholderImage = UIImage(systemName: "photo.on.rectangle", withConfiguration: coloredConfiguration)
         // 设置占位图视图的图片
         placeholderView.image = placeholderImage
-        // 显示占位图视图
+    }
+    
+    /// 显示占位图，隐藏图片视图
+    private func showPlaceholder() {
+        // 显示占位图视图，隐藏图片视图
         placeholderView.isHidden = false
+        imageView.isHidden = true
+        // 当没有图片时，设置灰白背景色
+        contentView.backgroundColor = .systemGray5
+        // 更新占位图
+        updatePlaceholderImage()
+    }
+    
+    /// 显示图片视图，隐藏占位图
+    private func showImage() {
+        // 显示图片视图，隐藏占位图
+        imageView.isHidden = false
+        placeholderView.isHidden = true
+        // 有图片时，恢复支持深色模式的背景色
+        contentView.backgroundColor = UIColor { traitCollection in
+            return traitCollection.userInterfaceStyle == .dark ? .systemGray6 : .systemBackground
+        }
+    }
+    
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        // 当界面模式改变时，更新占位图颜色
+        if traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) {
+            updatePlaceholderImage()
+        }
     }
     
     override func prepareForReuse() {
         super.prepareForReuse()
         titleLabel.text = ""
-        setPlaceholderImage()
+        showPlaceholder() // 显示占位图
         currentAssetID = nil
         if let requestID = requestID {
             PHImageManager.default().cancelImageRequest(requestID)
         }
         requestID = nil
+        gradientView.isHidden = false
     }
 }
