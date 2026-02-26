@@ -147,7 +147,7 @@ class GalleryViewController: UIViewController {
         ])
         
         // 初始状态下的按钮顺序，包含menuBarButton和sortBarButton
-        navigationItem.rightBarButtonItems = [selectBarButton, menuBarButton, redoBarButton, undoBarButton, sortBarButton]
+        navigationItem.setRightBarButtonItems([selectBarButton, menuBarButton, redoBarButton, undoBarButton, sortBarButton], animated: true)
         
         // 设置 gridView 的滚动委托
         gridView.scrollDelegate = self
@@ -181,11 +181,9 @@ class GalleryViewController: UIViewController {
     
     private func updateNavigationBar() {
         if selectionMode == .none {
-            navigationItem.rightBarButtonItems = [selectBarButton, menuBarButton, redoBarButton, undoBarButton, sortBarButton]
-            navigationItem.leftBarButtonItem = nil
+            navigationItem.setRightBarButtonItems([selectBarButton, menuBarButton, redoBarButton, undoBarButton, sortBarButton], animated: true)
         } else {
-            navigationItem.rightBarButtonItems = [cancelSelectBarButton, menuBarButton, redoBarButton, undoBarButton, sortBarButton]
-            navigationItem.leftBarButtonItem = nil
+            navigationItem.setRightBarButtonItems([cancelSelectBarButton, menuBarButton, redoBarButton, undoBarButton, sortBarButton], animated: true)
         }
     }
     
@@ -390,7 +388,7 @@ class GalleryViewController: UIViewController {
     
     private func setSelectionMode(_ mode: PhotoSelectionMode) {
         if mode == .none {
-            navigationItem.leftBarButtonItem = nil
+            
             gridView.clearSelected()
             gridView.selectedStart = nil
             gridView.selectedEnd = nil

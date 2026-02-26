@@ -565,6 +565,24 @@ class PhotoGridView: UIView {
         collectionView.reloadData()
     }
     
+    /// 全选所有可见照片
+    func selectAll() {
+        // 清除现有选中状态
+        selectedMap.removeAll()
+        selectedStart = nil
+        selectedEnd = nil
+        anchorPhoto = nil
+        
+        // 选中所有可见照片
+        for (index, asset) in visibleAssets.enumerated() {
+            selectedMap[asset.localIdentifier] = (index + 1, asset)
+        }
+        
+        // 通知代理
+        delegate?.photoGridView(self, didSelectedItems: selectedPhotos)
+        collectionView.reloadData()
+    }
+    
     // MARK: - Public Methods
     
     /// 更新可见资产（应用段落折叠过滤）

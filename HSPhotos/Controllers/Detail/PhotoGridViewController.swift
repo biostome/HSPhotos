@@ -41,6 +41,16 @@ class PhotoGridViewController: UIViewController {
         return button
     }()
     
+    private lazy var selectAllBarButton: UIBarButtonItem = {
+        let button = UIBarButtonItem(title: "全选", style: .plain, target: self, action: #selector(selectAllAssets))
+        return button
+    }()
+    
+    private lazy var deselectAllBarButton: UIBarButtonItem = {
+        let button = UIBarButtonItem(title: "取消全选", style: .plain, target: self, action: #selector(deselectAllAssets))
+        return button
+    }()
+    
     private lazy var menuBarButton: UIBarButtonItem = {
         let button = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), style: .plain, target: nil, action: nil)
         button.menu = createOperationMenu()
@@ -183,7 +193,7 @@ class PhotoGridViewController: UIViewController {
         ])
         
         // 初始状态下的按钮顺序，包含menuBarButton
-        navigationItem.rightBarButtonItems = [selectBarButton, menuBarButton, redoBarButton, undoBarButton]
+        navigationItem.setRightBarButtonItems([selectBarButton, menuBarButton, redoBarButton, undoBarButton], animated: true)
         
         // 设置 gridView 的滚动委托
         gridView.scrollDelegate = self
@@ -594,15 +604,50 @@ class PhotoGridViewController: UIViewController {
         }
     }
     
+    /// 全选所有资产
+    @objc private func selectAllAssets() {
+        gridView.selectAll()
+        // 更新按钮状态
+        updateSelectAllButton()
+    }
+    
+    /// 取消全选所有资产
+    @objc private func deselectAllAssets() {
+        gridView.clearSelected()
+        // 更新按钮状态
+        updateSelectAllButton()
+    }
+    
     private func updateNavigationBar() {
         // 根据选择模式更新按钮状态
         if selectionMode == .none {
             // 退出选择模式时，显示选择按钮，隐藏范围选择开关，使用动画效果
             navigationItem.setRightBarButtonItems([selectBarButton, menuBarButton, redoBarButton, undoBarButton], animated: true)
+            // 恢复默认的返回按钮
+            navigationItem.leftBarButtonItem = nil
         } else {
             // 进入选择模式时，显示取消按钮和范围选择开关，使用动画效果
             navigationItem.setRightBarButtonItems([cancelSelectBarButton, rangeSwitchItem, menuBarButton, redoBarButton, undoBarButton], animated: true)
+            // 根据当前选择状态显示全选或取消全选按钮
+            updateSelectAllButton()
         }
+    }
+    
+    /// 更新全选/取消全选按钮的显示状态
+    private func updateSelectAllButton() {
+        let isAllSelected = isAllAssetsSelected()
+        if isAllSelected {
+            // 已全选，显示取消全选按钮
+            navigationItem.setLeftBarButtonItems([deselectAllBarButton], animated: true)
+        } else {
+            // 未全选，显示全选按钮
+            navigationItem.setLeftBarButtonItems([selectAllBarButton], animated: true)
+        }
+    }
+    
+    /// 检查是否所有可见资产都已被选中
+    private func isAllAssetsSelected() -> Bool {
+        return gridView.selectedAssets.count == gridView.allAssets.count && !gridView.allAssets.isEmpty
     }
     
     // MARK: - Undo Manager Helper Methods
@@ -733,6 +778,10 @@ extension PhotoGridViewController: PhotoGridViewDelegate {
     func photoGridView(_ photoGridView: PhotoGridView, didSelectedItems assets: [PHAsset]) {
         updateOperationMenu()
         updateUndoRedoButtons()
+        // 更新全选/取消全选按钮状态
+        if selectionMode != .none {
+            updateSelectAllButton()
+        }
     }
     
     func photoGridView(_ photoGridView: PhotoGridView, didSetAnchor asset: PHAsset) {
