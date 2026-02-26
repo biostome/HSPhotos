@@ -41,8 +41,7 @@ class AlbumCell: UICollectionViewCell {
         // Image View
         imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
-        imageView.layer.cornerRadius = 12
-        imageView.layer.maskedCorners = [.layerMinXMinYCorner, .layerMaxXMinYCorner]
+        imageView.layer.cornerRadius = 8
         imageView.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(imageView)
         
@@ -66,22 +65,25 @@ class AlbumCell: UICollectionViewCell {
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(titleLabel)
         
-        // Layout
+        // Layout - 左图右文
         NSLayoutConstraint.activate([
-            imageView.topAnchor.constraint(equalTo: contentView.topAnchor),
-            imageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            imageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            imageView.heightAnchor.constraint(equalTo: imageView.widthAnchor, multiplier: 0.75),
+            // 图片视图：左侧，固定宽高
+            imageView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
+            imageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
+            imageView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12),
+            imageView.widthAnchor.constraint(equalTo: imageView.heightAnchor), // 正方形
             
-            countLabel.bottomAnchor.constraint(equalTo: imageView.bottomAnchor, constant: -8),
-            countLabel.trailingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: -8),
-            countLabel.heightAnchor.constraint(equalToConstant: 20),
-            countLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 30),
-            
-            titleLabel.topAnchor.constraint(equalTo: imageView.bottomAnchor, constant: 12),
-            titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
+            // 标题标签：右侧，垂直居中
+            titleLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
+            titleLabel.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 16),
             titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
-            titleLabel.bottomAnchor.constraint(lessThanOrEqualTo: contentView.bottomAnchor, constant: -12)
+            titleLabel.centerYAnchor.constraint(equalTo: contentView.centerYAnchor, constant: -10),
+            
+            // 计数标签：右侧，标题下方
+            countLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 8),
+            countLabel.leadingAnchor.constraint(equalTo: imageView.trailingAnchor, constant: 16),
+            countLabel.heightAnchor.constraint(equalToConstant: 20),
+            countLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 30)
         ])
     }
 

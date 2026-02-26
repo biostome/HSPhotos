@@ -771,6 +771,35 @@ extension PhotoGridViewController: PhotoGridViewDelegate {
         updateOperationMenu()
     }
     
+    func photoGridView(_ photoGridView: PhotoGridView, didSelectItemAt asset: PHAsset) {
+        // 打开图片浏览器
+        if selectionMode == .none {
+            if let index = self.assets.firstIndex(of: asset) {
+                // 获取选中图片的帧和图片
+                var sourceFrame: CGRect = .zero
+                var sourceImage: UIImage? = nil
+                
+                // 尝试获取选中的cell的frame
+                if let cellFrame = photoGridView.getCellFrame(for: asset) {
+                    sourceFrame = view.convert(cellFrame, from: photoGridView)
+                }
+                
+                // 尝试获取缩略图
+                let options = PHImageRequestOptions()
+                options.isSynchronous = true
+                options.deliveryMode = .highQualityFormat
+                options.isNetworkAccessAllowed = true
+                
+                PHImageManager.default().requestImage(for: asset, targetSize: CGSize(width: 300, height: 300), contentMode: .aspectFill, options: options) { (image, _) in
+                    sourceImage = image
+                }
+                
+                let viewerVC = GalleryViewerViewController(assets: self.assets, initialIndex: index, sourceFrame: sourceFrame, sourceImage: sourceImage)
+                present(viewerVC, animated: true)
+            }
+        }
+    }
+    
     func photoGridView(_ photoGridView: PhotoGridView, didDeselectItemAt indexPath: IndexPath) {
         updateOperationMenu()
     }

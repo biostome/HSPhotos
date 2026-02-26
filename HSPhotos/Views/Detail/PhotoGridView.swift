@@ -136,6 +136,17 @@ class PhotoGridView: UIView {
     
     private var columns: Int = PhotoGridConstants.defaultColumns
     
+    /// 获取指定资产的cell frame
+    public func getCellFrame(for asset: PHAsset) -> CGRect? {
+        if let index = visibleAssets.firstIndex(of: asset) {
+            let indexPath = IndexPath(item: index, section: 0)
+            if let cell = collectionView.cellForItem(at: indexPath) {
+                return collectionView.convert(cell.frame, to: self)
+            }
+        }
+        return nil
+    }
+    
     
     private var lastScale: CGFloat = 3.0
     
@@ -700,18 +711,19 @@ extension PhotoGridView: UICollectionViewDataSource {
 // MARK: - UICollectionViewDelegate
 extension PhotoGridView: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        guard indexPath.item < visibleAssets.count else { return }
-        let photo = visibleAssets[indexPath.item]
-        
-        switch selectionMode {
-        case .none:
-            return
-        case .multiple:
-            handleMultipleSelection(at: indexPath, in: collectionView, with: photo)
-        case .range:
-            handleRangeSelection(at: indexPath, in: collectionView, with: photo)
-        }
-    }
+         guard indexPath.item < visibleAssets.count else { return }
+         let photo = visibleAssets[indexPath.item]
+         
+         switch selectionMode {
+         case .none:
+             // 调用代理方法
+             delegate?.photoGridView(self, didSelectItemAt: photo)
+         case .multiple:
+             handleMultipleSelection(at: indexPath, in: collectionView, with: photo)
+         case .range:
+             handleRangeSelection(at: indexPath, in: collectionView, with: photo)
+         }
+     }
     
     func collectionView(_ collectionView: UICollectionView, didDeselectItemAt indexPath: IndexPath) {
         guard (selectionMode == .multiple || selectionMode == .range), indexPath.item < visibleAssets.count else { return }
