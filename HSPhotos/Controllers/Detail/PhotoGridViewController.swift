@@ -372,6 +372,31 @@ class PhotoGridViewController: UIViewController {
         }
     }
     
+    private func onDuplicate() {
+        let selectedAssets = gridView.selectedAssets
+        guard !selectedAssets.isEmpty else {
+            showAlert(title: "复制失败", message: "请先选择要复制的照片")
+            return
+        }
+        
+        let loadingAlert = UIAlertController(title: "复制中", message: "正在创建照片副本...", preferredStyle: .alert)
+        present(loadingAlert, animated: true)
+        
+        PhotoChangesService.duplicate(assets: selectedAssets, to: self.collection) { [weak self] success, message in
+            guard let self = self else { return }
+            loadingAlert.dismiss(animated: true) {
+                let title = success ? "复制成功" : "复制失败"
+                let alertMessage = success ? (message ?? "已创建照片副本") : (message ?? "无法创建照片副本")
+                self.showAlert(title: title, message: alertMessage)
+                if success {
+                    self.loadPhoto()
+                    // 更新按钮状态
+                    self.updateUndoRedoButtons()
+                }
+            }
+        }
+    }
+    
     private func onPaste() {
         guard let assets = AssetPasteboard.assetsFromPasteboard() else {
             showAlert(title: "粘贴失败", message: "剪切板里没有资源")
@@ -639,6 +664,10 @@ class PhotoGridViewController: UIViewController {
             self?.onCopy()
         }
         
+        let duplicate = UIAction(title: "复制", image: UIImage(systemName: "doc.on.doc.fill"), attributes: attributes) { [weak self] _ in
+            self?.onDuplicate()
+        }
+        
         let paste = UIAction(title: "粘贴", image: UIImage(systemName: "doc.on.clipboard")) { [weak self] _ in
             self?.onPaste()
         }
@@ -655,7 +684,7 @@ class PhotoGridViewController: UIViewController {
             self?.onMove()
         }
         
-        return UIMenu(title: "操作选项", children: [delete, move, paste, copy, sort])
+        return UIMenu(title: "操作选项", children: [delete, move, paste, copy, duplicate, sort])
     }
     
     private func updateOperationMenu() {

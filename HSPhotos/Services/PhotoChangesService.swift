@@ -168,7 +168,7 @@ class PhotoChangesService {
     ///   - to: 目标相册
     ///   - isUndoOperation: 是否为撤销操作，撤销操作不添加新的撤销记录
     static func copy(assets: [PHAsset], to destinationCollection: PHAssetCollection, isUndoOperation: Bool = false, completion: @escaping SortCompletion) {
-        PHPhotoLibrary.shared().performChanges({
+        PHPhotoLibrary.shared().performChanges({ 
             guard let changeRequest = PHAssetCollectionChangeRequest(for: destinationCollection) else {
                 return
             }
@@ -189,6 +189,122 @@ class PhotoChangesService {
                 completion(success, error?.localizedDescription ?? (success ? nil : "Copy operation failed"))
             }
         })
+    }
+    
+    // 创建相片副本的方法
+    /// - Parameters:
+    ///   - assets: 要创建副本的资源
+    ///   - to: 目标相册
+    ///   - isUndoOperation: 是否为撤销操作，撤销操作不添加新的撤销记录
+    static func duplicate(assets: [PHAsset], to destinationCollection: PHAssetCollection, isUndoOperation: Bool = false, completion: @escaping SortCompletion) {
+        // Check permission
+        guard PHPhotoLibrary.authorizationStatus() == .authorized || PHPhotoLibrary.authorizationStatus() == .limited else {
+            completion(false, "No photo library access permission")
+            return
+        }
+        
+        guard !assets.isEmpty else {
+            completion(false, "No assets to duplicate")
+            return
+        }
+        
+        // 使用Photos框架的批量操作来创建副本
+        var newAssets: [PHAsset] = []
+        let dispatchGroup = DispatchGroup()
+        
+        for asset in assets {
+            dispatchGroup.enter()
+            
+            // 获取资产资源
+            let resources = PHAssetResource.assetResources(for: asset)
+            guard let resource = resources.first else {
+                dispatchGroup.leave()
+                continue
+            }
+            
+            // 创建临时文件URL
+            let temporaryDirectory = URL(fileURLWithPath: NSTemporaryDirectory())
+            let fileName = UUID().uuidString + "." + (resource.originalFilename as NSString).pathExtension
+            let fileURL = temporaryDirectory.appendingPathComponent(fileName)
+            
+            // 导出资产数据到临时文件
+            let options = PHAssetResourceRequestOptions()
+            options.isNetworkAccessAllowed = true
+            
+            var receivedData = Data()
+            
+            PHAssetResourceManager.default().requestData(for: resource, options: options, dataReceivedHandler: { data in
+                receivedData.append(data)
+            }, completionHandler: { error in
+                defer {
+                    // 清理临时文件
+                    try? FileManager.default.removeItem(at: fileURL)
+                    dispatchGroup.leave()
+                }
+                
+                guard error == nil else {
+                    return
+                }
+                
+                do {
+                    // 写入临时文件
+                    try receivedData.write(to: fileURL)
+                    
+                    // 在PHPhotoLibrary的变更块中创建新资产
+                    var localPlaceholder: PHObjectPlaceholder?
+                    
+                    PHPhotoLibrary.shared().performChanges({ 
+                        // 从文件URL创建资产
+                        let creationRequest = PHAssetCreationRequest.creationRequestForAssetFromImage(atFileURL: fileURL)
+                        // 设置创建日期为原始资产的创建日期
+                        creationRequest?.creationDate = asset.creationDate
+                        
+                        // 获取新创建的资产的占位符
+                        localPlaceholder = creationRequest?.placeholderForCreatedAsset
+                    }, completionHandler: { success, error in
+                        if success, let placeholder = localPlaceholder {
+                            // 解析占位符获取实际的PHAsset
+                            let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: [placeholder.localIdentifier], options: nil)
+                            if let newAsset = fetchResult.firstObject {
+                                newAssets.append(newAsset)
+                            }
+                        }
+                    })
+                } catch {
+                    // 错误处理
+                }
+            })
+        }
+        
+        dispatchGroup.notify(queue: .main) {
+            if !newAssets.isEmpty {
+                // 将所有新创建的资产添加到目标相册
+                PHPhotoLibrary.shared().performChanges({ 
+                    if let collectionChangeRequest = PHAssetCollectionChangeRequest(for: destinationCollection) {
+                        collectionChangeRequest.addAssets(newAssets as NSArray)
+                    }
+                }, completionHandler: { success, error in
+                    DispatchQueue.main.async {
+                        if success {
+                            // 添加撤销操作（仅当不是撤销操作时）
+                            if !isUndoOperation {
+                                let undoAction = UndoAction(
+                                    type: .copy(sourceAssets: newAssets, destinationCollection: destinationCollection),
+                                    timestamp: Date(),
+                                    description: "创建 \(newAssets.count) 张照片的副本"
+                                )
+                                UndoManagerService.shared.addUndoAction(undoAction)
+                            }
+                            completion(true, "已创建 \(newAssets.count) 张照片的副本")
+                        } else {
+                            completion(false, error?.localizedDescription ?? "无法将照片添加到相册")
+                        }
+                    }
+                })
+            } else {
+                completion(false, "无法创建照片副本")
+            }
+        }
     }
     
     // 粘贴相片到相册的方法
