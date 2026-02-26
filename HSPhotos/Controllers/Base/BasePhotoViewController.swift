@@ -785,8 +785,7 @@ extension BasePhotoViewController: PhotoGridViewDelegate {
                 }
                 
                 let viewerVC = GalleryViewerViewController(assets: self.assets, initialIndex: index, sourceFrame: sourceFrame, sourceImage: sourceImage)
-                let navigationController = UINavigationController(rootViewController: viewerVC)
-                present(navigationController, animated: true)
+                present(viewerVC, animated: true)
             }
         }
     }
