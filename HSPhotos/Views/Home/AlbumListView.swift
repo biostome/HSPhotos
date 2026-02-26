@@ -60,6 +60,11 @@ class AlbumListView: UIView{
             collectionView.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
     }
+    
+    /// 滚动到指定的相册位置
+    public func scrollToItem(at indexPath: IndexPath, at scrollPosition: UICollectionView.ScrollPosition, animated: Bool) {
+        collectionView.scrollToItem(at: indexPath, at: scrollPosition, animated: animated)
+    }
 }
 
 // MARK: - UICollectionViewDataSource
