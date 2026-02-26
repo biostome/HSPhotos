@@ -40,7 +40,7 @@ class AlbumCell: UICollectionViewCell {
         contentView.layer.borderColor = UIColor(white: 0.9, alpha: 1.0).cgColor
         
         // Image View（先添加，在底层）
-        imageView.contentMode = .scaleAspectFill
+        imageView.contentMode = .scaleToFill
         imageView.clipsToBounds = true
         imageView.layer.cornerRadius = 12
         imageView.translatesAutoresizingMaskIntoConstraints = false
