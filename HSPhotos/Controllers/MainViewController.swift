@@ -32,10 +32,9 @@ class MainViewController: UIViewController {
     }
     
     private func showAlbumList() {
-        let albumListVC = AlbumListViewController()
-        let navigationController = UINavigationController(rootViewController: albumListVC)
-        navigationController.modalPresentationStyle = .fullScreen
-        present(navigationController, animated: false)
+        let tabbarController = MainTabbarViewContoller()
+        tabbarController.modalPresentationStyle = .fullScreen
+        present(tabbarController, animated: false)
     }
     
     private func showPermissionViewController() {
