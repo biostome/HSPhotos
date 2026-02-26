@@ -65,16 +65,10 @@ class AlbumCell: UICollectionViewCell {
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(titleLabel)
         
-        // Layout - 上图下文
+        // Layout - 上Label下图片
         NSLayoutConstraint.activate([
-            // 图片视图：上方，固定宽高
-            imageView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
-            imageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
-            imageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8),
-            imageView.heightAnchor.constraint(equalTo: imageView.widthAnchor), // 正方形
-            
-            // 标题标签：下方，左侧对齐
-            titleLabel.topAnchor.constraint(equalTo: imageView.bottomAnchor, constant: 8),
+            // 标题标签：上方，左侧对齐
+            titleLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
             titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
             titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8),
             titleLabel.heightAnchor.constraint(equalToConstant: 20),
@@ -84,7 +78,13 @@ class AlbumCell: UICollectionViewCell {
             countLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
             countLabel.heightAnchor.constraint(equalToConstant: 16),
             countLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 24),
-            countLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8)
+            
+            // 图片视图：下方，填充到边缘
+            imageView.topAnchor.constraint(equalTo: countLabel.bottomAnchor, constant: 8),
+            imageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            imageView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            imageView.heightAnchor.constraint(equalTo: imageView.widthAnchor) // 正方形
         ])
     }
 
