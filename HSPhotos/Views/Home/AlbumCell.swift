@@ -13,6 +13,7 @@ import Photos
 // MARK: - AlbumCell
 class AlbumCell: UICollectionViewCell {
     private let imageView = UIImageView()
+    private let placeholderView = UIImageView()
     private let countLabel = UILabel()
     private let titleLabel = UILabel()
     private let gradientView = UIView()
@@ -40,32 +41,44 @@ class AlbumCell: UICollectionViewCell {
         contentView.layer.borderColor = UIColor(white: 0.9, alpha: 1.0).cgColor
         
         // Image View（先添加，在底层）
-        imageView.contentMode = .scaleToFill
+        imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
         imageView.layer.cornerRadius = 12
         imageView.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(imageView)
         
-        // 渐变阴影View（添加在imageView上方，Label下方）
+        // 占位图视图（添加在imageView上方）
+        placeholderView.contentMode = .center
+        placeholderView.clipsToBounds = true
+        placeholderView.layer.cornerRadius = 12
+        placeholderView.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(placeholderView)
+        
+        // 渐变阴影View（添加在placeholderView上方，Label下方）
         gradientView.translatesAutoresizingMaskIntoConstraints = false
+        gradientView.backgroundColor = .clear // 移除临时背景色
+        gradientView.layer.cornerRadius = 12
+        gradientView.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner] // 左下角和右下角圆角
+        gradientView.clipsToBounds = true
         contentView.addSubview(gradientView)
         
         // 添加渐变层
         let gradientLayer = CAGradientLayer()
         gradientLayer.colors = [
-            UIColor(white: 0, alpha: 0.7).cgColor,  // 底部深色
-            UIColor(white: 0, alpha: 0.3).cgColor,  // 中间半透明
-            UIColor(white: 0, alpha: 0).cgColor     // 顶部透明
+            UIColor(red: 0, green: 0, blue: 0, alpha: 0.7).cgColor,  // 底部深色（增加不透明度）
+            UIColor(red: 0, green: 0, blue: 0, alpha: 0).cgColor     // 顶部透明
         ]
-        gradientLayer.locations = [0, 0.5, 1]
+        gradientLayer.locations = [0, 1]
         gradientLayer.startPoint = CGPoint(x: 0.5, y: 1)
         gradientLayer.endPoint = CGPoint(x: 0.5, y: 0)
         gradientLayer.frame = gradientView.bounds
+        gradientLayer.cornerRadius = 12
+        gradientLayer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner] // 左下角和右下角圆角
         gradientView.layer.insertSublayer(gradientLayer, at: 0)
         
-        // Title Label（后添加，在中层）
+        // Title Label（添加在gradientView上方）
         titleLabel.textColor = .white
-        titleLabel.font = .systemFont(ofSize: 15, weight: .medium)
+        titleLabel.font = .systemFont(ofSize: 17, weight: .semibold) // 增大字体
         titleLabel.numberOfLines = 2
         titleLabel.lineBreakMode = .byTruncatingTail
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
@@ -76,10 +89,13 @@ class AlbumCell: UICollectionViewCell {
         countLabel.textColor = .white
         countLabel.font = .systemFont(ofSize: 13, weight: .semibold)
         countLabel.textAlignment = .center
-        countLabel.layer.cornerRadius = 10
+        countLabel.layer.cornerRadius = 8
         countLabel.clipsToBounds = true
         countLabel.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(countLabel)
+        
+        // 设置占位图
+        setPlaceholderImage()
         
         // Layout - Label浮在图片上方
         NSLayoutConstraint.activate([
@@ -89,23 +105,29 @@ class AlbumCell: UICollectionViewCell {
             imageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             imageView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
             
-            // 渐变阴影View：填充整个Cell
-            gradientView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            // 占位图视图：与imageView大小相同
+            placeholderView.topAnchor.constraint(equalTo: imageView.topAnchor),
+            placeholderView.leadingAnchor.constraint(equalTo: imageView.leadingAnchor),
+            placeholderView.trailingAnchor.constraint(equalTo: imageView.trailingAnchor),
+            placeholderView.bottomAnchor.constraint(equalTo: imageView.bottomAnchor),
+            
+            // 渐变阴影View：高度为Cell的30%
             gradientView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             gradientView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             gradientView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            gradientView.heightAnchor.constraint(equalTo: contentView.heightAnchor, multiplier: 0.3),
             
-            // 标题标签：左上角，浮在图片上方
-            titleLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
-            titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
-            titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8),
-            titleLabel.heightAnchor.constraint(equalToConstant: 20),
+            // 标题标签：左下角，浮在渐变阴影View上
+            titleLabel.bottomAnchor.constraint(equalTo: gradientView.bottomAnchor, constant: -8), // 底部对齐
+            titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12), // 增加左边距
+            titleLabel.heightAnchor.constraint(equalToConstant: 24), // 增加高度以适应更大的字体
             
-            // 计数标签：左下角，浮在图片上方
-            countLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
-            countLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
-            countLabel.heightAnchor.constraint(equalToConstant: 16),
-            countLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 24)
+            // 计数标签：标题右后方，浮在渐变阴影View上
+            countLabel.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor), // 垂直居中对齐
+            countLabel.leadingAnchor.constraint(equalTo: titleLabel.trailingAnchor, constant: 8), // 跟随在标题右后方
+            countLabel.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -12), // 不超过右侧边缘
+            countLabel.heightAnchor.constraint(equalToConstant: 20), // 适当高度
+            countLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 40)
         ])
     }
 
@@ -115,23 +137,34 @@ class AlbumCell: UICollectionViewCell {
         
         titleLabel.text = collection.localizedTitle
         countLabel.text = "\(assets.count)"
-        imageView.image = UIImage(systemName: "photo") // 占位图
+        setPlaceholderImage() // 设置占位图
 
         guard let coverAsset = assets.firstObject else { return }
         if coverAsset.localIdentifier == currentAssetID { return }
         
         currentAssetID = coverAsset.localIdentifier
         
-        let targetSize = CGSize(width: imageView.bounds.width * UIScreen.main.scale,
-                                height: imageView.bounds.height * UIScreen.main.scale)
+        // 确保使用Cell的实际大小来计算目标尺寸
+        let cellSize = contentView.bounds.size
+        let targetSize = CGSize(width: cellSize.width * UIScreen.main.scale,
+                                height: cellSize.height * UIScreen.main.scale)
+        
+        // 创建图片请求选项，确保图片质量
+        let options = PHImageRequestOptions()
+        options.resizeMode = .exact
+        options.deliveryMode = .highQualityFormat
         
         requestID = PHImageManager.default().requestImage(
             for: coverAsset,
             targetSize: targetSize,
             contentMode: .aspectFill,
-            options: nil
+            options: options
         ) { [weak self] image, _ in
-            self?.imageView.image = image
+            if let image = image {
+                self?.imageView.image = image
+                // 有封面图片时，隐藏占位图
+                self?.placeholderView.isHidden = true
+            }
         }
     }
 
@@ -140,14 +173,30 @@ class AlbumCell: UICollectionViewCell {
         // 更新渐变层的frame
         if let gradientLayer = gradientView.layer.sublayers?.first as? CAGradientLayer {
             gradientLayer.frame = gradientView.bounds
+            // 确保渐变层的圆角与gradientView一致
+            gradientLayer.cornerRadius = gradientView.layer.cornerRadius
+            gradientLayer.maskedCorners = gradientView.layer.maskedCorners
         }
+    }
+    
+    /// 设置占位图，确保在不同大小的Cell中都能正确显示
+    private func setPlaceholderImage() {
+        // 创建一个配置对象，指定渲染模式、大小和颜色
+        let configuration = UIImage.SymbolConfiguration(pointSize: 44, weight: .regular)
+            .applying(UIImage.SymbolConfiguration(paletteColors: [.lightGray]))
+        // 使用配置创建系统图标
+        let placeholderImage = UIImage(systemName: "photo.on.rectangle", withConfiguration: configuration)
+        // 设置占位图视图的图片
+        placeholderView.image = placeholderImage
+        // 显示占位图视图
+        placeholderView.isHidden = false
     }
     
     override func prepareForReuse() {
         super.prepareForReuse()
         titleLabel.text = ""
         countLabel.text = ""
-        imageView.image = UIImage(systemName: "photo")
+        setPlaceholderImage()
         currentAssetID = nil
         if let requestID = requestID {
             PHImageManager.default().cancelImageRequest(requestID)
