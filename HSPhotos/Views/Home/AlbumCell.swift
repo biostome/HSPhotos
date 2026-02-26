@@ -15,6 +15,7 @@ class AlbumCell: UICollectionViewCell {
     private let imageView = UIImageView()
     private let countLabel = UILabel()
     private let titleLabel = UILabel()
+    private let gradientView = UIView()
     
     private var currentAssetID: String?
     private var requestID: PHImageRequestID?
@@ -45,6 +46,23 @@ class AlbumCell: UICollectionViewCell {
         imageView.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(imageView)
         
+        // 渐变阴影View（添加在imageView上方，Label下方）
+        gradientView.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(gradientView)
+        
+        // 添加渐变层
+        let gradientLayer = CAGradientLayer()
+        gradientLayer.colors = [
+            UIColor(white: 0, alpha: 0.7).cgColor,  // 底部深色
+            UIColor(white: 0, alpha: 0.3).cgColor,  // 中间半透明
+            UIColor(white: 0, alpha: 0).cgColor     // 顶部透明
+        ]
+        gradientLayer.locations = [0, 0.5, 1]
+        gradientLayer.startPoint = CGPoint(x: 0.5, y: 1)
+        gradientLayer.endPoint = CGPoint(x: 0.5, y: 0)
+        gradientLayer.frame = gradientView.bounds
+        gradientView.layer.insertSublayer(gradientLayer, at: 0)
+        
         // Title Label（后添加，在中层）
         titleLabel.textColor = .white
         titleLabel.font = .systemFont(ofSize: 15, weight: .medium)
@@ -70,6 +88,12 @@ class AlbumCell: UICollectionViewCell {
             imageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             imageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             imageView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            
+            // 渐变阴影View：填充整个Cell
+            gradientView.topAnchor.constraint(equalTo: contentView.topAnchor),
+            gradientView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            gradientView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            gradientView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
             
             // 标题标签：左上角，浮在图片上方
             titleLabel.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
@@ -111,6 +135,14 @@ class AlbumCell: UICollectionViewCell {
         }
     }
 
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // 更新渐变层的frame
+        if let gradientLayer = gradientView.layer.sublayers?.first as? CAGradientLayer {
+            gradientLayer.frame = gradientView.bounds
+        }
+    }
+    
     override func prepareForReuse() {
         super.prepareForReuse()
         titleLabel.text = ""
