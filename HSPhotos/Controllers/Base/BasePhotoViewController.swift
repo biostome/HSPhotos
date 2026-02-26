@@ -166,6 +166,7 @@ class BasePhotoViewController: UIViewController {
         view.addSubview(searchTextField)
         searchTextField.isHidden = true
         view.addSubview(segmentControl)
+        segmentControl.isHidden = true
         
         // 创建搜索条的顶部约束
         searchTextFieldTopConstraint = searchTextField.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8)
