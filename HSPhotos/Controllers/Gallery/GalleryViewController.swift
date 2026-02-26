@@ -110,7 +110,8 @@ class GalleryViewController: BasePhotoViewController {
                 }
                 
                 let viewerVC = GalleryViewerViewController(assets: self.assets, initialIndex: index, sourceFrame: sourceFrame, sourceImage: sourceImage)
-                present(viewerVC, animated: true)
+                let navigationController = UINavigationController(rootViewController: viewerVC)
+                present(navigationController, animated: true)
             }
         }
     }

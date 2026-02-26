@@ -22,12 +22,9 @@ class GalleryViewerViewController: UIViewController {
     )
     
     // 工具栏
-    private let closeButton = UIButton(type: .system)
-    private let titleButton = UIButton(type: .system)
     private let shareButton = UIButton(type: .system)
     private let favoriteButton = UIButton(type: .system)
     private let deleteButton = UIButton(type: .system)
-    private let topBar = UIView()
     private let bottomBar = UIVisualEffectView(effect: UIBlurEffect(style: .systemMaterial))
     
     // 页面指示器
@@ -69,8 +66,10 @@ class GalleryViewerViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .black
         
+        // 设置导航栏
+        setupNavigationBar()
+        
         setupPageViewController()
-        setupTopBar()
         setupBottomBar()
         setupPageIndicator()
         updateTitleAndFavorite()
@@ -115,6 +114,27 @@ class GalleryViewerViewController: UIViewController {
         ])
     }
     
+    // MARK: - 导航栏设置
+    private func setupNavigationBar() {
+        // 设置导航栏样式
+        navigationController?.navigationBar.barStyle = .black
+        navigationController?.navigationBar.tintColor = .white
+        
+        // 设置导航栏标题
+        let titleLabel = UILabel()
+        titleLabel.textColor = .white
+        titleLabel.font = .systemFont(ofSize: 16, weight: .medium)
+        navigationItem.titleView = titleLabel
+        
+        // 添加左侧关闭按钮
+        let closeButton = UIBarButtonItem(image: UIImage(systemName: "chevron.left"), style: .plain, target: self, action: #selector(closeTapped))
+        navigationItem.leftBarButtonItem = closeButton
+        
+        // 添加右侧信息按钮
+        let infoButton = UIBarButtonItem(image: UIImage(systemName: "info.circle"), style: .plain, target: self, action: #selector(infoTapped))
+        navigationItem.rightBarButtonItem = infoButton
+    }
+    
     // MARK: - 页面控制器设置
     private func setupPageViewController() {
         pageViewController.dataSource = self
@@ -148,47 +168,7 @@ class GalleryViewerViewController: UIViewController {
         return page
     }
     
-    // MARK: - 工具栏设置
-    private func setupTopBar() {
-        topBar.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(topBar)
-        
-        // 关闭按钮
-        closeButton.setImage(UIImage(systemName: "chevron.left"), for: .normal)
-        closeButton.tintColor = .label
-        closeButton.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.85)
-        closeButton.layer.cornerRadius = 18
-        closeButton.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
-        
-        // 标题按钮
-        titleButton.titleLabel?.numberOfLines = 2
-        titleButton.titleLabel?.textAlignment = .center
-        titleButton.setTitleColor(.label, for: .normal)
-        titleButton.titleLabel?.font = .systemFont(ofSize: 14, weight: .medium)
-        titleButton.addTarget(self, action: #selector(infoTapped), for: .touchUpInside)
-        
-        // 添加按钮到顶部栏
-        closeButton.translatesAutoresizingMaskIntoConstraints = false
-        titleButton.translatesAutoresizingMaskIntoConstraints = false
-        topBar.addSubview(closeButton)
-        topBar.addSubview(titleButton)
-        
-        // 设置约束
-        closeButton.widthAnchor.constraint(equalToConstant: 36).isActive = true
-        closeButton.heightAnchor.constraint(equalToConstant: 36).isActive = true
-        
-        NSLayoutConstraint.activate([
-            topBar.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
-            topBar.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            topBar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
-            topBar.heightAnchor.constraint(equalToConstant: 44),
-            closeButton.leadingAnchor.constraint(equalTo: topBar.leadingAnchor, constant: 4),
-            closeButton.centerYAnchor.constraint(equalTo: topBar.centerYAnchor),
-            titleButton.centerXAnchor.constraint(equalTo: topBar.centerXAnchor),
-            titleButton.centerYAnchor.constraint(equalTo: topBar.centerYAnchor),
-            titleButton.leadingAnchor.constraint(greaterThanOrEqualTo: closeButton.trailingAnchor, constant: 8)
-        ])
-    }
+
     
     private func setupBottomBar() {
         bottomBar.translatesAutoresizingMaskIntoConstraints = false
@@ -248,8 +228,16 @@ class GalleryViewerViewController: UIViewController {
     @objc private func toggleChrome() {
         isChromeHidden.toggle()
         let alpha: CGFloat = isChromeHidden ? 0 : 1
+        
+        // 动画显示/隐藏导航栏
+        if isChromeHidden {
+            navigationController?.setNavigationBarHidden(true, animated: true)
+        } else {
+            navigationController?.setNavigationBarHidden(false, animated: true)
+        }
+        
+        // 动画显示/隐藏底部栏和页面指示器
         UIView.animate(withDuration: 0.3, delay: 0, options: .curveEaseInOut, animations: {
-            self.topBar.alpha = alpha
             self.bottomBar.alpha = alpha
             self.pageIndicator.alpha = alpha
         })
@@ -551,12 +539,14 @@ class GalleryViewerViewController: UIViewController {
         guard currentIndex >= 0, currentIndex < assets.count else { return }
         let asset = assets[currentIndex]
         
-        // 更新标题
+        // 更新导航栏标题
         let dateFormatter = DateFormatter()
         dateFormatter.dateFormat = "yyyy年M月d日"
         let dateText = asset.creationDate.map { dateFormatter.string(from: $0) } ?? ""
         let title = dateText.isEmpty ? " " : dateText
-        titleButton.setTitle(title, for: .normal)
+        if let titleLabel = navigationItem.titleView as? UILabel {
+            titleLabel.text = title
+        }
         
         // 更新收藏按钮
         if var config = favoriteButton.configuration {
@@ -666,9 +656,8 @@ class GalleryViewerViewController: UIViewController {
             // 控制整个视图的背景透明度
             view.backgroundColor = UIColor.black.withAlphaComponent(backgroundAlpha)
             
-            // 顶部、底部栏和页面指示器跟随渐隐
+            // 底部栏和页面指示器跟随渐隐
             let chromeAlpha = isChromeHidden ? 0 : (1.0 - progress)
-            topBar.alpha = chromeAlpha
             bottomBar.alpha = chromeAlpha
             pageIndicator.alpha = chromeAlpha
             
@@ -696,7 +685,6 @@ class GalleryViewerViewController: UIViewController {
                             .scaledBy(x: 0.3, y: 0.3)
                         // 背景变透明
                         self.view.backgroundColor = .clear
-                        self.topBar.alpha = 0
                         self.bottomBar.alpha = 0
                         self.pageIndicator.alpha = 0
                     },
@@ -717,8 +705,12 @@ class GalleryViewerViewController: UIViewController {
                         self.pageViewController.view.transform = .identity
                         self.view.backgroundColor = .black
                         
+                        // 恢复导航栏状态
+                        if !self.isChromeHidden {
+                            self.navigationController?.setNavigationBarHidden(false, animated: true)
+                        }
+                        
                         let chromeAlpha: CGFloat = self.isChromeHidden ? 0 : 1
-                        self.topBar.alpha = chromeAlpha
                         self.bottomBar.alpha = chromeAlpha
                         self.pageIndicator.alpha = chromeAlpha
                     },
