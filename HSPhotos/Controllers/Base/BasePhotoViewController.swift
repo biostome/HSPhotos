@@ -333,29 +333,31 @@ class BasePhotoViewController: UIViewController {
             let sortedAssets = try gridView.sort()
             self.assets = sortedAssets
             
-            // let loadingAlert = UIAlertController(title: "同步中", message: "正在将照片顺序同步到系统相册...", preferredStyle: .alert)
-            // present(loadingAlert, animated: true)
+            let loadingAlert = UIAlertController(title: "同步中", message: "正在将照片顺序同步到系统相册...", preferredStyle: .alert)
+            present(loadingAlert, animated: true)
             
             PhotoChangesService.sync(sortedAssets: sortedAssets, for: self.collection) { [weak self] success, message in
                 guard let self = self else { return }
                 let duration = Date().timeIntervalSince(start)
-                if success {
-                    // 保存自定义排序数据到 UserDefaults
-                    PhotoOrder.set(order: sortedAssets, for: self.collection)
-                    
-                    // 记录撤销操作
-                    let originalAssets = self.assets // 保存原始顺序用于撤销
-                    let undoAction = UndoAction.sort(collection: self.collection, originalAssets: originalAssets, sortedAssets: sortedAssets)
-                    self.addAction(undoAction)
-                    
-                    // let message = "排序耗时: \(String(format: "%.2f", duration))秒"
-                    // self.syncSuccess(message: message)
-                } else {
-                    // let message = "无法同步照片顺序到系统相册：\(message ?? "")"
-                    // self.syncFailed(message: message)
+                loadingAlert.dismiss(animated: true) {
+                    if success {
+                        // 保存自定义排序数据到 UserDefaults
+                        PhotoOrder.set(order: sortedAssets, for: self.collection)
+                        
+                        // 记录撤销操作
+                        let originalAssets = self.assets // 保存原始顺序用于撤销
+                        let undoAction = UndoAction.sort(collection: self.collection, originalAssets: originalAssets, sortedAssets: sortedAssets)
+                        self.addAction(undoAction)
+                        
+                        let message = "排序耗时: \(String(format: "%.2f", duration))秒"
+                        self.syncSuccess(message: message)
+                    } else {
+                        let message = "无法同步照片顺序到系统相册：\(message ?? "")"
+                        self.syncFailed(message: message)
+                    }
+                    // 更新按钮状态
+                    self.updateUndoRedoButtons()
                 }
-                // 更新按钮状态
-                self.updateUndoRedoButtons()
             }
         } catch {
             gridView.clearSelected()
