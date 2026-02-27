@@ -325,7 +325,7 @@ class CustomVerticalScrollIndicator: UIView {
         let contentHeight = scrollView.contentSize.height
         let visibleHeight = scrollView.bounds.height
         
-        print("📊 配置指示器: contentHeight=\(contentHeight), visibleHeight=\(visibleHeight), frame.height=\(frame.height)")
+//        print("📊 配置指示器: contentHeight=\(contentHeight), visibleHeight=\(visibleHeight), frame.height=\(frame.height)")
         
         // 如果内容高度小于等于可见高度，隐藏指示器
         if contentHeight <= visibleHeight {
@@ -342,7 +342,7 @@ class CustomVerticalScrollIndicator: UIView {
         indicatorView.isHidden = false
         isConfigured = true
         
-        print("✅ 指示器配置完成: indicatorHeight=\(indicatorHeight), 初始隐藏")
+//        print("✅ 指示器配置完成: indicatorHeight=\(indicatorHeight), 初始隐藏")
     }
     
     private func updateScrollPosition() {
