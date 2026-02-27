@@ -62,9 +62,7 @@ struct PhotoGridConstants {
 
 
 class PhotoGridView: UIView {
-    // MARK: - Public Properties
     
-    /// 所有照片资产
     public var assets: [PHAsset] = [] {
         didSet {
             // 应用段落折叠过滤
@@ -72,19 +70,22 @@ class PhotoGridView: UIView {
         }
     }
     
-    /// 代理
+    // 实际显示的照片（经过段落折叠过滤）
+    private var visibleAssets: [PHAsset] = [] {
+        didSet {
+            collectionView.reloadData()
+        }
+    }
+    
     public var delegate: PhotoGridViewDelegate?
     
-    /// 滚动代理
     public weak var scrollDelegate: UIScrollViewDelegate?
     
-    /// 选中的资产数组（按选择顺序排序）
     public var selectedAssets: [PHAsset] { selectedPhotos }
     
-    /// 获取所有资产（包括隐藏的）
+    // 获取所有资产（包括隐藏的）
     public var allAssets: [PHAsset] { assets }
     
-    /// 选择模式
     public var selectionMode: PhotoSelectionMode = .none {
         didSet {
             collectionView.allowsMultipleSelection = selectionMode == .multiple || selectionMode == .range
@@ -98,96 +99,46 @@ class PhotoGridView: UIView {
     /// 选中的结束位置
     public var selectedEnd: Int?
     
-    /// 当前排序方式
-    public var sortPreference: PhotoSortPreference = .custom
+    // 新增：用于跟踪滑动手势选中的状态
+    internal var isSlidingSelectionEnabled = false
+    internal var lastSelectedIndexPath: IndexPath?
     
-    /// 当前相册引用，用于获取自定义排序数据
-    public var currentCollection: PHAssetCollection?
+    // 新增：用于临时禁用滚动
+    internal var isScrollDisabled = false
     
-    // MARK: - Private Properties
+    // 新增：用于跟踪手势方向
+    internal var initialTouchPoint: CGPoint = .zero
+    internal var hasStartedSelection = false
+    internal let selectionThreshold: CGFloat = 10.0 // 开始选中的阈值
     
-    /// 实际显示的照片（经过段落折叠过滤）
-    private var visibleAssets: [PHAsset] = [] {
-        didSet {
-            collectionView.reloadData()
-        }
-    }
+    // 滑动选择相关
+    internal var panStartIndexPath: IndexPath?
+    internal var panLastIndexPath: IndexPath?
     
-    /// 选中照片（根据选中顺序排序的派生数组）
+    // 记录滑动开始位置的选择状态
+    internal var panInitialSelectionState: Bool = false
+    
+    // 选中照片（根据选中顺序排序的派生数组）
     private var selectedPhotos: [PHAsset] {
         return selectedMap.values.sorted { $0.0 < $1.0 }.map { $0.1 }
     }
     
-    /// 照片ID -> (选中序号(从1开始且连续), 资产)
+    // 照片ID -> (选中序号(从1开始且连续), 资产)
     private var selectedMap: [String: (Int, PHAsset)] = [:]
     
-    /// 当前锚点照片
+    // 当前锚点照片
     private var anchorPhoto: PHAsset?
     
-    /// 首图服务引用
+    // 当前排序方式
+    public var sortPreference: PhotoSortPreference = .custom
+    
+    // 当前相册引用，用于获取自定义排序数据
+    public var currentCollection: PHAssetCollection?
+    
+    // 首图服务引用
     private let headerService = PhotoHeaderService.shared
     
-    /// 列数
     private var columns: Int = PhotoGridConstants.defaultColumns
-    
-    /// 上次缩放比例
-    private var lastScale: CGFloat = 3.0
-    
-    // MARK: - Sliding Selection Properties
-    
-    /// 用于跟踪滑动手势选中的状态
-    internal var isSlidingSelectionEnabled = false
-    
-    /// 上次选中的索引路径
-    internal var lastSelectedIndexPath: IndexPath?
-    
-    /// 用于临时禁用滚动
-    internal var isScrollDisabled = false
-    
-    /// 用于跟踪手势方向
-    internal var initialTouchPoint: CGPoint = .zero
-    
-    /// 是否已开始选择
-    internal var hasStartedSelection = false
-    
-    /// 开始选中的阈值
-    internal let selectionThreshold: CGFloat = 10.0
-    
-    /// 滑动开始的索引路径
-    internal var panStartIndexPath: IndexPath?
-    
-    /// 滑动过程中的最后索引路径
-    internal var panLastIndexPath: IndexPath?
-    
-    /// 记录滑动开始位置的选择状态
-    internal var panInitialSelectionState: Bool = false
-    
-    // MARK: - UI Components
-    
-    /// 集合视图
-    private lazy var collectionView: UICollectionView = {
-        let initialLayout = createLayout(for: columns)
-        let collectionView = UICollectionView(frame: .zero, collectionViewLayout: initialLayout)
-        collectionView.backgroundColor = .clear
-        collectionView.register(PhotoCell.self, forCellWithReuseIdentifier: "PhotoCell")
-        collectionView.showsVerticalScrollIndicator = false
-        collectionView.delegate = self
-        collectionView.dataSource = self
-        collectionView.translatesAutoresizingMaskIntoConstraints = false
-        return collectionView
-    }()
-    
-    /// 垂直滚动指示器
-    lazy var verticalScrollIndicator: CustomVerticalScrollIndicator = {
-        let view = CustomVerticalScrollIndicator()
-        view.translatesAutoresizingMaskIntoConstraints = false
-        view.alpha = 0.0 // 初始隐藏
-        view.backgroundColor = .clear
-        view.delegate = self
-        return view
-    }()
-    
-    // MARK: - Public Methods
     
     /// 获取指定资产的cell frame
     public func getCellFrame(for asset: PHAsset) -> CGRect? {
@@ -200,7 +151,29 @@ class PhotoGridView: UIView {
         return nil
     }
     
-    // MARK: - Initialization
+    
+    private var lastScale: CGFloat = 3.0
+    
+    private lazy var collectionView: UICollectionView = {
+        let initialLayout = createLayout(for: columns)
+        let collectionView = UICollectionView(frame: .zero, collectionViewLayout: initialLayout)
+        collectionView.backgroundColor = .clear
+        collectionView.register(PhotoCell.self, forCellWithReuseIdentifier: "PhotoCell")
+        collectionView.showsVerticalScrollIndicator = false
+        collectionView.delegate = self
+        collectionView.dataSource = self
+        collectionView.translatesAutoresizingMaskIntoConstraints = false
+        return collectionView
+    }()
+    
+    lazy var verticalScrollIndicator: CustomVerticalScrollIndicator = {
+        let view = CustomVerticalScrollIndicator()
+        view.translatesAutoresizingMaskIntoConstraints = false
+        view.alpha = 0.0 // 初始隐藏
+        view.backgroundColor = .clear
+        view.delegate = self
+        return view
+    }()
     
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -212,20 +185,14 @@ class PhotoGridView: UIView {
         fatalError("init(coder:) has not been implemented")
     }
     
-    // MARK: - Setup Methods
-    
-    /// 设置UI界面
     private func setupUI() {
         backgroundColor = .clear
-        
-        // 配置集合视图
         collectionView.delegate = self
         collectionView.dataSource = self
         collectionView.translatesAutoresizingMaskIntoConstraints = false
         collectionView.keyboardDismissMode = .onDrag
         addSubview(collectionView)
         
-        // 设置集合视图约束
         NSLayoutConstraint.activate([
             collectionView.topAnchor.constraint(equalTo: topAnchor),
             collectionView.leadingAnchor.constraint(equalTo: leadingAnchor),
@@ -233,21 +200,19 @@ class PhotoGridView: UIView {
             collectionView.bottomAnchor.constraint(equalTo: bottomAnchor),
         ])
         
-        // 添加垂直滚动指示器
         addSubview(verticalScrollIndicator)
         
-        // 设置垂直滚动指示器约束
         NSLayoutConstraint.activate([
             verticalScrollIndicator.topAnchor.constraint(equalTo: safeAreaLayoutGuide.topAnchor),
             verticalScrollIndicator.trailingAnchor.constraint(equalTo: trailingAnchor),
             verticalScrollIndicator.widthAnchor.constraint(equalToConstant: 30),
             verticalScrollIndicator.bottomAnchor.constraint(equalTo: safeAreaLayoutGuide.bottomAnchor)
         ])
+        
     }
     
-    /// 设置手势识别器
+    
     private func setupGestures() {
-        // 添加缩放手势
         let pinchGesture = UIPinchGestureRecognizer(target: self, action: #selector(handlePinchGesture(_:)))
         collectionView.addGestureRecognizer(pinchGesture)
         
@@ -257,11 +222,6 @@ class PhotoGridView: UIView {
         collectionView.addGestureRecognizer(panGesture)
     }
     
-    // MARK: - Gesture Handling
-    
-    /// 计算新的列数
-    /// - Parameter scaleDelta: 缩放比例变化
-    /// - Returns: 新的列数
     private func calculateNewColumns(for scaleDelta: CGFloat) -> Int {
         guard let currentIndex = PhotoGridConstants.allowedColumns.firstIndex(of: columns) else {
             return columns
@@ -280,15 +240,13 @@ class PhotoGridView: UIView {
         return columns
     }
     
-    /// 更新列数
-    /// - Parameter newColumns: 新的列数
     private func updateColumns(to newColumns: Int) {
         columns = newColumns
         let newLayout = createLayout(for: columns)
         collectionView.setCollectionViewLayout(newLayout, animated: true)
     }
     
-    /// 处理缩放手势
+    // MARK: - Gesture Handling
     @objc private func handlePinchGesture(_ gesture: UIPinchGestureRecognizer) {
         switch gesture.state {
         case .began:
@@ -308,7 +266,7 @@ class PhotoGridView: UIView {
         }
     }
     
-    /// 处理滑动手势
+    // 新增：处理滑动手势
     @objc private func handlePanGesture(_ gesture: UIPanGestureRecognizer) {
         // 只在多选模式或范围选择模式下启用滑动选择
         guard selectionMode == .multiple || selectionMode == .range else { return }
@@ -318,159 +276,151 @@ class PhotoGridView: UIView {
         switch gesture.state {
         case .began:
             // 记录滑动开始的indexPath和初始选择状态
-            handlePanGestureBegan(at: point)
+            if let indexPath = collectionView.indexPathForItem(at: point) {
+                panStartIndexPath = indexPath
+                panLastIndexPath = indexPath
+                
+                // 记录起始位置的初始选择状态
+                if let asset = getAsset(at: indexPath) {
+                    panInitialSelectionState = selectedMap[asset.localIdentifier] != nil
+                    
+                    // 切换起始位置的选择状态
+                    _ = toggle(photo: asset)
+                    
+                    // 刷新UI
+                    collectionView.reloadItems(at: [indexPath])
+                    // 通知代理
+                    delegate?.photoGridView(self, didSelectedItems: selectedPhotos)
+                }
+            }
         case .changed:
             // 处理滑动中的选择
-            handlePanGestureChanged(at: point)
+            if let startIndexPath = panStartIndexPath, let currentIndexPath = collectionView.indexPathForItem(at: point) {
+                // 只在indexPath变化时处理
+                guard currentIndexPath != panLastIndexPath else { return }
+                
+                // 获取当前所有的asset ids，按照collectionView的顺序
+                let allAssetIds = assets.map { $0.localIdentifier }
+                
+                // 获取当前位置的asset和index
+                guard let currentAsset = getAsset(at: currentIndexPath),
+                      let currentIndex = allAssetIds.firstIndex(of: currentAsset.localIdentifier) else { return }
+                
+                // 获取起始位置的asset和index
+                guard let startAsset = getAsset(at: startIndexPath),
+                      let startIndex = allAssetIds.firstIndex(of: startAsset.localIdentifier) else { return }
+                
+                // 获取上一个位置的asset和index
+                guard let lastIndexPath = panLastIndexPath,
+                      let lastAsset = getAsset(at: lastIndexPath),
+                      let lastIndex = allAssetIds.firstIndex(of: lastAsset.localIdentifier) else {
+                    // 如果没有上一个位置，只处理当前位置
+                    let asset = getAsset(at: currentIndexPath)
+                    if let asset = asset {
+                        let targetSelectionState = !panInitialSelectionState
+                        let isCurrentlySelected = selectedMap[asset.localIdentifier] != nil
+                        
+                        if isCurrentlySelected != targetSelectionState {
+                            _ = toggle(photo: asset)
+                        }
+                    }
+                    
+                    panLastIndexPath = currentIndexPath
+                    collectionView.reloadItems(at: [currentIndexPath])
+                    // 通知代理
+                    delegate?.photoGridView(self, didSelectedItems: selectedPhotos)
+                    return
+                }
+                
+                // 计算目标选择状态：基于起始位置的初始状态，滑动选择的照片应该是统一的选择或取消
+                let targetSelectionState = !panInitialSelectionState
+                
+                // 计算当前滑动的范围（只处理变化的部分）
+                let rangeStart = min(lastIndex, currentIndex)
+                let rangeEnd = max(lastIndex, currentIndex)
+                
+                // 遍历范围内的所有asset，设置为目标选择状态
+                var indexPathsToUpdate: [IndexPath] = []
+                for i in rangeStart...rangeEnd {
+                    if i < assets.count {
+                        let asset = assets[i]
+                        let isCurrentlySelected = selectedMap[asset.localIdentifier] != nil
+                        
+                        // 计算该位置应该有的选择状态
+                        // 基于起始位置到当前位置的完整范围
+                        let fullRangeStart = min(startIndex, currentIndex)
+                        let fullRangeEnd = max(startIndex, currentIndex)
+                        let isInFullRange = i >= fullRangeStart && i <= fullRangeEnd
+                        
+                        // 如果在完整范围内，设置为目标状态；否则设置为初始状态
+                        let expectedState = isInFullRange ? targetSelectionState : panInitialSelectionState
+                        
+                        if isCurrentlySelected != expectedState {
+                            _ = toggle(photo: asset)
+                            // 添加到更新列表
+                            let itemIndex = i
+                            let sectionIndex = 0 // 假设所有照片都在一个section中
+                            let indexPath = IndexPath(item: itemIndex, section: sectionIndex)
+                            indexPathsToUpdate.append(indexPath)
+                        }
+                    }
+                }
+                
+                // 更新最后处理的indexPath
+                panLastIndexPath = currentIndexPath
+                
+                // 刷新所有受影响的单元格
+                if !indexPathsToUpdate.isEmpty {
+                    collectionView.reloadItems(at: indexPathsToUpdate)
+                }
+                
+                // 通知代理
+                delegate?.photoGridView(self, didSelectedItems: selectedPhotos)
+            }
         case .ended, .cancelled, .failed:
             // 清理状态
-            handlePanGestureEnded(gesture: gesture)
+            panStartIndexPath = nil
+            panLastIndexPath = nil
+            gesture.setTranslation(.zero, in: collectionView) // 重置手势位移
         default:
             break
         }
     }
     
-    /// 处理滑动手势开始
-    private func handlePanGestureBegan(at point: CGPoint) {
-        if let indexPath = collectionView.indexPathForItem(at: point) {
-            panStartIndexPath = indexPath
-            panLastIndexPath = indexPath
-            
-            // 记录起始位置的初始选择状态
-            if let asset = getAsset(at: indexPath) {
-                panInitialSelectionState = selectedMap[asset.localIdentifier] != nil
-                
-                // 切换起始位置的选择状态
-                _ = toggle(photo: asset)
-                
-                // 刷新UI
-                collectionView.reloadItems(at: [indexPath])
-                // 通知代理
-                delegate?.photoGridView(self, didSelectedItems: selectedPhotos)
-            }
-        }
-    }
-    
-    /// 处理滑动手势变化
-    private func handlePanGestureChanged(at point: CGPoint) {
-        if let startIndexPath = panStartIndexPath, let currentIndexPath = collectionView.indexPathForItem(at: point) {
-            // 只在indexPath变化时处理
-            guard currentIndexPath != panLastIndexPath else { return }
-            
-            // 获取当前所有的asset ids，按照collectionView的顺序
-            let allAssetIds = assets.map { $0.localIdentifier }
-            
-            // 获取当前位置的asset和index
-            guard let currentAsset = getAsset(at: currentIndexPath),
-                  let currentIndex = allAssetIds.firstIndex(of: currentAsset.localIdentifier) else { return }
-            
-            // 获取起始位置的asset和index
-            guard let startAsset = getAsset(at: startIndexPath),
-                  let startIndex = allAssetIds.firstIndex(of: startAsset.localIdentifier) else { return }
-            
-            // 获取上一个位置的asset和index
-            guard let lastIndexPath = panLastIndexPath,
-                  let lastAsset = getAsset(at: lastIndexPath),
-                  let lastIndex = allAssetIds.firstIndex(of: lastAsset.localIdentifier) else {
-                // 如果没有上一个位置，只处理当前位置
-                handlePanGestureWithoutLastIndex(at: currentIndexPath)
-                return
-            }
-            
-            // 处理有上一个位置的情况
-            handlePanGestureWithLastIndex(
-                currentIndex: currentIndex,
-                startIndex: startIndex,
-                lastIndex: lastIndex
-            )
-        }
-    }
-    
-    /// 处理没有上一个位置的滑动手势
-    private func handlePanGestureWithoutLastIndex(at currentIndexPath: IndexPath) {
-        let asset = getAsset(at: currentIndexPath)
-        if let asset = asset {
-            let targetSelectionState = !panInitialSelectionState
-            let isCurrentlySelected = selectedMap[asset.localIdentifier] != nil
-            
-            if isCurrentlySelected != targetSelectionState {
-                _ = toggle(photo: asset)
-            }
-        }
-        
-        panLastIndexPath = currentIndexPath
-        collectionView.reloadItems(at: [currentIndexPath])
-        // 通知代理
-        delegate?.photoGridView(self, didSelectedItems: selectedPhotos)
-    }
-    
-    /// 处理有上一个位置的滑动手势
-    private func handlePanGestureWithLastIndex(currentIndex: Int, startIndex: Int, lastIndex: Int) {
-        // 计算目标选择状态：基于起始位置的初始状态，滑动选择的照片应该是统一的选择或取消
-        let targetSelectionState = !panInitialSelectionState
-        
-        // 计算当前滑动的范围（只处理变化的部分）
-        let rangeStart = min(lastIndex, currentIndex)
-        let rangeEnd = max(lastIndex, currentIndex)
-        
-        // 遍历范围内的所有asset，设置为目标选择状态
-        var indexPathsToUpdate: [IndexPath] = []
-        for i in rangeStart...rangeEnd {
-            if i < assets.count {
-                let asset = assets[i]
-                let isCurrentlySelected = selectedMap[asset.localIdentifier] != nil
-                
-                // 计算该位置应该有的选择状态
-                // 基于起始位置到当前位置的完整范围
-                let fullRangeStart = min(startIndex, currentIndex)
-                let fullRangeEnd = max(startIndex, currentIndex)
-                let isInFullRange = i >= fullRangeStart && i <= fullRangeEnd
-                
-                // 如果在完整范围内，设置为目标状态；否则设置为初始状态
-                let expectedState = isInFullRange ? targetSelectionState : panInitialSelectionState
-                
-                if isCurrentlySelected != expectedState {
-                    _ = toggle(photo: asset)
-                    // 添加到更新列表
-                    let itemIndex = i
-                    let sectionIndex = 0 // 假设所有照片都在一个section中
-                    let indexPath = IndexPath(item: itemIndex, section: sectionIndex)
-                    indexPathsToUpdate.append(indexPath)
-                }
-            }
-        }
-        
-        // 更新最后处理的indexPath
-        if let currentIndexPath = collectionView.indexPathForItem(at: collectionView.convert(CGPoint(x: 0, y: CGFloat(currentIndex) * collectionView.bounds.height), from: collectionView)) {
-            panLastIndexPath = currentIndexPath
-        }
-        
-        // 刷新所有受影响的单元格
-        if !indexPathsToUpdate.isEmpty {
-            collectionView.reloadItems(at: indexPathsToUpdate)
-        }
-        
-        // 通知代理
-        delegate?.photoGridView(self, didSelectedItems: selectedPhotos)
-    }
-    
-    /// 处理滑动手势结束
-    private func handlePanGestureEnded(gesture: UIPanGestureRecognizer) {
-        // 清理状态
-        panStartIndexPath = nil
-        panLastIndexPath = nil
-        gesture.setTranslation(.zero, in: collectionView) // 重置手势位移
-    }
-    
 
     
 
     
-    // MARK: - Selection Core Methods
+    // MARK: - Layout Methods
+    private func createLayout(for columns: Int) -> UICollectionViewFlowLayout {
+        let layout = UICollectionViewFlowLayout()
+        
+        // 根据列数动态调整间距
+        let spacing = columns > 5 ? PhotoGridConstants.compactSpacing : PhotoGridConstants.defaultSpacing
+        let sectionInset = columns > 5 ? PhotoGridConstants.compactSpacing : PhotoGridConstants.sectionInset
+        
+        layout.minimumInteritemSpacing = spacing
+        layout.minimumLineSpacing = spacing
+        layout.sectionInset = UIEdgeInsets(
+            top: sectionInset,
+            left: sectionInset,
+            bottom: sectionInset,
+            right: sectionInset
+        )
+        
+        let totalSpacing = sectionInset * 2 + (CGFloat(columns - 1) * spacing)
+        let itemWidth = (bounds.width - totalSpacing) / CGFloat(columns)
+        layout.itemSize = CGSize(width: itemWidth, height: itemWidth)
+        
+        return layout
+    }
     
-    /// 切换照片的选择状态
-    /// - Parameter photo: 要切换选择状态的照片
-    /// - Returns: 需要更新序号的照片数组
+    // 新增：根据索引路径获取资源
+    private func getAsset(at indexPath: IndexPath) -> PHAsset? {
+        guard indexPath.item < assets.count else { return nil }
+        return assets[indexPath.item]
+    }
+    
     internal func toggle(photo: PHAsset) -> [PHAsset] {
         var updatedPhotos: [PHAsset] = []
         
@@ -512,10 +462,6 @@ class PhotoGridView: UIView {
     }
     
     /// 选择指定范围的照片（根据方向分配顺序）
-    /// - Parameters:
-    ///   - startIndex: 开始索引
-    ///   - endIndex: 结束索引
-    ///   - reverse: 是否反向选择
     private func selectRange(from startIndex: Int, to endIndex: Int, reverse: Bool) {
         var indexPaths: [IndexPath] = []
         // 归一化范围并根据方向决定追加顺序
@@ -547,9 +493,6 @@ class PhotoGridView: UIView {
     }
     
     /// 取消选择指定范围的照片（根据方向分配顺序）
-    /// - Parameters:
-    ///   - startIndex: 开始索引
-    ///   - endIndex: 结束索引
     private func deselectRange(from startIndex: Int, to endIndex: Int) {
         var indexPaths: [IndexPath] = []
         var updatedPhotos: [PHAsset] = []
@@ -588,62 +531,100 @@ class PhotoGridView: UIView {
         }
     }
     
-    /// 根据索引路径获取资源
-    /// - Parameter indexPath: 索引路径
-    /// - Returns: 对应的资源
-    private func getAsset(at indexPath: IndexPath) -> PHAsset? {
-        guard indexPath.item < assets.count else { return nil }
-        return assets[indexPath.item]
-    }
-    
-    // MARK: - Layout Methods
-    
-    /// 创建集合视图布局
-    /// - Parameter columns: 列数
-    /// - Returns: 集合视图布局
-    private func createLayout(for columns: Int) -> UICollectionViewFlowLayout {
-        let layout = UICollectionViewFlowLayout()
-        
-        // 根据列数动态调整间距
-        let spacing = columns > 5 ? PhotoGridConstants.compactSpacing : PhotoGridConstants.defaultSpacing
-        let sectionInset = columns > 5 ? PhotoGridConstants.compactSpacing : PhotoGridConstants.sectionInset
-        
-        layout.minimumInteritemSpacing = spacing
-        layout.minimumLineSpacing = spacing
-        layout.sectionInset = UIEdgeInsets(
-            top: sectionInset,
-            left: sectionInset,
-            bottom: sectionInset,
-            right: sectionInset
-        )
-        
-        let totalSpacing = sectionInset * 2 + (CGFloat(columns - 1) * spacing)
-        let itemWidth = (bounds.width - totalSpacing) / CGFloat(columns)
-        layout.itemSize = CGSize(width: itemWidth, height: itemWidth)
-        
-        return layout
-    }
-    
-    // MARK: - Collection View and Layout Methods
+    // 已不需要按次序计算排名，直接从 selectedMap 中读取
     
     /// 获取照片在自定义排序中的下标位置
     /// - Parameter photo: 要查询的照片
     /// - Returns: 自定义排序中的下标位置（从0开始），如果未找到则返回-1
     private func getCustomOrderIndex(for photo: PHAsset) -> Int {
         guard let collection = currentCollection else { 
+            print("❌ getCustomOrderIndex: currentCollection is nil")
             return -1 
         }
         
         // 获取自定义排序数据
         let customOrder = PhotoOrder.order(for: collection)
+        print("🔍 getCustomOrderIndex: customOrder count = \(customOrder.count)")
+        print("🔍 getCustomOrderIndex: looking for photo = \(photo.localIdentifier)")
         
         // 在自定义排序中查找照片的位置
         if let index = customOrder.firstIndex(of: photo.localIdentifier) {
+            print("✅ getCustomOrderIndex: found at index = \(index)")
             return index
         }
         
         // 如果在自定义排序中未找到，返回-1表示不在自定义排序中
+        print("❌ getCustomOrderIndex: photo not found in custom order")
         return -1
+    }
+    
+    func sort() throws -> [PHAsset] {
+        guard selectedPhotos.count > 1 else {
+            throw PhotoSortError.notEnoughPhotosSelected
+        }
+        
+        // 确定排序基准照片：优先使用锚点，如果没有锚点则使用第一张选中的照片
+        let currentAnchorPhoto: PHAsset
+        if let anchorPhoto = anchorPhoto {
+            // 锚点照片即使没有被选中也可以作为排序基准
+            currentAnchorPhoto = anchorPhoto
+        } else {
+            // 没有锚点时，使用第一张选中的照片作为基准
+            currentAnchorPhoto = selectedPhotos.first!
+        }
+        
+        // 获取要移动的照片（除了基准照片之外的所有选中照片）
+        let photosToMove = selectedPhotos.filter { $0.localIdentifier != currentAnchorPhoto.localIdentifier }
+        let identifiersToMove = Set(photosToMove.map { $0.localIdentifier })
+        var temporaryAssets = self.assets.filter { !identifiersToMove.contains($0.localIdentifier) }
+        
+        guard let anchorIndex = temporaryAssets.firstIndex(of: currentAnchorPhoto) else {
+            throw PhotoSortError.anchorPhotoMissing
+        }
+        
+        // 按选中顺序插入照片（基准照片始终在首位，其余按选中顺序跟随）
+        temporaryAssets.insert(contentsOf: photosToMove, at: anchorIndex + 1)
+        return temporaryAssets
+    }
+    
+    func clearSelected() {
+        selectedMap.removeAll()
+        selectedStart = nil
+        selectedEnd = nil
+        anchorPhoto = nil  // 清除锚点
+        // 清空后序号从1开始（由 selectedMap.count + 1 决定），无需重置计数器
+        delegate?.photoGridView(self, didSelectedItems: selectedPhotos)
+        collectionView.reloadData()
+    }
+    
+    /// 全选所有可见照片
+    func selectAll() {
+        // 清除现有选中状态
+        selectedMap.removeAll()
+        selectedStart = nil
+        selectedEnd = nil
+        anchorPhoto = nil
+        
+        // 选中所有可见照片
+        for (index, asset) in visibleAssets.enumerated() {
+            selectedMap[asset.localIdentifier] = (index + 1, asset)
+        }
+        
+        // 通知代理
+        delegate?.photoGridView(self, didSelectedItems: selectedPhotos)
+        collectionView.reloadData()
+    }
+    
+    // MARK: - Public Methods
+    
+    /// 更新可见资产（应用段落折叠过滤）
+    private func updateVisibleAssets() {
+        guard let collection = currentCollection else {
+            visibleAssets = assets
+            return
+        }
+        
+        visibleAssets = headerService.getVisibleAssets(from: assets, in: collection)
     }
     
     /// 刷新段落显示
@@ -669,18 +650,8 @@ class PhotoGridView: UIView {
             }
         }
     }
-    
+
     // MARK: - Asset Management
-    
-    /// 更新可见资产（应用段落折叠过滤）
-    private func updateVisibleAssets() {
-        guard let collection = currentCollection else {
-            visibleAssets = assets
-            return
-        }
-        
-        visibleAssets = headerService.getVisibleAssets(from: assets, in: collection)
-    }
     
     /// 删除指定的资源项
     /// - Parameters:
@@ -724,87 +695,14 @@ class PhotoGridView: UIView {
             completion(finished)
         }
     }
-    
-    // MARK: - Selection Management
-    
-    /// 排序选中的照片
-    /// - Returns: 排序后的照片数组
-    /// - Throws: 排序错误
-    func sort() throws -> [PHAsset] {
-        guard selectedPhotos.count > 1 else {
-            throw PhotoSortError.notEnoughPhotosSelected
-        }
-        
-        // 确定排序基准照片：优先使用锚点，如果没有锚点则使用第一张选中的照片
-        let currentAnchorPhoto: PHAsset
-        if let anchorPhoto = anchorPhoto {
-            // 锚点照片即使没有被选中也可以作为排序基准
-            currentAnchorPhoto = anchorPhoto
-        } else {
-            // 没有锚点时，使用第一张选中的照片作为基准
-            currentAnchorPhoto = selectedPhotos.first!
-        }
-        
-        // 获取要移动的照片（除了基准照片之外的所有选中照片）
-        let photosToMove = selectedPhotos.filter { $0.localIdentifier != currentAnchorPhoto.localIdentifier }
-        let identifiersToMove = Set(photosToMove.map { $0.localIdentifier })
-        var temporaryAssets = self.assets.filter { !identifiersToMove.contains($0.localIdentifier) }
-        
-        guard let anchorIndex = temporaryAssets.firstIndex(of: currentAnchorPhoto) else {
-            throw PhotoSortError.anchorPhotoMissing
-        }
-        
-        // 按选中顺序插入照片（基准照片始终在首位，其余按选中顺序跟随）
-        temporaryAssets.insert(contentsOf: photosToMove, at: anchorIndex + 1)
-        return temporaryAssets
-    }
-    
-    /// 清除所有选中状态
-    func clearSelected() {
-        selectedMap.removeAll()
-        selectedStart = nil
-        selectedEnd = nil
-        anchorPhoto = nil  // 清除锚点
-        // 清空后序号从1开始（由 selectedMap.count + 1 决定），无需重置计数器
-        delegate?.photoGridView(self, didSelectedItems: selectedPhotos)
-        collectionView.reloadData()
-    }
-    
-    /// 全选所有可见照片
-    func selectAll() {
-        // 清除现有选中状态
-        selectedMap.removeAll()
-        selectedStart = nil
-        selectedEnd = nil
-        anchorPhoto = nil
-        
-        // 选中所有可见照片
-        for (index, asset) in visibleAssets.enumerated() {
-            selectedMap[asset.localIdentifier] = (index + 1, asset)
-        }
-        
-        // 通知代理
-        delegate?.photoGridView(self, didSelectedItems: selectedPhotos)
-        collectionView.reloadData()
-    }
 }
 
 // MARK: - UICollectionViewDataSource
 extension PhotoGridView: UICollectionViewDataSource {
-    /// 集合视图的项目数量
-    /// - Parameters:
-    ///   - collectionView: 集合视图
-    ///   - section: 分区
-    /// - Returns: 项目数量
     func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
         return visibleAssets.count
     }
     
-    /// 集合视图的单元格
-    /// - Parameters:
-    ///   - collectionView: 集合视图
-    ///   - indexPath: 索引路径
-    /// - Returns: 单元格
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "PhotoCell", for: indexPath) as! PhotoCell
         let photo = visibleAssets[indexPath.item]
@@ -833,10 +731,6 @@ extension PhotoGridView: UICollectionViewDataSource {
 
 // MARK: - UICollectionViewDelegate
 extension PhotoGridView: UICollectionViewDelegate {
-    /// 选择项目
-    /// - Parameters:
-    ///   - collectionView: 集合视图
-    ///   - indexPath: 索引路径
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
          guard indexPath.item < visibleAssets.count else { return }
          let photo = visibleAssets[indexPath.item]
@@ -852,21 +746,16 @@ extension PhotoGridView: UICollectionViewDelegate {
          }
      }
     
-    /// 取消选择项目
-    /// - Parameters:
-    ///   - collectionView: 集合视图
-    ///   - indexPath: 索引路径
     func collectionView(_ collectionView: UICollectionView, didDeselectItemAt indexPath: IndexPath) {
         guard (selectionMode == .multiple || selectionMode == .range), indexPath.item < visibleAssets.count else { return }
         let photo = visibleAssets[indexPath.item]
         handleDeselection(at: indexPath, in: collectionView, with: photo)
     }
     
-    /// 处理多选模式下的选择
-    /// - Parameters:
-    ///   - indexPath: 索引路径
-    ///   - collectionView: 集合视图
-    ///   - photo: 照片资产
+}
+
+// MARK: - Helper Methods
+extension PhotoGridView {
     private func handleMultipleSelection(at indexPath: IndexPath, in collectionView: UICollectionView, with photo: PHAsset) {
         // 如果启用了滑动选择，则不处理点击选择
         guard !isSlidingSelectionEnabled else { return }
@@ -900,11 +789,6 @@ extension PhotoGridView: UICollectionViewDelegate {
         }
     }
     
-    /// 处理范围选择模式下的选择
-    /// - Parameters:
-    ///   - indexPath: 索引路径
-    ///   - collectionView: 集合视图
-    ///   - photo: 照片资产
     private func handleRangeSelection(at indexPath: IndexPath, in collectionView: UICollectionView, with photo: PHAsset) {
         // 如果启用了滑动选择，则不处理点击选择
         guard !isSlidingSelectionEnabled else { return }
@@ -982,11 +866,6 @@ extension PhotoGridView: UICollectionViewDelegate {
         }
     }
     
-    /// 处理取消选择
-    /// - Parameters:
-    ///   - indexPath: 索引路径
-    ///   - collectionView: 集合视图
-    ///   - photo: 照片资产
     private func handleDeselection(at indexPath: IndexPath, in collectionView: UICollectionView, with photo: PHAsset) {
         // 如果启用了滑动选择，则不处理点击取消选择
         guard !isSlidingSelectionEnabled else { return }
@@ -1019,12 +898,7 @@ extension PhotoGridView: UICollectionViewDelegate {
 
 // MARK: - UICollectionViewDelegateFlowLayout
 extension PhotoGridView: UICollectionViewDelegateFlowLayout {
-    /// 集合视图项目大小
-    /// - Parameters:
-    ///   - collectionView: 集合视图
-    ///   - collectionViewLayout: 集合视图布局
-    ///   - indexPath: 索引路径
-    /// - Returns: 项目大小
+    
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
         guard let flowLayout = collectionViewLayout as? UICollectionViewFlowLayout else { return .zero }
         let sectionInset = flowLayout.sectionInset
@@ -1034,12 +908,9 @@ extension PhotoGridView: UICollectionViewDelegateFlowLayout {
         let width = (collectionView.bounds.width - totalSpacing) / CGFloat(columns)
         return CGSize(width: width, height: width)
     }
-}
-
-// MARK: - UIScrollViewDelegate
-extension PhotoGridView: UIScrollViewDelegate {
-    /// 滚动视图滚动时
-    /// - Parameter scrollView: 滚动视图
+    
+    // MARK: - UIScrollViewDelegate
+    
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         // 只有在非滑动选择状态下才通知代理
         if !isSlidingSelectionEnabled {
@@ -1047,8 +918,7 @@ extension PhotoGridView: UIScrollViewDelegate {
         }
     }
         
-    /// 滚动视图开始拖动时
-    /// - Parameter scrollView: 滚动视图
+    // 新增：重写 scrollViewWillBeginDragging 方法来控制滚动
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
         // 如果正在滑动选择，则阻止滚动
         if isSlidingSelectionEnabled {
@@ -1058,10 +928,7 @@ extension PhotoGridView: UIScrollViewDelegate {
         scrollDelegate?.scrollViewWillBeginDragging?(scrollView)
     }
     
-    /// 滚动视图结束拖动时
-    /// - Parameters:
-    ///   - scrollView: 滚动视图
-    ///   - decelerate: 是否减速
+    // 新增：重写 scrollViewDidEndDragging 方法来恢复滚动
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
         // 如果不是在滑动选择状态，则恢复滚动
         if !isSlidingSelectionEnabled {
@@ -1071,14 +938,10 @@ extension PhotoGridView: UIScrollViewDelegate {
         scrollDelegate?.scrollViewDidEndDragging?(scrollView, willDecelerate: decelerate)
     }
     
-    /// 滚动视图结束减速时
-    /// - Parameter scrollView: 滚动视图
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         // 滚动完全停止时的处理
     }
     
-    /// 滚动视图结束滚动动画时
-    /// - Parameter scrollView: 滚动视图
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
         
     }
@@ -1086,19 +949,12 @@ extension PhotoGridView: UIScrollViewDelegate {
 
 // MARK: - UIGestureRecognizerDelegate
 extension PhotoGridView: UIGestureRecognizerDelegate {
-    /// 手势是否可以同时识别
-    /// - Parameters:
-    ///   - gestureRecognizer: 手势识别器
-    ///   - otherGestureRecognizer: 其他手势识别器
-    /// - Returns: 是否可以同时识别
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
         // 不允许滑动手势和滚动同时进行
         return false
     }
     
-    /// 手势是否应该开始
-    /// - Parameter gestureRecognizer: 手势识别器
-    /// - Returns: 是否应该开始
+    // 新增：控制手势识别的条件
     override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         // 只处理pan手势
         guard let panGesture = gestureRecognizer as? UIPanGestureRecognizer else { return true }
@@ -1115,11 +971,7 @@ extension PhotoGridView: UIGestureRecognizerDelegate {
         return horizontalVelocity > verticalVelocity
     }
     
-    /// 手势是否应该被其他手势要求失败
-    /// - Parameters:
-    ///   - gestureRecognizer: 手势识别器
-    ///   - otherGestureRecognizer: 其他手势识别器
-    /// - Returns: 是否应该被要求失败
+    // 新增：控制手势是否应该被取消
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer) -> Bool {
         // 让滚动手势在滑动选择手势开始后失败，优先处理滑动选择
         if let panGesture = gestureRecognizer as? UIPanGestureRecognizer, 
@@ -1131,11 +983,7 @@ extension PhotoGridView: UIGestureRecognizerDelegate {
         return false
     }
     
-    /// 手势是否应该取消其他手势
-    /// - Parameters:
-    ///   - gestureRecognizer: 手势识别器
-    ///   - otherGestureRecognizer: 其他手势识别器
-    /// - Returns: 是否应该取消其他手势
+    // 新增：控制手势是否应该取消其他手势
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldCancelOtherGestureRecognizer otherGestureRecognizer: UIGestureRecognizer) -> Bool {
         // 当滑动选择手势开始时，取消滚动手势
         if gestureRecognizer is UIPanGestureRecognizer, 
@@ -1150,12 +998,6 @@ extension PhotoGridView: UIGestureRecognizerDelegate {
 
 // MARK: - UICollectionView Context Menu
 extension PhotoGridView {
-    /// 集合视图上下文菜单配置
-    /// - Parameters:
-    ///   - collectionView: 集合视图
-    ///   - indexPath: 索引路径
-    ///   - point: 点
-    /// - Returns: 上下文菜单配置
     func collectionView(_ collectionView: UICollectionView, contextMenuConfigurationForItemAt indexPath: IndexPath, point: CGPoint) -> UIContextMenuConfiguration? {
         guard indexPath.item < visibleAssets.count else { return nil }
         let asset = visibleAssets[indexPath.item]
@@ -1170,6 +1012,7 @@ extension PhotoGridView {
                 let removeAnchorAction = UIAction(title: "取消锚点", image: UIImage(systemName: "anchor.slash")) { [weak self] _ in
                     self?.anchorPhoto = nil
                     self?.collectionView.reloadData()
+                    print("锚点已取消")
                 }
                 actions.append(removeAnchorAction)
             } else {
@@ -1177,6 +1020,7 @@ extension PhotoGridView {
                     self?.anchorPhoto = asset
                     self?.collectionView.reloadData()
                     self?.delegate?.photoGridView(self!, didSetAnchor: asset)
+                    print("锚点已设置为: \(asset.localIdentifier)")
                 }
                 actions.append(setAnchorAction)
             }
@@ -1187,6 +1031,7 @@ extension PhotoGridView {
                     guard let self = self, let collection = self.currentCollection else { return }
                     self.headerService.removeHeader(asset, for: collection)
                     self.refreshParagraphDisplay()
+                    print("首图已取消: \(asset.localIdentifier)")
                 }
                 actions.append(removeHeaderAction)
                 
@@ -1199,6 +1044,7 @@ extension PhotoGridView {
                     guard let self = self, let collection = self.currentCollection else { return }
                     self.headerService.toggleParagraphCollapse(asset, for: collection)
                     self.refreshParagraphDisplay()
+                    print("段落状态已切换: \(asset.localIdentifier)")
                 }
                 actions.append(collapseAction)
             } else {
@@ -1206,6 +1052,7 @@ extension PhotoGridView {
                     guard let self = self, let collection = self.currentCollection else { return }
                     self.headerService.setHeader(asset, for: collection)
                     self.refreshParagraphDisplay()
+                    print("首图已设置: \(asset.localIdentifier)")
                 }
                 actions.append(setHeaderAction)
             }
@@ -1222,33 +1069,16 @@ extension PhotoGridView {
         }
     }
     
-    /// 集合视图上下文菜单高亮预览
-    /// - Parameter configuration: 上下文菜单配置
-    /// - Returns: 目标预览
     func collectionView(_ collectionView: UICollectionView, previewForHighlightingContextMenuWithConfiguration configuration: UIContextMenuConfiguration) -> UITargetedPreview? {
         guard let identifier = configuration.identifier as? IndexPath,
               let cell = collectionView.cellForItem(at: identifier) else { return nil }
         
         return UITargetedPreview(view: cell)
     }
-    
-    /// 粘贴到此后方处理
-    /// - Parameters:
-    ///   - asset: 目标资产
-    ///   - assets: 要粘贴的资产数组
-    private func handlePasteToAfter(asset: PHAsset, assets: [PHAsset]) {
-        guard let collection = currentCollection else { return }
-        self.delegate?.photoGridView(self, didPasteAssets: assets, after: asset)
-    }
 }
 
 // MARK: - CustomVerticalScrollIndicatorDelegate
 extension PhotoGridView: CustomVerticalScrollIndicatorDelegate {
-    /// 滚动指示器的文本
-    /// - Parameters:
-    ///   - indicator: 滚动指示器
-    ///   - scrollProgress: 滚动进度
-    /// - Returns: 文本
     func scrollIndicator(_ indicator: CustomVerticalScrollIndicator, textForScrollProgress scrollProgress: CGFloat) -> String? {
         guard !visibleAssets.isEmpty else { return nil }
         
@@ -1269,9 +1099,6 @@ extension PhotoGridView: CustomVerticalScrollIndicatorDelegate {
         }
     }
     
-    /// 格式化日期
-    /// - Parameter asset: 照片资产
-    /// - Returns: 格式化后的日期字符串
     private func formatDate(for asset: PHAsset) -> String {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm"
@@ -1287,6 +1114,12 @@ extension PhotoGridView: CustomVerticalScrollIndicatorDelegate {
         }
         
         return formatter.string(from: date)
+    }
+    
+    // MARK: - 粘贴到此后方处理
+    private func handlePasteToAfter(asset: PHAsset, assets: [PHAsset]) {
+        guard let collection = currentCollection else { return }
+        self.delegate?.photoGridView(self, didPasteAssets: assets, after: asset)
     }
 }
 
