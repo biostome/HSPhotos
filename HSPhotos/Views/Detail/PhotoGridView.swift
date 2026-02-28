@@ -409,7 +409,7 @@ class PhotoGridView: UIView {
         )
         
         let totalSpacing = sectionInset * 2 + (CGFloat(columns - 1) * spacing)
-        let itemWidth = (bounds.width - totalSpacing) / CGFloat(columns)
+        let itemWidth = max(1, (bounds.width - totalSpacing) / CGFloat(columns))
         layout.itemSize = CGSize(width: itemWidth, height: itemWidth)
         
         return layout
@@ -905,7 +905,7 @@ extension PhotoGridView: UICollectionViewDelegateFlowLayout {
         let interItemSpacing = flowLayout.minimumInteritemSpacing
         
         let totalSpacing = sectionInset.left + sectionInset.right + (CGFloat(columns - 1) * interItemSpacing)
-        let width = (collectionView.bounds.width - totalSpacing) / CGFloat(columns)
+        let width = max(1, (collectionView.bounds.width - totalSpacing) / CGFloat(columns))
         return CGSize(width: width, height: width)
     }
     
