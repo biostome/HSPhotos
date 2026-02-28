@@ -357,11 +357,11 @@ class BasePhotoViewController: UIViewController {
                         let undoAction = UndoAction.sort(collection: self.collection, originalAssets: originalAssets, sortedAssets: sortedAssets)
                         self.addAction(undoAction)
                         
-                        let message = "排序耗时: \(String(format: "%.2f", duration))秒"
-                        self.syncSuccess(message: message)
+//                        let message = "排序耗时: \(String(format: "%.2f", duration))秒"
+//                        self.syncSuccess(message: message)
                     } else {
-                        let message = "无法同步照片顺序到系统相册：\(message ?? "")"
-                        self.syncFailed(message: message)
+//                        let message = "无法同步照片顺序到系统相册：\(message ?? "")"
+//                        self.syncFailed(message: message)
                     }
                     // 更新按钮状态
                     self.updateUndoRedoButtons()
@@ -415,9 +415,9 @@ class BasePhotoViewController: UIViewController {
         }
         AssetPasteboard.pasteAssets(assets, into: collection) { [weak self] success, error in
             guard let self = self else { return }
-            let title = success ? "粘贴成功" : "粘贴失败"
-            let message = success ? "已粘贴到相册" : (error ?? "无法粘贴到相册")
-            self.showAlert(title: title, message: message)
+//            let title = success ? "粘贴成功" : "粘贴失败"
+//            let message = success ? "已粘贴到相册" : (error ?? "无法粘贴到相册")
+//            self.showAlert(title: title, message: message)
             if success {
                 self.loadPhoto()
                 // 更新按钮状态
@@ -501,8 +501,8 @@ class BasePhotoViewController: UIViewController {
                     self.addAction(undoAction)
                     
                     let count = assets.count
-                    let message = count == 1 ? "已移动 1 张照片" : "已移动 \(count) 张照片"
-                    self.showAlert(title: "移动成功", message: message)
+//                    let message = count == 1 ? "已移动 1 张照片" : "已移动 \(count) 张照片"
+//                    self.showAlert(title: "移动成功", message: message)
                     self.gridView.clearSelected()
                     self.loadPhoto() // 重新加载照片列表
                 } else {
