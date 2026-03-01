@@ -33,6 +33,11 @@ class FolderCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewDataS
     }
     
     private func setupUI() {
+        // 设置Cell背景色，支持深色模式
+        contentView.backgroundColor = UIColor {
+            $0.userInterfaceStyle == .dark ? .systemGray6 : .systemBackground
+        }
+        
         // 容器视图
         containerView.backgroundColor = .clear
         containerView.translatesAutoresizingMaskIntoConstraints = false
@@ -51,6 +56,9 @@ class FolderCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewDataS
         // 添加标题标签
         titleLabel.textAlignment = .left
         titleLabel.font = .systemFont(ofSize: 16, weight: .medium)
+        titleLabel.textColor = UIColor {
+            $0.userInterfaceStyle == .dark ? .white : .black
+        }
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(titleLabel)
         
@@ -131,7 +139,9 @@ class FolderCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewDataS
             }
         } else {
             cell.imageView.image = nil
-            cell.imageView.backgroundColor = .systemGray5
+            cell.imageView.backgroundColor = UIColor {
+                $0.userInterfaceStyle == .dark ? .systemGray5 : .systemGray4
+            }
         }
         
         return cell
@@ -188,10 +198,15 @@ class ThumbnailCell: UICollectionViewCell {
     }
     
     private func setupUI() {
+        // 设置Cell背景色，支持深色模式
+        contentView.backgroundColor = .clear
+        
         imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
         imageView.layer.cornerRadius = 4
-        imageView.backgroundColor = .systemGray5
+        imageView.backgroundColor = UIColor {
+            $0.userInterfaceStyle == .dark ? .systemGray5 : .systemGray4
+        }
         imageView.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(imageView)
         
