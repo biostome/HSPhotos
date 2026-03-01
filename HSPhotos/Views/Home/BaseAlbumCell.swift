@@ -27,7 +27,9 @@ class BaseAlbumCell: UICollectionViewCell {
     
     /// 设置通用的UI元素
     private func setupCommonUI() {
-        contentView.backgroundColor = .systemBackground
+        // 设置背景色为浅灰色，支持深色模式
+        setupBackgroundColor()
+        
         contentView.layer.cornerRadius = 12
         contentView.layer.shadowColor = UIColor.black.cgColor
         contentView.layer.shadowOffset = CGSize(width: 0, height: 2)
@@ -42,6 +44,13 @@ class BaseAlbumCell: UICollectionViewCell {
         titleLabel.numberOfLines = 1
         titleLabel.textAlignment = .center
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
+    }
+    
+    /// 设置背景色，支持深色模式
+    private func setupBackgroundColor() {
+        contentView.backgroundColor = UIColor {
+            $0.userInterfaceStyle == .dark ? .systemGray6 : .systemGray5
+        }
     }
     
     /// 取消所有图片请求
@@ -75,7 +84,7 @@ class BaseAlbumCell: UICollectionViewCell {
         super.traitCollectionDidChange(previousTraitCollection)
         // 当界面模式改变时，更新背景色
         if traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) {
-            contentView.backgroundColor = .systemBackground
+            setupBackgroundColor()
         }
     }
     

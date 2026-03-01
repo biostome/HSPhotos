@@ -165,8 +165,6 @@ class AlbumCell: BaseAlbumCell {
         // 显示占位图视图，隐藏图片视图
         placeholderView.isHidden = false
         imageView.isHidden = true
-        // 当没有图片时，设置灰白背景色
-        contentView.backgroundColor = .systemGray5
         // 更新占位图
         updatePlaceholderImage()
     }
@@ -176,10 +174,6 @@ class AlbumCell: BaseAlbumCell {
         // 显示图片视图，隐藏占位图
         imageView.isHidden = false
         placeholderView.isHidden = true
-        // 有图片时，恢复支持深色模式的背景色
-        contentView.backgroundColor = UIColor { traitCollection in
-            return traitCollection.userInterfaceStyle == .dark ? .systemGray6 : .systemBackground
-        }
     }
     
     override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
