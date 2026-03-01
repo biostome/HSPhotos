@@ -26,6 +26,7 @@ class FolderCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewDataS
         
         super.init(frame: frame)
         setupUI()
+        setupTraitChangeObserver()
     }
     
     required init?(coder: NSCoder) {
@@ -97,13 +98,11 @@ class FolderCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewDataS
         var assets: [PHAsset] = []
         
         albums.enumerateObjects { (collection, _, _) in
-            if let assetCollection = collection as? PHAssetCollection {
-                let albumAssets = PHAsset.fetchAssets(in: assetCollection, options: nil)
-                if let asset = albumAssets.firstObject {
-                    assets.append(asset)
-                    if assets.count >= 4 {
-                        return
-                    }
+            let albumAssets = PHAsset.fetchAssets(in: collection, options: nil)
+            if let asset = albumAssets.firstObject {
+                assets.append(asset)
+                if assets.count >= 4 {
+                    return
                 }
             }
         }
@@ -124,12 +123,14 @@ class FolderCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewDataS
             let asset = assets[indexPath.item]
             let thumbnailSize = CGSize(width: 100, height: 100)
             
-            loadImage(for: asset, targetSize: thumbnailSize) { [weak self] image in
+            let requestID = loadImage(for: asset, targetSize: thumbnailSize) { image in
                 if let image = image {
                     cell.imageView.image = image
                     cell.imageView.backgroundColor = .clear
                 }
             }
+            // 保存请求ID，以便在需要时取消请求
+            imageRequests.append(requestID)
         } else {
             cell.imageView.image = nil
             // 设置四宫格背景色为稍微深一点的灰色，支持深色模式
@@ -163,12 +164,19 @@ class FolderCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewDataS
         }
     }
     
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-        // 当界面模式改变时，更新collectionView
-        if traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) {
-            collectionView.reloadData()
+    /// 注册trait变化监听
+    private var traitChangeToken: UITraitChangeRegistration?
+    
+    /// 设置trait变化监听
+    private func setupTraitChangeObserver() {
+        traitChangeToken = registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: FolderCell, previousTraitCollection: UITraitCollection) in
+            // 当界面模式改变时，更新collectionView
+            self.collectionView.reloadData()
         }
+    }
+    
+    deinit {
+        // 系统会自动处理trait变化注册的清理
     }
     
     override func prepareForReuse() {

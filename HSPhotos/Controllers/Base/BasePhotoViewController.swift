@@ -135,6 +135,7 @@ class BasePhotoViewController: UIViewController {
         edgesForExtendedLayout = .all
 
         setupUI()
+        setupTraitChangeObserver()
         
         // 同步初始排序偏好到 PhotoGridView
         gridView.sortPreference = sortPreference
@@ -210,10 +211,13 @@ class BasePhotoViewController: UIViewController {
         backgroundGradientLayer.frame = view.bounds
     }
     
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-        // 当界面模式改变时，更新渐变背景颜色
-        if traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) {
+    /// 注册trait变化监听
+    private var traitChangeToken: UITraitChangeRegistration?
+    
+    /// 设置trait变化监听
+    private func setupTraitChangeObserver() {
+        traitChangeToken = registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: BasePhotoViewController, previousTraitCollection: UITraitCollection) in
+            // 当界面模式改变时，更新渐变背景颜色
             let lightColors: [CGColor] = [
                 UIColor(red: 0.91, green: 0.96, blue: 1.00, alpha: 1.0).cgColor,
                 UIColor(red: 0.97, green: 0.98, blue: 0.96, alpha: 1.0).cgColor,
@@ -224,9 +228,13 @@ class BasePhotoViewController: UIViewController {
                 UIColor(red: 0.08, green: 0.08, blue: 0.09, alpha: 1.0).cgColor,
                 UIColor(red: 0.06, green: 0.06, blue: 0.07, alpha: 1.0).cgColor
             ]
-            let isDark = traitCollection.userInterfaceStyle == .dark
-            backgroundGradientLayer.colors = isDark ? darkColors : lightColors
+            let isDark = self.traitCollection.userInterfaceStyle == .dark
+            self.backgroundGradientLayer.colors = isDark ? darkColors : lightColors
         }
+    }
+    
+    deinit {
+        // 系统会自动处理trait变化注册的清理
     }
     
     internal func updateUndoRedoButtons() {

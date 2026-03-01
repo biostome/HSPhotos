@@ -264,8 +264,10 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
             // 计算合理的目标大小，避免请求过大的图片
             // 使用最小边长100作为基准，确保图片质量的同时避免过大
             let maxDimension: CGFloat = 200
-            let targetSize = CGSize(width: maxDimension * UIScreen.main.scale,
-                                    height: maxDimension * UIScreen.main.scale)
+            // 使用通过上下文获取的UIScreen实例
+            let scale = imageView.window?.windowScene?.screen.scale ?? 2.0 // 默认使用2.0作为回退
+            let targetSize = CGSize(width: maxDimension * scale,
+                                    height: maxDimension * scale)
             requestID = PHImageManager.default().requestImage(
                 for: asset,
                 targetSize: targetSize,

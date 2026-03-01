@@ -26,7 +26,7 @@ final class HeroPhotoTransitionAnimator: NSObject, UIViewControllerAnimatedTrans
 
     private func animatePresent(using transitionContext: UIViewControllerContextTransitioning) {
         guard let toVC = transitionContext.viewController(forKey: .to) as? GalleryViewerViewController,
-              let fromVC = transitionContext.viewController(forKey: .from) else {
+              let _ = transitionContext.viewController(forKey: .from) else {
             transitionContext.completeTransition(false)
             return
         }
@@ -111,7 +111,7 @@ final class HeroPhotoTransitionAnimator: NSObject, UIViewControllerAnimatedTrans
 
     private func animateDismiss(using transitionContext: UIViewControllerContextTransitioning) {
         guard let fromVC = transitionContext.viewController(forKey: .from) as? GalleryViewerViewController,
-              let toVC = transitionContext.viewController(forKey: .to) else {
+              let _ = transitionContext.viewController(forKey: .to) else {
             transitionContext.completeTransition(false)
             return
         }

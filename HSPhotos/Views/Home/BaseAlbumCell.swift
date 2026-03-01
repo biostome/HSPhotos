@@ -16,9 +16,13 @@ class BaseAlbumCell: UICollectionViewCell {
     // 图片请求ID数组，用于取消请求
     var imageRequests: [PHImageRequestID] = []
 
+    /// 注册trait变化监听
+    private var traitChangeToken: UITraitChangeRegistration?
+    
     override init(frame: CGRect) {
         super.init(frame: frame)
         setupCommonUI()
+        setupTraitChangeObserver()
     }
     
     required init?(coder: NSCoder) {
@@ -80,12 +84,16 @@ class BaseAlbumCell: UICollectionViewCell {
         return requestID
     }
     
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-        // 当界面模式改变时，更新背景色
-        if traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) {
-            setupBackgroundColor()
+    /// 设置trait变化监听
+    private func setupTraitChangeObserver() {
+        traitChangeToken = registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: BaseAlbumCell, previousTraitCollection: UITraitCollection) in
+            self.setupBackgroundColor()
         }
+    }
+    
+    deinit {
+        // 移除trait变化监听
+        // 系统会自动处理trait变化注册的清理
     }
     
     override func prepareForReuse() {

@@ -974,7 +974,7 @@ extension PhotoGridView: UIGestureRecognizerDelegate {
     // 新增：控制手势是否应该被取消
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer) -> Bool {
         // 让滚动手势在滑动选择手势开始后失败，优先处理滑动选择
-        if let panGesture = gestureRecognizer as? UIPanGestureRecognizer, 
+        if gestureRecognizer is UIPanGestureRecognizer, 
            otherGestureRecognizer is UIPanGestureRecognizer, 
            otherGestureRecognizer.view == collectionView {
             // 检查是否在选择模式下
@@ -1118,7 +1118,7 @@ extension PhotoGridView: CustomVerticalScrollIndicatorDelegate {
     
     // MARK: - 粘贴到此后方处理
     private func handlePasteToAfter(asset: PHAsset, assets: [PHAsset]) {
-        guard let collection = currentCollection else { return }
+        guard currentCollection != nil else { return }
         self.delegate?.photoGridView(self, didPasteAssets: assets, after: asset)
     }
 }

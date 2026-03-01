@@ -959,7 +959,6 @@ private class PhotoPageViewController: UIViewController {
         
         if scrollView.zoomScale == 1 {
             // 当前是原始大小，双击放大到2倍
-            let zoomInScale: CGFloat = 2
             scrollView.zoom(to: CGRect(x: point.x - 100, y: point.y - 100, width: 200, height: 200), animated: true)
         } else {
             // 当前已经放大，双击恢复原始大小
@@ -1163,8 +1162,10 @@ private class PhotoPageViewController: UIViewController {
     }
     
     private func fullScreenPixelSize() -> CGSize {
-        // 使用通过上下文获取的UIScreen实例，避免使用废弃的UIScreen.main
-        let screen = view.window?.windowScene?.screen ?? UIScreen.main
+        // 使用通过上下文获取的UIScreen实例
+        guard let screen = view.window?.windowScene?.screen else {
+            return CGSize(width: 0, height: 0)
+        }
         let size = screen.bounds.size
         let scale = screen.scale
         return CGSize(width: size.width * scale, height: size.height * scale)

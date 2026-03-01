@@ -122,7 +122,7 @@ class PhotoHeaderService {
                 // 开始新段落
                 currentHeader = asset
                 followingAssets = []
-            } else if let header = currentHeader {
+            } else if currentHeader != nil {
                 // 添加到当前段落
                 followingAssets.append(asset)
             } else {
@@ -167,7 +167,7 @@ class PhotoHeaderService {
                 visibleAssets.append(asset)
             } else {
                 // 这不是首图
-                if let header = currentHeader {
+                if currentHeader != nil {
                     // 如果当前有首图，检查段落是否折叠
                     if !isCurrentParagraphCollapsed {
                         visibleAssets.append(asset)

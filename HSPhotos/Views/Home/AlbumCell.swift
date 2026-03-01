@@ -21,6 +21,7 @@ class AlbumCell: BaseAlbumCell {
     override init(frame: CGRect) {
         super.init(frame: frame)
         setupUI()
+        setupTraitChangeObserver()
     }
     
     required init?(coder: NSCoder) {
@@ -119,7 +120,7 @@ class AlbumCell: BaseAlbumCell {
         let cellSize = contentView.bounds.size
         let targetSize = CGSize(width: cellSize.width * 2, height: cellSize.height * 2)
         
-        loadImage(for: coverAsset, targetSize: targetSize) { [weak self] image in
+        _ = loadImage(for: coverAsset, targetSize: targetSize) { [weak self] image in
             if let image = image {
                 self?.imageView.image = image
                 self?.showImage()
@@ -176,12 +177,19 @@ class AlbumCell: BaseAlbumCell {
         placeholderView.isHidden = true
     }
     
-    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
-        super.traitCollectionDidChange(previousTraitCollection)
-        // 当界面模式改变时，更新占位图颜色
-        if traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) {
-            updatePlaceholderImage()
+    /// 注册trait变化监听
+    private var traitChangeToken: UITraitChangeRegistration?
+    
+    /// 设置trait变化监听
+    private func setupTraitChangeObserver() {
+        traitChangeToken = registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: AlbumCell, previousTraitCollection: UITraitCollection) in
+            // 当界面模式改变时，更新占位图颜色
+            self.updatePlaceholderImage()
         }
+    }
+    
+    deinit {
+        // 系统会自动处理trait变化注册的清理
     }
     
     override func prepareForReuse() {
