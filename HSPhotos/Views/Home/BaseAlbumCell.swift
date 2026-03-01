@@ -49,7 +49,7 @@ class BaseAlbumCell: UICollectionViewCell {
     /// 设置背景色，支持深色模式
     private func setupBackgroundColor() {
         contentView.backgroundColor = UIColor {
-            $0.userInterfaceStyle == .dark ? .systemGray6 : .systemGray5
+            $0.userInterfaceStyle == .dark ? .systemGray5 : .systemGray4
         }
     }
     

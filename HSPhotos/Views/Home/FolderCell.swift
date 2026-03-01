@@ -134,7 +134,7 @@ class FolderCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewDataS
             cell.imageView.image = nil
             // 设置四宫格背景色为稍微深一点的灰色，支持深色模式
             cell.imageView.backgroundColor = UIColor {
-                $0.userInterfaceStyle == .dark ? .systemGray4 : .systemGray3
+                $0.userInterfaceStyle == .dark ? .systemGray3 : .systemGray2
             }
         }
         
@@ -200,7 +200,7 @@ class ThumbnailCell: UICollectionViewCell {
         imageView.layer.cornerRadius = 4
         // 设置四宫格背景色为稍微深一点的灰色，支持深色模式
         imageView.backgroundColor = UIColor {
-            $0.userInterfaceStyle == .dark ? .systemGray4 : .systemGray3
+            $0.userInterfaceStyle == .dark ? .systemGray3 : .systemGray2
         }
         imageView.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(imageView)
