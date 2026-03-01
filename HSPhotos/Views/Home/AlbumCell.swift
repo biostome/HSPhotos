@@ -11,14 +11,12 @@ import Photos
 
 
 // MARK: - AlbumCell
-class AlbumCell: UICollectionViewCell {
+class AlbumCell: BaseAlbumCell {
     private let imageView = UIImageView()
     private let placeholderView = UIImageView()
-    private let titleLabel = UILabel()
-    private let gradientView = UIView()
+    private let photoCountLabel = UILabel()
     
     private var currentAssetID: String?
-    private var requestID: PHImageRequestID?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -29,140 +27,101 @@ class AlbumCell: UICollectionViewCell {
         fatalError("init(coder:) has not been implemented")
     }
     
+    private let gradientView = UIView()
+    
     private func setupUI() {
-        contentView.backgroundColor = .white
-        contentView.layer.cornerRadius = 12
-        contentView.layer.shadowColor = UIColor.black.cgColor
-        contentView.layer.shadowOffset = CGSize(width: 0, height: 2)
-        contentView.layer.shadowRadius = 6
-        contentView.layer.shadowOpacity = 0.12
-        contentView.layer.borderWidth = 0.5
-        contentView.layer.borderColor = UIColor(white: 0.9, alpha: 1.0).cgColor
-        
-        // Image View（先添加，在底层）
+        // 相册布局 - 单张封面图
         imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
         imageView.layer.cornerRadius = 12
         imageView.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(imageView)
         
-        // 占位图视图（添加在imageView上方）
+        // 占位图视图
         placeholderView.contentMode = .center
         placeholderView.clipsToBounds = true
         placeholderView.layer.cornerRadius = 12
         placeholderView.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(placeholderView)
         
-        // 渐变阴影View（添加在placeholderView上方，Label下方）
+        // 渐变视图，使标题更清晰可见
         gradientView.translatesAutoresizingMaskIntoConstraints = false
-        gradientView.backgroundColor = .clear
-        gradientView.layer.cornerRadius = 12
-        gradientView.layer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner] // 左下角和右下角圆角
-        gradientView.clipsToBounds = true
         contentView.addSubview(gradientView)
+        setupGradient()
         
-        // 确保gradientView在正确的层级
-        contentView.bringSubviewToFront(gradientView)
-        contentView.bringSubviewToFront(titleLabel)
-        
-        // 添加渐变层
-        let gradientLayer = CAGradientLayer()
-        gradientLayer.colors = [
-            UIColor(red: 0, green: 0, blue: 0, alpha: 0.7).cgColor,  // 底部深色
-            UIColor(red: 0, green: 0, blue: 0, alpha: 0).cgColor     // 顶部透明
-        ]
-        gradientLayer.locations = [0, 1]
-        gradientLayer.startPoint = CGPoint(x: 0.5, y: 1)
-        gradientLayer.endPoint = CGPoint(x: 0.5, y: 0)
-        gradientLayer.frame = gradientView.bounds
-        gradientLayer.cornerRadius = 12
-        gradientLayer.maskedCorners = [.layerMinXMaxYCorner, .layerMaxXMaxYCorner] // 左下角和右下角圆角
-        gradientView.layer.insertSublayer(gradientLayer, at: 0)
-        
-        // 确保gradientView可见
-        gradientView.isHidden = false
-        
-        // Title Label（添加在gradientView上方）
-        titleLabel.textColor = .white // 保持白色，在渐变背景上更清晰
-        titleLabel.font = .systemFont(ofSize: 17, weight: .semibold) // 增大字体
-        titleLabel.numberOfLines = 2
+        // 标题标签
+        titleLabel.textColor = .white
+        titleLabel.font = .systemFont(ofSize: 16, weight: .medium)
+        titleLabel.numberOfLines = 1
         titleLabel.lineBreakMode = .byTruncatingTail
+        titleLabel.textAlignment = .left
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(titleLabel)
         
-        // 设置Cell背景色，支持深色模式
-        contentView.backgroundColor = UIColor { traitCollection in
-            return traitCollection.userInterfaceStyle == .dark ? .systemGray6 : .systemBackground
-        }
-        // 确保Cell的layer有圆角
-        contentView.layer.cornerRadius = 12
-        contentView.layer.masksToBounds = true
+        // 照片数量标签
+        photoCountLabel.textColor = .white
+        photoCountLabel.font = .systemFont(ofSize: 12, weight: .medium)
+        photoCountLabel.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(photoCountLabel)
         
-
-        
-        // 设置占位图
-        showPlaceholder()
-        
-        // Layout - Label浮在图片上方
+        // 布局约束
         NSLayoutConstraint.activate([
-            // 图片视图：填充整个Cell
+            // 相册布局 - 占据整个cell
             imageView.topAnchor.constraint(equalTo: contentView.topAnchor),
             imageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             imageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             imageView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
             
-            // 占位图视图：与imageView大小相同
             placeholderView.topAnchor.constraint(equalTo: imageView.topAnchor),
             placeholderView.leadingAnchor.constraint(equalTo: imageView.leadingAnchor),
             placeholderView.trailingAnchor.constraint(equalTo: imageView.trailingAnchor),
             placeholderView.bottomAnchor.constraint(equalTo: imageView.bottomAnchor),
             
-            // 渐变阴影View：高度为Cell的30%
+            // 渐变视图
             gradientView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             gradientView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             gradientView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-            gradientView.heightAnchor.constraint(equalTo: contentView.heightAnchor, multiplier: 0.3),
+            gradientView.heightAnchor.constraint(equalToConstant: 60),
             
-            // 标题标签：左下角，浮在渐变阴影View上
-            titleLabel.bottomAnchor.constraint(equalTo: gradientView.bottomAnchor, constant: -8), // 底部对齐
-            titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12), // 增加左边距
-            titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12), // 增加右边距
-            titleLabel.heightAnchor.constraint(equalToConstant: 24), // 增加高度以适应更大的字体
+            // 标题标签（左下角，浮在图片上方）
+            titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
+            titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8),
+            titleLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
+            
+            // 照片数量标签（右下角，浮在图片上方）
+            photoCountLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8),
+            photoCountLabel.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
         ])
+        
+        // 设置占位图
+        updatePlaceholderImage()
     }
 
     // MARK: - Configure
-    func configure(with collection: PHAssetCollection) {
-        let assets = PHAsset.fetchAssets(in: collection, options: nil)
+    func configure(with item: AlbumListItem) {
+        // 取消之前的图片请求
+        cancelImageRequests()
         
-        titleLabel.text = collection.localizedTitle
-        showPlaceholder() // 显示占位图
-
-        guard let coverAsset = assets.firstObject else { return }
+        // 设置相册标题和数量
+        titleLabel.text = item.title
+        photoCountLabel.text = "\(item.itemCount)"
+        
+        // 加载相册封面图
+        guard let coverAsset = item.coverAsset else {
+            showPlaceholder()
+            return
+        }
+        
         if coverAsset.localIdentifier == currentAssetID { return }
         
         currentAssetID = coverAsset.localIdentifier
         
-        // 适当增加目标图片大小，提高图片质量，同时保持较好的加载速度
         let cellSize = contentView.bounds.size
-        // 使用适中的目标尺寸，在速度和质量之间取得平衡
-        let targetSize = CGSize(width: cellSize.width * 2,
-                                height: cellSize.height * 2)
+        let targetSize = CGSize(width: cellSize.width * 2, height: cellSize.height * 2)
         
-        // 创建图片请求选项，使用均衡模式
-        let options = PHImageRequestOptions()
-        options.resizeMode = .fast
-        options.deliveryMode = .opportunistic
-        
-        requestID = PHImageManager.default().requestImage(
-            for: coverAsset,
-            targetSize: targetSize,
-            contentMode: .aspectFill,
-            options: options
-        ) { [weak self] image, _ in
+        loadImage(for: coverAsset, targetSize: targetSize) { [weak self] image in
             if let image = image {
                 self?.imageView.image = image
-                // 有封面图片时，显示图片视图，隐藏占位图
                 self?.showImage()
             }
         }
@@ -170,13 +129,22 @@ class AlbumCell: UICollectionViewCell {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        // 更新渐变层的frame
-        if let gradientLayer = gradientView.layer.sublayers?.first as? CAGradientLayer {
-            gradientLayer.frame = gradientView.bounds
-            // 确保渐变层的圆角与gradientView一致
-            gradientLayer.cornerRadius = gradientView.layer.cornerRadius
-            gradientLayer.maskedCorners = gradientView.layer.maskedCorners
+        // 更新渐变层的大小
+        if let gradient = gradientView.layer.sublayers?.first as? CAGradientLayer {
+            gradient.frame = gradientView.bounds
         }
+    }
+    
+    /// 设置渐变层
+    private func setupGradient() {
+        let gradient = CAGradientLayer()
+        gradient.frame = gradientView.bounds
+        gradient.colors = [
+            UIColor.clear.cgColor,
+            UIColor.black.withAlphaComponent(0.7).cgColor
+        ]
+        gradient.locations = [0.0, 1.0]
+        gradientView.layer.insertSublayer(gradient, at: 0)
     }
     
     /// 设置占位图，确保在不同大小的Cell中都能正确显示
@@ -224,13 +192,9 @@ class AlbumCell: UICollectionViewCell {
     
     override func prepareForReuse() {
         super.prepareForReuse()
-        titleLabel.text = ""
-        showPlaceholder() // 显示占位图
+        photoCountLabel.text = ""
+        
+        // 重置状态
         currentAssetID = nil
-        if let requestID = requestID {
-            PHImageManager.default().cancelImageRequest(requestID)
-        }
-        requestID = nil
-        gradientView.isHidden = false
     }
 }

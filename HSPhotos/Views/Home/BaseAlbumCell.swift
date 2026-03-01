@@ -1,0 +1,87 @@
+//
+//  BaseAlbumCell.swift
+//  HSPhotos
+//
+//  Created by Hans on 2025/8/27.
+//
+
+import UIKit
+import Photos
+
+/// 相册Cell的基类，提取共同功能
+class BaseAlbumCell: UICollectionViewCell {
+    // 标题标签
+    let titleLabel = UILabel()
+    
+    // 图片请求ID数组，用于取消请求
+    var imageRequests: [PHImageRequestID] = []
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setupCommonUI()
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    /// 设置通用的UI元素
+    private func setupCommonUI() {
+        contentView.backgroundColor = .systemBackground
+        contentView.layer.cornerRadius = 12
+        contentView.layer.shadowColor = UIColor.black.cgColor
+        contentView.layer.shadowOffset = CGSize(width: 0, height: 2)
+        contentView.layer.shadowRadius = 6
+        contentView.layer.shadowOpacity = 0.12
+        contentView.layer.borderWidth = 0.5
+        contentView.layer.borderColor = UIColor(white: 0.9, alpha: 1.0).cgColor
+        
+        // 标题标签
+        titleLabel.textColor = .label
+        titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
+        titleLabel.numberOfLines = 1
+        titleLabel.textAlignment = .center
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+    }
+    
+    /// 取消所有图片请求
+    func cancelImageRequests() {
+        for requestID in imageRequests {
+            PHImageManager.default().cancelImageRequest(requestID)
+        }
+        imageRequests.removeAll()
+    }
+    
+    /// 加载图片的通用方法
+    func loadImage(for asset: PHAsset, targetSize: CGSize, completion: @escaping (UIImage?) -> Void) -> PHImageRequestID {
+        let options = PHImageRequestOptions()
+        options.resizeMode = .fast
+        options.deliveryMode = .opportunistic
+        
+        let requestID = PHImageManager.default().requestImage(
+            for: asset,
+            targetSize: targetSize,
+            contentMode: .aspectFill,
+            options: options
+        ) { image, _ in
+            completion(image)
+        }
+        
+        imageRequests.append(requestID)
+        return requestID
+    }
+    
+    override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+        super.traitCollectionDidChange(previousTraitCollection)
+        // 当界面模式改变时，更新背景色
+        if traitCollection.hasDifferentColorAppearance(comparedTo: previousTraitCollection) {
+            contentView.backgroundColor = .systemBackground
+        }
+    }
+    
+    override func prepareForReuse() {
+        super.prepareForReuse()
+        titleLabel.text = ""
+        cancelImageRequests()
+    }
+}

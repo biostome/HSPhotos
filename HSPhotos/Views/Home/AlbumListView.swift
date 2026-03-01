@@ -11,13 +11,14 @@ import Photos
 protocol AlbumListViewDelegate {
     func albumListView(_ albumListView: AlbumListView, didSelectItemAt indexPath: IndexPath)
     func albumListView(_ albumListView: AlbumListView, didSelectItemAt collection: PHAssetCollection)
+    func albumListView(_ albumListView: AlbumListView, didSelectFolder collectionList: PHCollectionList)
 }
 
 class AlbumListView: UIView{
     
     public var delegate: AlbumListViewDelegate?
     
-    public var collections: [PHAssetCollection] = [] {
+    public var collections: [AlbumListItem] = [] {
         didSet{
             self.collectionView.reloadData()
         }
@@ -25,13 +26,14 @@ class AlbumListView: UIView{
     
     private let collectionView: UICollectionView = {
         let layout = UICollectionViewFlowLayout()
-        layout.minimumInteritemSpacing = 8
+        layout.minimumInteritemSpacing = 12
         layout.minimumLineSpacing = 12
         layout.sectionInset = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
         
         let collectionView = UICollectionView(frame: .zero, collectionViewLayout: layout)
         collectionView.backgroundColor = .clear // 设置为透明，显示渐变背景
         collectionView.register(AlbumCell.self, forCellWithReuseIdentifier: "AlbumCell")
+        collectionView.register(FolderCell.self, forCellWithReuseIdentifier: "FolderCell")
         collectionView.showsVerticalScrollIndicator = false
         return collectionView
     }()
@@ -74,27 +76,46 @@ extension AlbumListView: UICollectionViewDataSource {
     }
     
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
-        let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "AlbumCell", for: indexPath) as! AlbumCell
-        let album = collections[indexPath.item]
-        cell.configure(with: album)
-        return cell
+        let item = collections[indexPath.item]
+        
+        if item.isFolder {
+            let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "FolderCell", for: indexPath) as! FolderCell
+            cell.configure(with: item)
+            return cell
+        } else {
+            let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "AlbumCell", for: indexPath) as! AlbumCell
+            cell.configure(with: item)
+            return cell
+        }
     }
 }
 
 // MARK: - UICollectionViewDelegateFlowLayout
 extension AlbumListView: UICollectionViewDelegateFlowLayout {
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
-        let width = (collectionView.bounds.width - 32) / 2 // 2列，左右各12px间距，中间8px间距
-        let height = width // 正方形
-        return CGSize(width: width, height: height)
+        // 确保总是显示2列，计算宽度时考虑sectionInset和interitemSpacing
+        let totalWidth = collectionView.frame.width
+        let sectionInset = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+        let interitemSpacing: CGFloat = 12
+        let availableWidth = totalWidth - sectionInset.left - sectionInset.right - interitemSpacing
+        let cellWidth = availableWidth / 2
+        let cellHeight = cellWidth // 正方形
+        return CGSize(width: cellWidth, height: cellHeight)
     }
 }
 
 // MARK: - UICollectionViewDelegate
 extension AlbumListView: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-        let album = self.collections[indexPath.item]
+        let item = self.collections[indexPath.item]
         self.delegate?.albumListView(self, didSelectItemAt: indexPath)
-        self.delegate?.albumListView(self, didSelectItemAt: album)
+        
+        // 根据类型调用不同的代理方法
+        switch item.type {
+        case .album(let collection):
+            self.delegate?.albumListView(self, didSelectItemAt: collection)
+        case .folder(let collectionList):
+            self.delegate?.albumListView(self, didSelectFolder: collectionList)
+        }
     }
 }

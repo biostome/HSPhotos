@@ -11,7 +11,7 @@ import Photos
 
 class AlbumListViewController: UIViewController {
 
-    private var albums: [PHAssetCollection] = []
+    private var albumListItems: [AlbumListItem] = []
     private let backgroundGradientLayer = CAGradientLayer()
     
     lazy var albumListView: AlbumListView = {
@@ -112,15 +112,15 @@ class AlbumListViewController: UIViewController {
                         
                         if success, let albumPlaceholder = albumPlaceholder {
                             // 重新加载相册列表
-                            self.albums.removeAll()
+                            self.albumListItems.removeAll()
                             self.loadAlbums()
                             
                             // 延迟一下，确保相册列表已经加载完成
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                                 // 查找新创建的相册
-                                if let newAlbum = self.albums.first(where: { $0.localizedTitle == name }) {
+                                if let newAlbum = self.albumListItems.first(where: { $0.title == name }) {
                                     // 找到新相册在数组中的索引
-                                    if let index = self.albums.firstIndex(of: newAlbum) {
+                                    if let index = self.albumListItems.firstIndex(where: { $0.localIdentifier == newAlbum.localIdentifier }) {
                                         // 滚动到新创建的相册位置
                                         let indexPath = IndexPath(item: index, section: 0)
                                         self.albumListView.scrollToItem(at: indexPath, at: .top, animated: true)
@@ -175,15 +175,80 @@ class AlbumListViewController: UIViewController {
     }
     
     private func loadAlbums() {
-        let options = PHFetchOptions()
-        options.sortDescriptors = [NSSortDescriptor(key: "localizedTitle", ascending: true)]
+        var items: [AlbumListItem] = []
         
-        let collections = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: options)
+        // 1. 加载所有文件夹
+        let folderOptions = PHFetchOptions()
+        folderOptions.sortDescriptors = [NSSortDescriptor(key: "localizedTitle", ascending: true)]
         
-        collections.enumerateObjects { collection, _, _ in
-            self.albums.append(collection)
+        let allFolders = PHCollectionList.fetchCollectionLists(with: .folder, subtype: .any, options: folderOptions)
+        
+        // 2. 加载所有相册
+        let albumOptions = PHFetchOptions()
+        albumOptions.sortDescriptors = [NSSortDescriptor(key: "localizedTitle", ascending: true)]
+        
+        let allAlbums = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: albumOptions)
+        
+        // 3. 检查每个文件夹是否有父文件夹
+        var topLevelFolders: [PHCollectionList] = []
+        allFolders.enumerateObjects { collectionList, _, _ in
+            // 获取所有可能包含此文件夹的父文件夹
+            let parentFolderOptions = PHFetchOptions()
+            let parentFolders = PHCollectionList.fetchCollectionLists(with: .folder, subtype: .any, options: parentFolderOptions)
+            
+            var hasParent = false
+            parentFolders.enumerateObjects { parentFolder, _, stop in
+                let subCollections = PHCollection.fetchCollections(in: parentFolder, options: nil)
+                subCollections.enumerateObjects { subCollection, _, stopSub in
+                    if subCollection.localIdentifier == collectionList.localIdentifier {
+                        hasParent = true
+                        stop.pointee = true
+                        stopSub.pointee = true
+                    }
+                }
+            }
+            
+            if !hasParent {
+                topLevelFolders.append(collectionList)
+            }
         }
-        self.albumListView.collections = self.albums
+        
+        // 4. 检查每个相册是否有父文件夹
+        var topLevelAlbums: [PHAssetCollection] = []
+        allAlbums.enumerateObjects { collection, _, _ in
+            // 获取所有可能包含此相册的父文件夹
+            let parentFolderOptions = PHFetchOptions()
+            let parentFolders = PHCollectionList.fetchCollectionLists(with: .folder, subtype: .any, options: parentFolderOptions)
+            
+            var hasParent = false
+            parentFolders.enumerateObjects { parentFolder, _, stop in
+                let subCollections = PHCollection.fetchCollections(in: parentFolder, options: nil)
+                subCollections.enumerateObjects { subCollection, _, stopSub in
+                    if subCollection.localIdentifier == collection.localIdentifier {
+                        hasParent = true
+                        stop.pointee = true
+                        stopSub.pointee = true
+                    }
+                }
+            }
+            
+            if !hasParent {
+                topLevelAlbums.append(collection)
+            }
+        }
+        
+        // 5. 添加顶级文件夹
+        for folder in topLevelFolders {
+            items.append(AlbumListItem(type: .folder(folder)))
+        }
+        
+        // 6. 添加顶级相册
+        for album in topLevelAlbums {
+            items.append(AlbumListItem(type: .album(album)))
+        }
+        
+        self.albumListItems = items
+        self.albumListView.collections = self.albumListItems
     }
     
     override func viewDidLayoutSubviews() {
@@ -199,10 +264,13 @@ extension AlbumListViewController: AlbumListViewDelegate {
     }
     
     func albumListView(_ albumListView: AlbumListView, didSelectItemAt collection: PHAssetCollection) {
-        
         let photoVC = PhotoGridViewController(collection: collection)
         navigationController?.pushViewController(photoVC, animated: true)
     }
     
-    
+    func albumListView(_ albumListView: AlbumListView, didSelectFolder collectionList: PHCollectionList) {
+        // 显示文件夹内的子相册列表
+        let folderVC = FolderViewController(collectionList: collectionList)
+        navigationController?.pushViewController(folderVC, animated: true)
+    }
 }
