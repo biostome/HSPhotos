@@ -311,14 +311,24 @@ class AlbumListViewController: UIViewController {
         PHPhotoLibrary.requestAuthorization { [weak self] status in
             DispatchQueue.main.async {
                 guard let self = self, status == .authorized else {
-                    self?.showPermissionViewController()
+                    if let self = self {
+                        self.showPermissionViewController()
+                    }
                     return
                 }
                 
                 // 创建相册
                 PHPhotoLibrary.shared().performChanges {
+                    // 创建新相册
                     let createAlbumRequest = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: name)
-                    _ = createAlbumRequest.placeholderForCreatedAssetCollection
+                    let albumPlaceholder = createAlbumRequest.placeholderForCreatedAssetCollection
+                    
+                    // 如果当前在文件夹内，将新相册添加到该文件夹
+                    if let collectionList = self.collectionList {
+                        if let collectionListChangeRequest = PHCollectionListChangeRequest(for: collectionList) {
+                            collectionListChangeRequest.addChildCollections([albumPlaceholder as Any] as NSArray)
+                        }
+                    }
                 } completionHandler: { [weak self] success, error in
                     DispatchQueue.main.async {
                         guard let self = self else { return }
@@ -358,14 +368,24 @@ class AlbumListViewController: UIViewController {
         PHPhotoLibrary.requestAuthorization { [weak self] status in
             DispatchQueue.main.async {
                 guard let self = self, status == .authorized else {
-                    self?.showPermissionViewController()
+                    if let self = self {
+                        self.showPermissionViewController()
+                    }
                     return
                 }
                 
                 // 创建文件夹
                 PHPhotoLibrary.shared().performChanges {
+                    // 创建新文件夹
                     let createFolderRequest = PHCollectionListChangeRequest.creationRequestForCollectionList(withTitle: name)
-                    _ = createFolderRequest.placeholderForCreatedCollectionList
+                    let folderPlaceholder = createFolderRequest.placeholderForCreatedCollectionList
+                    
+                    // 如果当前在文件夹内，将新文件夹添加到该文件夹
+                    if let collectionList = self.collectionList {
+                        if let collectionListChangeRequest = PHCollectionListChangeRequest(for: collectionList) {
+                            collectionListChangeRequest.addChildCollections([folderPlaceholder as Any] as NSArray)
+                        }
+                    }
                 } completionHandler: { [weak self] success, error in
                     DispatchQueue.main.async {
                         guard let self = self else { return }
