@@ -431,4 +431,158 @@ extension AlbumListViewController: AlbumListViewDelegate {
         let folderVC = AlbumListViewController(collectionList: collectionList)
         navigationController?.pushViewController(folderVC, animated: true)
     }
+    
+    func albumListView(_ albumListView: AlbumListView, didTapEditTitleFor item: AlbumListItem) {
+        // 显示输入框让用户编辑标题
+        let alertController = UIAlertController(title: "编辑标题", message: "请输入新的标题", preferredStyle: .alert)
+        
+        alertController.addTextField { textField in
+            textField.text = item.title
+        }
+        
+        let cancelAction = UIAlertAction(title: "取消", style: .cancel)
+        let saveAction = UIAlertAction(title: "保存", style: .default) { [weak self] _ in
+            guard let self = self, let newTitle = alertController.textFields?.first?.text, !newTitle.isEmpty else {
+                return
+            }
+            
+            // 更新标题
+            self.performEditTitle(for: item, newTitle: newTitle)
+        }
+        
+        alertController.addAction(cancelAction)
+        alertController.addAction(saveAction)
+        
+        present(alertController, animated: true)
+    }
+    
+    func albumListView(_ albumListView: AlbumListView, didTapDeleteFor item: AlbumListItem) {
+        // 显示确认对话框
+        let alertController = UIAlertController(title: "删除相册", message: "确定要删除这个相册吗？", preferredStyle: .alert)
+        
+        let cancelAction = UIAlertAction(title: "取消", style: .cancel)
+        let deleteAction = UIAlertAction(title: "删除", style: .destructive) { [weak self] _ in
+            // 删除相册
+            self?.performDelete(for: item)
+        }
+        
+        alertController.addAction(cancelAction)
+        alertController.addAction(deleteAction)
+        
+        present(alertController, animated: true)
+    }
+    
+    private func performEditTitle(for item: AlbumListItem, newTitle: String) {
+        // 请求权限
+        PHPhotoLibrary.requestAuthorization { [weak self] status in
+            DispatchQueue.main.async { 
+                guard let self = self, status == .authorized else {
+                    self?.showPermissionViewController()
+                    return
+                }
+                
+                // 根据类型更新标题
+                switch item.type {
+                case .album(let collection):
+                    // 更新相册标题
+                    PHPhotoLibrary.shared().performChanges { 
+                        let changeRequest = PHAssetCollectionChangeRequest(for: collection)
+                        changeRequest?.title = newTitle
+                    } completionHandler: { [weak self] success, error in
+                        DispatchQueue.main.async { 
+                            guard let self = self else { return }
+                            
+                            if success {
+                                // 重新加载相册列表
+                                self.loadAlbums()
+                            } else {
+                                // 显示错误信息
+                                let errorMessage = error?.localizedDescription ?? "更新标题失败"
+                                let alertController = UIAlertController(title: "错误", message: errorMessage, preferredStyle: .alert)
+                                alertController.addAction(UIAlertAction(title: "确定", style: .default))
+                                self.present(alertController, animated: true)
+                            }
+                        }
+                    }
+                case .folder(let collectionList):
+                    // 更新文件夹标题
+                    PHPhotoLibrary.shared().performChanges { 
+                        let changeRequest = PHCollectionListChangeRequest(for: collectionList)
+                        changeRequest?.title = newTitle
+                    } completionHandler: { [weak self] success, error in
+                        DispatchQueue.main.async { 
+                            guard let self = self else { return }
+                            
+                            if success {
+                                // 重新加载相册列表
+                                self.loadAlbums()
+                            } else {
+                                // 显示错误信息
+                                let errorMessage = error?.localizedDescription ?? "更新标题失败"
+                                let alertController = UIAlertController(title: "错误", message: errorMessage, preferredStyle: .alert)
+                                alertController.addAction(UIAlertAction(title: "确定", style: .default))
+                                self.present(alertController, animated: true)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    private func performDelete(for item: AlbumListItem) {
+        // 请求权限
+        PHPhotoLibrary.requestAuthorization { [weak self] status in
+            DispatchQueue.main.async { 
+                guard let self = self, status == .authorized else {
+                    self?.showPermissionViewController()
+                    return
+                }
+                
+                // 根据类型删除
+                switch item.type {
+                case .album(let collection):
+                    // 删除相册
+                    PHPhotoLibrary.shared().performChanges { 
+                        PHAssetCollectionChangeRequest.deleteAssetCollections([collection] as NSArray)
+                    } completionHandler: { [weak self] success, error in
+                        DispatchQueue.main.async { 
+                            guard let self = self else { return }
+                            
+                            if success {
+                                // 重新加载相册列表
+                                self.loadAlbums()
+                            } else {
+                                // 显示错误信息
+                                let errorMessage = error?.localizedDescription ?? "删除相册失败"
+                                let alertController = UIAlertController(title: "错误", message: errorMessage, preferredStyle: .alert)
+                                alertController.addAction(UIAlertAction(title: "确定", style: .default))
+                                self.present(alertController, animated: true)
+                            }
+                        }
+                    }
+                case .folder(let collectionList):
+                    // 删除文件夹
+                    PHPhotoLibrary.shared().performChanges { 
+                        PHCollectionListChangeRequest.deleteCollectionLists([collectionList] as NSArray)
+                    } completionHandler: { [weak self] success, error in
+                        DispatchQueue.main.async { 
+                            guard let self = self else { return }
+                            
+                            if success {
+                                // 重新加载相册列表
+                                self.loadAlbums()
+                            } else {
+                                // 显示错误信息
+                                let errorMessage = error?.localizedDescription ?? "删除文件夹失败"
+                                let alertController = UIAlertController(title: "错误", message: errorMessage, preferredStyle: .alert)
+                                alertController.addAction(UIAlertAction(title: "确定", style: .default))
+                                self.present(alertController, animated: true)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

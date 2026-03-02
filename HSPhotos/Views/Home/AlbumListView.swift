@@ -12,6 +12,8 @@ protocol AlbumListViewDelegate {
     func albumListView(_ albumListView: AlbumListView, didSelectItemAt indexPath: IndexPath)
     func albumListView(_ albumListView: AlbumListView, didSelectItemAt collection: PHAssetCollection)
     func albumListView(_ albumListView: AlbumListView, didSelectFolder collectionList: PHCollectionList)
+    func albumListView(_ albumListView: AlbumListView, didTapEditTitleFor item: AlbumListItem)
+    func albumListView(_ albumListView: AlbumListView, didTapDeleteFor item: AlbumListItem)
 }
 
 /// 相册列表布局模式
@@ -160,6 +162,33 @@ extension AlbumListView: UICollectionViewDelegate {
             self.delegate?.albumListView(self, didSelectItemAt: collection)
         case .folder(let collectionList):
             self.delegate?.albumListView(self, didSelectFolder: collectionList)
+        }
+    }
+    
+    func collectionView(_ collectionView: UICollectionView, shouldShowMenuForItemAt indexPath: IndexPath) -> Bool {
+        return true
+    }
+    
+    func collectionView(_ collectionView: UICollectionView, canPerformAction action: Selector, forItemAt indexPath: IndexPath, withSender sender: Any?) -> Bool {
+        return false
+    }
+    
+    func collectionView(_ collectionView: UICollectionView, performAction action: Selector, forItemAt indexPath: IndexPath, withSender sender: Any?) {
+    }
+    
+    func collectionView(_ collectionView: UICollectionView, contextMenuConfigurationForItemAt indexPath: IndexPath, point: CGPoint) -> UIContextMenuConfiguration? {
+        let item = self.collections[indexPath.item]
+        
+        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
+            let editAction = UIAction(title: "编辑标题", image: UIImage(systemName: "pencil")) { _ in
+                self.delegate?.albumListView(self, didTapEditTitleFor: item)
+            }
+            
+            let deleteAction = UIAction(title: "删除相册", image: UIImage(systemName: "trash"), attributes: .destructive) { _ in
+                self.delegate?.albumListView(self, didTapDeleteFor: item)
+            }
+            
+            return UIMenu(title: "", children: [editAction, deleteAction])
         }
     }
 }
