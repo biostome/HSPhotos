@@ -86,23 +86,30 @@ class FolderCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewDataS
         cancelImageRequests()
         
         // 加载文件夹缩略图
-        loadFolderThumbnails()
+        loadFolderThumbnails(from: item)
     }
     
-    private func loadFolderThumbnails() {
-        // 获取所有相册的照片作为文件夹缩略图
-        let options = PHFetchOptions()
-        options.fetchLimit = 4
-        
-        let albums = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: options)
+    private func loadFolderThumbnails(from item: AlbumListItem) {
         var assets: [PHAsset] = []
         
-        albums.enumerateObjects { (collection, _, _) in
-            let albumAssets = PHAsset.fetchAssets(in: collection, options: nil)
-            if let asset = albumAssets.firstObject {
-                assets.append(asset)
-                if assets.count >= 4 {
-                    return
+        // 检查是否为文件夹类型
+        if item.isFolder, let collectionList = item.collectionList {
+            // 获取文件夹内的所有子集合（包括相册和子文件夹）
+            let fetchOptions = PHFetchOptions()
+            
+            let subCollections = PHCollection.fetchCollections(in: collectionList, options: fetchOptions)
+            
+            // 遍历子集合，只处理相册类型
+            subCollections.enumerateObjects { (collection, _, _) in
+                if let album = collection as? PHAssetCollection {
+                    // 从相册中获取第一张图片
+                    let albumAssets = PHAsset.fetchAssets(in: album, options: nil)
+                    if let asset = albumAssets.firstObject {
+                        assets.append(asset)
+                        if assets.count >= 4 {
+                            return
+                        }
+                    }
                 }
             }
         }
@@ -181,7 +188,17 @@ class FolderCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewDataS
     
     override func prepareForReuse() {
         super.prepareForReuse()
+        
+        // 取消之前的图片请求
+        cancelImageRequests()
+        
+        // 重置UI状态
+        titleLabel.text = ""
+        
+        // 重置数据
         assets.removeAll()
+        
+        // 重新加载collectionView
         collectionView.reloadData()
     }
 }

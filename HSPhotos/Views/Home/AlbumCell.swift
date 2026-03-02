@@ -194,7 +194,17 @@ class AlbumCell: BaseAlbumCell {
     
     override func prepareForReuse() {
         super.prepareForReuse()
+        
+        // 取消之前的图片请求
+        cancelImageRequests()
+        
+        // 重置UI状态
+        titleLabel.text = ""
         photoCountLabel.text = ""
+        imageView.image = nil
+        
+        // 显示占位图
+        showPlaceholder()
         
         // 重置状态
         currentAssetID = nil
