@@ -35,14 +35,22 @@ class AlbumCell: BaseAlbumCell {
         // 相册布局 - 单张封面图
         imageView.contentMode = .scaleAspectFill
         imageView.clipsToBounds = true
-        imageView.layer.cornerRadius = 12
+        // 设置左下角和右下角的圆角
+        let imageMaskPath = UIBezierPath(roundedRect: imageView.bounds, byRoundingCorners: [.bottomLeft, .bottomRight], cornerRadii: CGSize(width: 12, height: 12))
+        let imageMaskLayer = CAShapeLayer()
+        imageMaskLayer.path = imageMaskPath.cgPath
+        imageView.layer.mask = imageMaskLayer
         imageView.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(imageView)
         
         // 占位图视图
         placeholderView.contentMode = .center
         placeholderView.clipsToBounds = true
-        placeholderView.layer.cornerRadius = 12
+        // 设置左下角和右下角的圆角
+        let placeholderMaskPath = UIBezierPath(roundedRect: placeholderView.bounds, byRoundingCorners: [.bottomLeft, .bottomRight], cornerRadii: CGSize(width: 12, height: 12))
+        let placeholderMaskLayer = CAShapeLayer()
+        placeholderMaskLayer.path = placeholderMaskPath.cgPath
+        placeholderView.layer.mask = placeholderMaskLayer
         placeholderView.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(placeholderView)
         
@@ -132,6 +140,18 @@ class AlbumCell: BaseAlbumCell {
         super.layoutSubviews()
         // 每次布局时更新渐变层
         setupGradient()
+        
+        // 更新imageView的遮罩路径
+        if let imageMaskLayer = imageView.layer.mask as? CAShapeLayer {
+            let imageMaskPath = UIBezierPath(roundedRect: imageView.bounds, byRoundingCorners: [.bottomLeft, .bottomRight], cornerRadii: CGSize(width: 12, height: 12))
+            imageMaskLayer.path = imageMaskPath.cgPath
+        }
+        
+        // 更新placeholderView的遮罩路径
+        if let placeholderMaskLayer = placeholderView.layer.mask as? CAShapeLayer {
+            let placeholderMaskPath = UIBezierPath(roundedRect: placeholderView.bounds, byRoundingCorners: [.bottomLeft, .bottomRight], cornerRadii: CGSize(width: 12, height: 12))
+            placeholderMaskLayer.path = placeholderMaskPath.cgPath
+        }
     }
     
     /// 设置渐变层

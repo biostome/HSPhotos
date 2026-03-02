@@ -34,7 +34,7 @@ class BaseAlbumCell: UICollectionViewCell {
         // 设置背景色为浅灰色，支持深色模式
         setupBackgroundColor()
         
-        contentView.layer.cornerRadius = 12
+        // 设置阴影
         contentView.layer.shadowColor = UIColor.black.cgColor
         contentView.layer.shadowOffset = CGSize(width: 0, height: 2)
         contentView.layer.shadowRadius = 6
@@ -42,12 +42,27 @@ class BaseAlbumCell: UICollectionViewCell {
         contentView.layer.borderWidth = 0.5
         contentView.layer.borderColor = UIColor(white: 0.9, alpha: 1.0).cgColor
         
+        // 设置左下角和右下角的圆角
+        let maskPath = UIBezierPath(roundedRect: contentView.bounds, byRoundingCorners: [.bottomLeft, .bottomRight], cornerRadii: CGSize(width: 12, height: 12))
+        let maskLayer = CAShapeLayer()
+        maskLayer.path = maskPath.cgPath
+        contentView.layer.mask = maskLayer
+        
         // 标题标签
         titleLabel.textColor = .label
         titleLabel.font = .systemFont(ofSize: 14, weight: .semibold)
         titleLabel.numberOfLines = 1
         titleLabel.textAlignment = .center
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
+    }
+    
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        // 更新遮罩路径以适应新的bounds
+        if let maskLayer = contentView.layer.mask as? CAShapeLayer {
+            let maskPath = UIBezierPath(roundedRect: contentView.bounds, byRoundingCorners: [.bottomLeft, .bottomRight], cornerRadii: CGSize(width: 12, height: 12))
+            maskLayer.path = maskPath.cgPath
+        }
     }
     
     /// 设置背景色，支持深色模式
