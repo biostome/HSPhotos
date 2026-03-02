@@ -96,6 +96,7 @@ class AlbumListViewController: UIViewController {
     // 创建菜单
     private func createMenu() -> UIMenu {
         // 创建视图模式子菜单
+        /*
         let coverPhotoAction = UIAction(title: "封面照片", image: UIImage(systemName: "photo")) { [weak self] _ in
             self?.switchToCoverPhotoMode()
         }
@@ -105,7 +106,7 @@ class AlbumListViewController: UIViewController {
         }
         
         let viewModeMenu = UIMenu(title: "视图模式", options: .displayInline, children: [coverPhotoAction, listViewAction])
-        
+        */
         // 创建排序选项
         let sortByModificationDateAction = UIAction(title: "按修改日期排序", image: UIImage(systemName: "clock")) { [weak self] _ in
             self?.sortByModificationDate()
@@ -120,7 +121,7 @@ class AlbumListViewController: UIViewController {
         }
         
         // 创建主菜单
-        return UIMenu(title: "", children: [viewModeMenu, sortByModificationDateAction, sortByNameAction, sortByCustomAction])
+        return UIMenu(title: "", children: [/*viewModeMenu,*/ sortByModificationDateAction, sortByNameAction, sortByCustomAction])
     }
     
     // 切换到封面照片模式
