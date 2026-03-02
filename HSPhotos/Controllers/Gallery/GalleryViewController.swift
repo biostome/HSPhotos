@@ -3,7 +3,7 @@ import Photos
 
 class GalleryViewController: BasePhotoViewController {
     
-    private lazy var sortBarButton: UIBarButtonItem = {
+    internal lazy var sortBarButton: UIBarButtonItem = {
         let button = UIBarButtonItem(image: UIImage(systemName: "arrow.up.arrow.down"), style: .plain, target: nil, action: nil)
         button.menu = createSortMenu()
         return button
@@ -32,10 +32,12 @@ class GalleryViewController: BasePhotoViewController {
     
     override func updateNavigationBar() {
         if selectionMode == .none {
+            // 其他相册不显示排序按钮
             navigationItem.setRightBarButtonItems([selectBarButton, menuBarButton, redoBarButton, undoBarButton], animated: true)
             // 退出选择模式时，隐藏全选按钮
             navigationItem.leftBarButtonItem = nil
         } else {
+            // 选择模式下不显示排序按钮
             navigationItem.setRightBarButtonItems([cancelSelectBarButton, rangeSwitchItem, menuBarButton, redoBarButton, undoBarButton], animated: true)
             // 进入选择模式时，显示全选/取消全选按钮
             updateSelectAllButton()
