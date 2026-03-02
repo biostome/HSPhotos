@@ -184,7 +184,8 @@ extension AlbumListView: UICollectionViewDelegate {
                 self.delegate?.albumListView(self, didTapEditTitleFor: item)
             }
             
-            let deleteAction = UIAction(title: "删除相册", image: UIImage(systemName: "trash"), attributes: .destructive) { _ in
+            let deleteActionTitle = item.isFolder ? "删除文件夹" : "删除相册"
+            let deleteAction = UIAction(title: deleteActionTitle, image: UIImage(systemName: "trash"), attributes: .destructive) { _ in
                 self.delegate?.albumListView(self, didTapDeleteFor: item)
             }
             
