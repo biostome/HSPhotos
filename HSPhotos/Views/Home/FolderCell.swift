@@ -13,6 +13,8 @@ class FolderCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewDataS
     private let containerView = UIView()
     private let collectionView: UICollectionView
     private var assets: [PHAsset] = []
+    private let gradientView = UIView()
+    private var gradientLayer: CAGradientLayer?
 
     override init(frame: CGRect) {
         // 初始化CollectionView
@@ -49,10 +51,14 @@ class FolderCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewDataS
         collectionView.register(ThumbnailCell.self, forCellWithReuseIdentifier: "ThumbnailCell")
         containerView.addSubview(collectionView)
         
+        // 渐变视图，使标题更清晰可见
+        gradientView.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(gradientView)
+        
         // 添加标题标签
         titleLabel.textAlignment = .left
         titleLabel.font = .systemFont(ofSize: 16, weight: .medium)
-        titleLabel.textColor = .label
+        titleLabel.textColor = .white
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(titleLabel)
         
@@ -69,6 +75,12 @@ class FolderCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewDataS
             collectionView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
             collectionView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
             collectionView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor), // 填满容器视图
+            
+            // 渐变视图
+            gradientView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            gradientView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            gradientView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+            gradientView.heightAnchor.constraint(equalToConstant: 40),
             
             // 文件夹标题（在左下角）
             titleLabel.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
@@ -169,6 +181,27 @@ class FolderCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewDataS
         if let flowLayout = collectionView.collectionViewLayout as? UICollectionViewFlowLayout {
             flowLayout.invalidateLayout()
         }
+        // 每次布局时更新渐变层
+        setupGradient()
+    }
+    
+    /// 设置渐变层
+    private func setupGradient() {
+        // 移除旧的渐变层
+        gradientLayer?.removeFromSuperlayer()
+        
+        // 创建新的渐变层
+        let gradient = CAGradientLayer()
+        gradient.frame = gradientView.bounds
+        gradient.colors = [
+            UIColor.clear.cgColor,
+            UIColor.black.withAlphaComponent(0.7).cgColor
+        ]
+        gradient.locations = [0.0, 1.0]
+        gradientView.layer.insertSublayer(gradient, at: 0)
+        
+        // 保存渐变层引用
+        gradientLayer = gradient
     }
     
     /// 注册trait变化监听

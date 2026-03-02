@@ -29,6 +29,7 @@ class AlbumCell: BaseAlbumCell {
     }
     
     private let gradientView = UIView()
+    private var gradientLayer: CAGradientLayer?
     
     private func setupUI() {
         // 相册布局 - 单张封面图
@@ -48,7 +49,6 @@ class AlbumCell: BaseAlbumCell {
         // 渐变视图，使标题更清晰可见
         gradientView.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(gradientView)
-        setupGradient()
         
         // 标题标签
         titleLabel.textColor = .white
@@ -130,14 +130,16 @@ class AlbumCell: BaseAlbumCell {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        // 更新渐变层的大小
-        if let gradient = gradientView.layer.sublayers?.first as? CAGradientLayer {
-            gradient.frame = gradientView.bounds
-        }
+        // 每次布局时更新渐变层
+        setupGradient()
     }
     
     /// 设置渐变层
     private func setupGradient() {
+        // 移除旧的渐变层
+        gradientLayer?.removeFromSuperlayer()
+        
+        // 创建新的渐变层
         let gradient = CAGradientLayer()
         gradient.frame = gradientView.bounds
         gradient.colors = [
@@ -146,6 +148,9 @@ class AlbumCell: BaseAlbumCell {
         ]
         gradient.locations = [0.0, 1.0]
         gradientView.layer.insertSublayer(gradient, at: 0)
+        
+        // 保存渐变层引用
+        gradientLayer = gradient
     }
     
     /// 设置占位图，确保在不同大小的Cell中都能正确显示
