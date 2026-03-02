@@ -79,8 +79,17 @@ class AlbumListViewController: UIViewController {
         title = collectionList?.localizedTitle ?? "相册"
         navigationController?.navigationBar.prefersLargeTitles = true
         
-        // 添加创建相册按钮
-        let addButton = UIBarButtonItem(barButtonSystemItem: .add, target: self, action: #selector(createAlbum))
+        // 添加按钮（使用UIMenu）
+        let addAlbumAction = UIAction(title: "新建相簿", image: UIImage(systemName: "rectangle.stack.badge.plus")) { [weak self] _ in
+            self?.createAlbum()
+        }
+        
+        let addFolderAction = UIAction(title: "新建文件夹", image: UIImage(systemName: "folder.badge.plus")) { [weak self] _ in
+            self?.createFolder()
+        }
+        
+        let addMenu = UIMenu(title: "", children: [addAlbumAction, addFolderAction])
+        let addButton = UIBarButtonItem(systemItem: .add, primaryAction: nil, menu: addMenu)
         
         // 添加菜单按钮（使用UIMenu）
         let menuButton = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), primaryAction: nil, menu: createMenu())
@@ -342,6 +351,77 @@ class AlbumListViewController: UIViewController {
                 }
             }
         }
+    }
+    
+    private func performCreateFolder(with name: String) {
+        // 请求权限
+        PHPhotoLibrary.requestAuthorization { [weak self] status in
+            DispatchQueue.main.async {
+                guard let self = self, status == .authorized else {
+                    self?.showPermissionViewController()
+                    return
+                }
+                
+                // 创建文件夹
+                PHPhotoLibrary.shared().performChanges {
+                    let createFolderRequest = PHCollectionListChangeRequest.creationRequestForCollectionList(withTitle: name)
+                    _ = createFolderRequest.placeholderForCreatedCollectionList
+                } completionHandler: { [weak self] success, error in
+                    DispatchQueue.main.async {
+                        guard let self = self else { return }
+                        
+                        if success {
+                            // 重新加载相册列表
+                            self.albumListItems.removeAll()
+                            self.loadAlbums()
+                            
+                            // 延迟一下，确保相册列表已经加载完成
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                // 查找新创建的文件夹
+                                if let newFolder = self.albumListItems.first(where: { $0.title == name }) {
+                                    // 找到新文件夹在数组中的索引
+                                    if let index = self.albumListItems.firstIndex(where: { $0.localIdentifier == newFolder.localIdentifier }) {
+                                        // 滚动到新创建的文件夹位置
+                                        let indexPath = IndexPath(item: index, section: 0)
+                                        self.albumListView.scrollToItem(at: indexPath, at: .top, animated: true)
+                                    }
+                                }
+                            }
+                        } else {
+                            // 显示错误信息
+                            let errorMessage = error?.localizedDescription ?? "创建文件夹失败"
+                            let alertController = UIAlertController(title: "错误", message: errorMessage, preferredStyle: .alert)
+                            alertController.addAction(UIAlertAction(title: "确定", style: .default))
+                            self.present(alertController, animated: true)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    @objc private func createFolder() {
+        // 显示输入框让用户输入文件夹名称
+        let alertController = UIAlertController(title: "创建文件夹", message: "请输入文件夹名称", preferredStyle: .alert)
+        
+        alertController.addTextField { textField in
+            textField.placeholder = "文件夹名称"
+        }
+        
+        let cancelAction = UIAlertAction(title: "取消", style: .cancel)
+        let createAction = UIAlertAction(title: "创建", style: .default) { [weak self] _ in
+            guard let self = self, let folderName = alertController.textFields?.first?.text, !folderName.isEmpty else {
+                return
+            }
+            
+            // 创建新文件夹
+            self.performCreateFolder(with: folderName)
+        }
+        
+        alertController.addAction(cancelAction)
+        alertController.addAction(createAction)
+        
+        present(alertController, animated: true)
     }
     
     /// 注册trait变化监听
