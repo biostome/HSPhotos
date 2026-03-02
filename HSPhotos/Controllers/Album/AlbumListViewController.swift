@@ -126,12 +126,14 @@ class AlbumListViewController: UIViewController {
     // 切换到封面照片模式
     private func switchToCoverPhotoMode() {
         // 实现封面照片模式逻辑
+        albumListView.layoutMode = .grid
         print("切换到封面照片模式")
     }
     
     // 切换到列表视图模式
     private func switchToListViewMode() {
         // 实现列表视图模式逻辑
+        albumListView.layoutMode = .list
         print("切换到列表视图模式")
     }
     

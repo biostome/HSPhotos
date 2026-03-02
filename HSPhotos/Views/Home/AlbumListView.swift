@@ -14,6 +14,12 @@ protocol AlbumListViewDelegate {
     func albumListView(_ albumListView: AlbumListView, didSelectFolder collectionList: PHCollectionList)
 }
 
+/// 相册列表布局模式
+enum AlbumListLayoutMode {
+    case grid // 网格布局
+    case list // 列表布局
+}
+
 class AlbumListView: UIView{
     
     public var delegate: AlbumListViewDelegate?
@@ -21,6 +27,15 @@ class AlbumListView: UIView{
     public var collections: [AlbumListItem] = [] {
         didSet{
             self.collectionView.reloadData()
+        }
+    }
+    
+    /// 布局模式
+    public var layoutMode: AlbumListLayoutMode = .grid {
+        didSet {
+            // 重新加载布局
+            collectionView.collectionViewLayout.invalidateLayout()
+            collectionView.reloadData()
         }
     }
     
@@ -34,6 +49,8 @@ class AlbumListView: UIView{
         collectionView.backgroundColor = .clear // 设置为透明，显示渐变背景
         collectionView.register(AlbumCell.self, forCellWithReuseIdentifier: "AlbumCell")
         collectionView.register(FolderCell.self, forCellWithReuseIdentifier: "FolderCell")
+        collectionView.register(AlbumListCell.self, forCellWithReuseIdentifier: "AlbumListCell")
+        collectionView.register(FolderListCell.self, forCellWithReuseIdentifier: "FolderListCell")
         collectionView.showsVerticalScrollIndicator = false
         return collectionView
     }()
@@ -79,13 +96,27 @@ extension AlbumListView: UICollectionViewDataSource {
         let item = collections[indexPath.item]
         
         if item.isFolder {
-            let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "FolderCell", for: indexPath) as! FolderCell
-            cell.configure(with: item)
-            return cell
+            switch layoutMode {
+            case .grid:
+                let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "FolderCell", for: indexPath) as! FolderCell
+                cell.configure(with: item)
+                return cell
+            case .list:
+                let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "FolderListCell", for: indexPath) as! FolderListCell
+                cell.configure(with: item)
+                return cell
+            }
         } else {
-            let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "AlbumCell", for: indexPath) as! AlbumCell
-            cell.configure(with: item)
-            return cell
+            switch layoutMode {
+            case .grid:
+                let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "AlbumCell", for: indexPath) as! AlbumCell
+                cell.configure(with: item)
+                return cell
+            case .list:
+                let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "AlbumListCell", for: indexPath) as! AlbumListCell
+                cell.configure(with: item)
+                return cell
+            }
         }
     }
 }
@@ -93,14 +124,27 @@ extension AlbumListView: UICollectionViewDataSource {
 // MARK: - UICollectionViewDelegateFlowLayout
 extension AlbumListView: UICollectionViewDelegateFlowLayout {
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
-        // 确保总是显示2列，计算宽度时考虑sectionInset和interitemSpacing
-        let totalWidth = collectionView.frame.width
-        let sectionInset = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
-        let interitemSpacing: CGFloat = 12
-        let availableWidth = totalWidth - sectionInset.left - sectionInset.right - interitemSpacing
-        let cellWidth = availableWidth / 2
-        let cellHeight = cellWidth // 正方形
-        return CGSize(width: cellWidth, height: cellHeight)
+        let item = collections[indexPath.item]
+        
+        // 根据布局模式返回不同的大小
+        switch layoutMode {
+        case .grid:
+            // 网格布局：正方形
+            let totalWidth = collectionView.frame.width
+            let sectionInset = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+            let interitemSpacing: CGFloat = 12
+            let availableWidth = totalWidth - sectionInset.left - sectionInset.right - interitemSpacing
+            let cellWidth = availableWidth / 2
+            let cellHeight = cellWidth // 正方形
+            return CGSize(width: cellWidth, height: cellHeight)
+        case .list:
+            // 列表布局：固定高度的矩形
+            let totalWidth = collectionView.frame.width
+            let sectionInset = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+            let cellWidth = totalWidth - sectionInset.left - sectionInset.right
+            let cellHeight: CGFloat = 100 // 固定高度
+            return CGSize(width: cellWidth, height: cellHeight)
+        }
     }
 }
 
