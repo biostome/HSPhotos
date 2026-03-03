@@ -7,6 +7,7 @@
 
 import UIKit
 import Photos
+import PhotosUI
 
 class BasePhotoViewController: UIViewController {
     
@@ -700,6 +701,10 @@ class BasePhotoViewController: UIViewController {
     internal func createOperationMenu() -> UIMenu {
         let attributes: UIMenuElement.Attributes = gridView.selectedAssets.isEmpty ? .disabled : []
         
+        let addPhotos = UIAction(title: "添加照片", image: UIImage(systemName: "plus.rectangle.on.folder")) { [weak self] _ in
+            self?.onAddPhotos()
+        }
+        
         let copy = UIAction(title: "拷贝", image: UIImage(systemName: "doc.on.doc"), attributes: attributes) { [weak self] _ in
             self?.onCopy()
         }
@@ -724,11 +729,22 @@ class BasePhotoViewController: UIViewController {
             self?.onMove()
         }
         
-        return UIMenu(title: "操作选项", children: [delete, move, paste, copy, duplicate, sort])
+        return UIMenu(title: "操作选项", children: [addPhotos, delete, move, paste, copy, duplicate, sort])
     }
     
     internal func updateOperationMenu() {
         menuBarButton.menu = createOperationMenu()
+    }
+    
+    internal func onAddPhotos() {
+        var configuration = PHPickerConfiguration(photoLibrary: .shared())
+        configuration.filter = .images
+        configuration.selectionLimit = 0
+        configuration.selection = .ordered
+        
+        let picker = PHPickerViewController(configuration: configuration)
+        picker.delegate = self
+        present(picker, animated: true)
     }
     
     internal func syncSuccess(message: String) {
@@ -760,6 +776,96 @@ class BasePhotoViewController: UIViewController {
         }
     }
 
+}
+
+extension BasePhotoViewController: PHPickerViewControllerDelegate {
+    func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+        picker.dismiss(animated: true) { [weak self] in
+            self?.addPickedPhotosToCurrentAlbum(results)
+        }
+    }
+    
+    private func addPickedPhotosToCurrentAlbum(_ results: [PHPickerResult]) {
+        let selectedIdentifiers = results.compactMap { $0.assetIdentifier }
+        guard !selectedIdentifiers.isEmpty else { return }
+        
+        let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: selectedIdentifiers, options: nil)
+        var selectedAssets: [PHAsset] = []
+        fetchResult.enumerateObjects { asset, _, _ in
+            selectedAssets.append(asset)
+        }
+        guard !selectedAssets.isEmpty else { return }
+        
+        let existingAssets = PHAsset.fetchAssets(in: collection, options: nil)
+        var existingIDs = Set<String>()
+        existingAssets.enumerateObjects { asset, _, _ in
+            existingIDs.insert(asset.localIdentifier)
+        }
+        
+        let assetsToAdd = selectedAssets.filter { !existingIDs.contains($0.localIdentifier) }
+        if assetsToAdd.isEmpty {
+            showAlert(title: "提示", message: "所选照片已在该相簿中")
+            return
+        }
+        
+        ensureReadWritePermission { [weak self] granted in
+            guard let self = self else { return }
+            guard granted else {
+                self.showAlert(title: "权限不足", message: "请允许照片读写权限后重试")
+                return
+            }
+            
+            let loadingAlert = UIAlertController(title: "添加中", message: "正在将照片添加到相簿...", preferredStyle: .alert)
+            self.present(loadingAlert, animated: true)
+            
+            var finished = false
+            let finish: (String, String, Bool) -> Void = { title, message, shouldReload in
+                guard !finished else { return }
+                finished = true
+                loadingAlert.dismiss(animated: true) {
+                    if shouldReload {
+                        self.loadPhoto()
+                    }
+                    if !shouldReload {
+                        self.showAlert(title: title, message: message)
+                    }
+                }
+            }
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 15) {
+                finish("添加失败", "操作超时，请稍后重试", false)
+            }
+            
+            PHPhotoLibrary.shared().performChanges({
+                guard let request = PHAssetCollectionChangeRequest(for: self.collection) else { return }
+                request.addAssets(assetsToAdd as NSArray)
+            }, completionHandler: { success, error in
+                DispatchQueue.main.async {
+                    if success {
+                        finish("添加成功", "已添加 \(assetsToAdd.count) 张照片", true)
+                    } else {
+                        finish("添加失败", error?.localizedDescription ?? "无法添加照片", false)
+                    }
+                }
+            })
+        }
+    }
+    
+    private func ensureReadWritePermission(_ completion: @escaping (Bool) -> Void) {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        switch status {
+        case .authorized, .limited:
+            completion(true)
+        case .notDetermined:
+            PHPhotoLibrary.requestAuthorization(for: .readWrite) { newStatus in
+                DispatchQueue.main.async {
+                    completion(newStatus == .authorized || newStatus == .limited)
+                }
+            }
+        default:
+            completion(false)
+        }
+    }
 }
 
 // MARK: - PhotoGridViewDelegate

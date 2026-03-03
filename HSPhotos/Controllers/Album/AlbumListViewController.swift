@@ -7,6 +7,7 @@
 
 import UIKit
 import Photos
+import PhotosUI
 
 
 class AlbumListViewController: UIViewController {
@@ -14,6 +15,7 @@ class AlbumListViewController: UIViewController {
     private var albumListItems: [AlbumListItem] = []
     private var displayedItems: [AlbumListItem] = []
     private var expandedFolderIDs: Set<String> = []
+    private var targetAlbumForAddingPhotos: PHAssetCollection?
     private let backgroundGradientLayer = CAGradientLayer()
     private let collectionList: PHCollectionList?
     
@@ -26,6 +28,30 @@ class AlbumListViewController: UIViewController {
     
     // 当前排序类型
     private var currentSortType: SortType = .custom
+    private lazy var addButton: UIBarButtonItem = {
+        let addAlbumAction = UIAction(title: "新建相簿", image: UIImage(systemName: "rectangle.stack.badge.plus")) { [weak self] _ in
+            self?.createAlbum()
+        }
+        let addFolderAction = UIAction(title: "新建文件夹", image: UIImage(systemName: "folder.badge.plus")) { [weak self] _ in
+            self?.createFolder()
+        }
+        let addMenu = UIMenu(title: "", children: [addAlbumAction, addFolderAction])
+        return UIBarButtonItem(systemItem: .add, primaryAction: nil, menu: addMenu)
+    }()
+    private lazy var menuButton: UIBarButtonItem = {
+        UIBarButtonItem(image: UIImage(systemName: "ellipsis"), primaryAction: nil, menu: createMenu())
+    }()
+    private lazy var toggleExpandCollapseButton: UIBarButtonItem = {
+        let image = UIImage(systemName: "chevron.down.circle")
+        let button = UIBarButtonItem(
+            image: image,
+            style: .plain,
+            target: self,
+            action: #selector(toggleExpandCollapse)
+        )
+        button.accessibilityLabel = "展开全部"
+        return button
+    }()
     
     init(collectionList: PHCollectionList? = nil) {
         self.collectionList = collectionList
@@ -80,24 +106,7 @@ class AlbumListViewController: UIViewController {
     private func setupNavigationBar() {
         title = collectionList?.localizedTitle ?? "相册"
         navigationController?.navigationBar.prefersLargeTitles = true
-        
-        // 添加按钮（使用UIMenu）
-        let addAlbumAction = UIAction(title: "新建相簿", image: UIImage(systemName: "rectangle.stack.badge.plus")) { [weak self] _ in
-            self?.createAlbum()
-        }
-        
-        let addFolderAction = UIAction(title: "新建文件夹", image: UIImage(systemName: "folder.badge.plus")) { [weak self] _ in
-            self?.createFolder()
-        }
-        
-        let addMenu = UIMenu(title: "", children: [addAlbumAction, addFolderAction])
-        let addButton = UIBarButtonItem(systemItem: .add, primaryAction: nil, menu: addMenu)
-        
-        // 添加菜单按钮（使用UIMenu）
-        let menuButton = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), primaryAction: nil, menu: createMenu())
-        
-        // 设置右侧按钮（带动画）
-        navigationItem.setRightBarButtonItems([menuButton, addButton], animated: true)
+        updateToggleExpandCollapseButtonState()
         
         // 允许视图内容延伸到四周
         extendedLayoutIncludesOpaqueBars = true
@@ -277,6 +286,7 @@ class AlbumListViewController: UIViewController {
             displayedItems = buildVisibleItems(from: albumListItems, level: 0, visitedFolderIDs: &visitedFolderIDs)
         }
         albumListView.setCollections(displayedItems, animated: animated)
+        updateToggleExpandCollapseButtonState()
     }
     
     private func buildVisibleItems(from items: [AlbumListItem], level: Int, visitedFolderIDs: inout Set<String>) -> [AlbumListItem] {
@@ -331,6 +341,68 @@ class AlbumListViewController: UIViewController {
         }
         
         return items
+    }
+    
+    @objc private func toggleExpandCollapse() {
+        guard albumListView.layoutMode == .list else { return }
+        
+        let expandableFolderIDs = allExpandableFolderIDs()
+        guard !expandableFolderIDs.isEmpty else { return }
+        
+        if expandableFolderIDs.isSubset(of: expandedFolderIDs) {
+            expandedFolderIDs.subtract(expandableFolderIDs)
+        } else {
+            expandedFolderIDs.formUnion(expandableFolderIDs)
+        }
+        
+        applyCurrentDisplayData(animated: true)
+    }
+    
+    private func updateToggleExpandCollapseButtonState() {
+        let isListMode = albumListView.layoutMode == .list
+        let expandableFolderIDs = allExpandableFolderIDs()
+        let hasExpandableFolders = !expandableFolderIDs.isEmpty
+        let allExpanded = hasExpandableFolders && expandableFolderIDs.isSubset(of: expandedFolderIDs)
+        
+        let expandImage = UIImage(systemName: "chevron.down.circle")
+        let collapseImage = UIImage(systemName: "chevron.up.circle")
+        toggleExpandCollapseButton.image = allExpanded ? collapseImage : expandImage
+        toggleExpandCollapseButton.accessibilityLabel = allExpanded ? "收起全部" : "展开全部"
+        toggleExpandCollapseButton.isEnabled = isListMode && hasExpandableFolders
+        
+        var rightItems: [UIBarButtonItem] = [menuButton]
+        
+        if isListMode {
+            rightItems.append(toggleExpandCollapseButton)
+        }
+        
+        rightItems.append(addButton)
+        
+        navigationItem.setRightBarButtonItems(rightItems, animated: true)
+    }
+    
+    private func allExpandableFolderIDs() -> Set<String> {
+        var visitedFolderIDs = Set<String>()
+        return collectExpandableFolderIDs(from: albumListItems, visitedFolderIDs: &visitedFolderIDs)
+    }
+    
+    private func collectExpandableFolderIDs(from items: [AlbumListItem], visitedFolderIDs: inout Set<String>) -> Set<String> {
+        var folderIDs = Set<String>()
+        
+        for item in items {
+            guard item.isFolder, let folder = item.collectionList else { continue }
+            guard !visitedFolderIDs.contains(item.localIdentifier) else { continue }
+            visitedFolderIDs.insert(item.localIdentifier)
+            
+            let childItems = fetchItems(in: folder)
+            if !childItems.isEmpty {
+                folderIDs.insert(item.localIdentifier)
+            }
+            
+            folderIDs.formUnion(collectExpandableFolderIDs(from: childItems, visitedFolderIDs: &visitedFolderIDs))
+        }
+        
+        return folderIDs
     }
     
 
@@ -592,6 +664,20 @@ extension AlbumListViewController: AlbumListViewDelegate {
         applyCurrentDisplayData(animated: true)
     }
     
+    func albumListView(_ albumListView: AlbumListView, didTapAddPhotosFor item: AlbumListItem) {
+        guard let targetAlbum = item.assetCollection else { return }
+        targetAlbumForAddingPhotos = targetAlbum
+        
+        var configuration = PHPickerConfiguration(photoLibrary: .shared())
+        configuration.filter = .images
+        configuration.selectionLimit = 0
+        configuration.selection = .ordered
+        
+        let picker = PHPickerViewController(configuration: configuration)
+        picker.delegate = self
+        present(picker, animated: true)
+    }
+    
     func albumListView(_ albumListView: AlbumListView, didSelectItemAt collection: PHAssetCollection) {
         let photoVC = PhotoGridViewController(collection: collection)
         navigationController?.pushViewController(photoVC, animated: true)
@@ -754,6 +840,108 @@ extension AlbumListViewController: AlbumListViewDelegate {
                     }
                 }
             }
+        }
+    }
+}
+
+extension AlbumListViewController: PHPickerViewControllerDelegate {
+    func picker(_ picker: PHPickerViewController, didFinishPicking results: [PHPickerResult]) {
+        let targetAlbum = targetAlbumForAddingPhotos
+        targetAlbumForAddingPhotos = nil
+        
+        picker.dismiss(animated: true) { [weak self] in
+            guard
+                let self = self,
+                let targetAlbum = targetAlbum
+            else {
+                return
+            }
+            self.addPickedPhotos(results, to: targetAlbum)
+        }
+    }
+    
+    private func addPickedPhotos(_ results: [PHPickerResult], to targetAlbum: PHAssetCollection) {
+        let selectedIdentifiers = results.compactMap { $0.assetIdentifier }
+        guard !selectedIdentifiers.isEmpty else { return }
+        
+        let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: selectedIdentifiers, options: nil)
+        var selectedAssets: [PHAsset] = []
+        fetchResult.enumerateObjects { asset, _, _ in
+            selectedAssets.append(asset)
+        }
+        guard !selectedAssets.isEmpty else { return }
+        
+        let existingAssets = PHAsset.fetchAssets(in: targetAlbum, options: nil)
+        var existingAssetIDs = Set<String>()
+        existingAssets.enumerateObjects { asset, _, _ in
+            existingAssetIDs.insert(asset.localIdentifier)
+        }
+        
+        let assetsToAdd = selectedAssets.filter { !existingAssetIDs.contains($0.localIdentifier) }
+        if assetsToAdd.isEmpty {
+            let alert = UIAlertController(title: "提示", message: "所选照片已在该相簿中", preferredStyle: .alert)
+            alert.addAction(UIAlertAction(title: "确定", style: .default))
+            present(alert, animated: true)
+            return
+        }
+        
+        ensureReadWritePermission { [weak self] granted in
+            guard let self = self else { return }
+            guard granted else {
+                let alert = UIAlertController(title: "权限不足", message: "请允许照片读写权限后重试", preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: "确定", style: .default))
+                self.present(alert, animated: true)
+                return
+            }
+            
+            let loadingAlert = UIAlertController(title: "添加中", message: "正在将照片添加到相簿...", preferredStyle: .alert)
+            self.present(loadingAlert, animated: true)
+            
+            var finished = false
+            let finish: (String, String, Bool) -> Void = { title, message, shouldShowAlert in
+                guard !finished else { return }
+                finished = true
+                loadingAlert.dismiss(animated: true) {
+                    if shouldShowAlert {
+                        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+                        alert.addAction(UIAlertAction(title: "确定", style: .default))
+                        self.present(alert, animated: true)
+                    }
+                }
+            }
+            
+            DispatchQueue.main.asyncAfter(deadline: .now() + 15) {
+                finish("添加失败", "操作超时，请稍后重试", true)
+            }
+            
+            PHPhotoLibrary.shared().performChanges({
+                guard let request = PHAssetCollectionChangeRequest(for: targetAlbum) else { return }
+                request.addAssets(assetsToAdd as NSArray)
+            }, completionHandler: { success, error in
+                DispatchQueue.main.async {
+                    if success {
+                        finish("添加成功", "已添加 \(assetsToAdd.count) 张照片", false)
+                    } else {
+                        finish("添加失败", error?.localizedDescription ?? "添加失败，请稍后重试", true)
+                    }
+                }
+            })
+        }
+    }
+    
+    private func ensureReadWritePermission(_ completion: @escaping (Bool) -> Void) {
+        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        switch status {
+        case .authorized, .limited:
+            completion(true)
+        case .notDetermined:
+            PHPhotoLibrary.requestAuthorization(for: .readWrite) { newStatus in
+                DispatchQueue.main.async {
+                    completion(newStatus == .authorized || newStatus == .limited)
+                }
+            }
+        default:
+            completion(false)
         }
     }
 }

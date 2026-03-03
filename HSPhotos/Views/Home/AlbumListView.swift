@@ -13,6 +13,7 @@ protocol AlbumListViewDelegate {
     func albumListView(_ albumListView: AlbumListView, didTapFolderDisclosureAt indexPath: IndexPath)
     func albumListView(_ albumListView: AlbumListView, didSelectItemAt collection: PHAssetCollection)
     func albumListView(_ albumListView: AlbumListView, didSelectFolder collectionList: PHCollectionList)
+    func albumListView(_ albumListView: AlbumListView, didTapAddPhotosFor item: AlbumListItem)
     func albumListView(_ albumListView: AlbumListView, didTapEditTitleFor item: AlbumListItem)
     func albumListView(_ albumListView: AlbumListView, didTapDeleteFor item: AlbumListItem)
 }
@@ -119,18 +120,28 @@ class AlbumListView: UIView{
         if deletedIndexPaths.isEmpty && insertedIndexPaths.isEmpty && reloadedIndexPaths.isEmpty {
             return
         }
-        
-        collectionView.performBatchUpdates({
-            if !deletedIndexPaths.isEmpty {
-                collectionView.deleteItems(at: deletedIndexPaths)
-            }
-            if !insertedIndexPaths.isEmpty {
-                collectionView.insertItems(at: insertedIndexPaths)
-            }
-            if !reloadedIndexPaths.isEmpty {
+
+        let hasStructuralChanges = !deletedIndexPaths.isEmpty || !insertedIndexPaths.isEmpty
+        if hasStructuralChanges {
+            collectionView.performBatchUpdates({
+                if !deletedIndexPaths.isEmpty {
+                    collectionView.deleteItems(at: deletedIndexPaths)
+                }
+                if !insertedIndexPaths.isEmpty {
+                    collectionView.insertItems(at: insertedIndexPaths)
+                }
+            }, completion: { _ in
+                // Avoid delete/reload index path conflicts in the same batch.
+                self.collectionView.reloadData()
+            })
+            return
+        }
+
+        if !reloadedIndexPaths.isEmpty {
+            collectionView.performBatchUpdates({
                 collectionView.reloadItems(at: reloadedIndexPaths)
-            }
-        })
+            })
+        }
     }
     
     private func itemKey(for item: AlbumListItem) -> String {
@@ -240,6 +251,9 @@ extension AlbumListView: UICollectionViewDelegate {
         let item = self.collections[indexPath.item]
         
         return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in
+            let addPhotosAction = UIAction(title: "添加照片", image: UIImage(systemName: "plus.rectangle.on.folder")) { _ in
+                self.delegate?.albumListView(self, didTapAddPhotosFor: item)
+            }
             let editAction = UIAction(title: "编辑标题", image: UIImage(systemName: "pencil")) { _ in
                 self.delegate?.albumListView(self, didTapEditTitleFor: item)
             }
@@ -249,7 +263,14 @@ extension AlbumListView: UICollectionViewDelegate {
                 self.delegate?.albumListView(self, didTapDeleteFor: item)
             }
             
-            return UIMenu(title: "", children: [editAction, deleteAction])
+            var actions: [UIAction] = []
+            if item.isAlbum {
+                actions.append(addPhotosAction)
+            }
+            actions.append(editAction)
+            actions.append(deleteAction)
+            
+            return UIMenu(title: "", children: actions)
         }
     }
 }
