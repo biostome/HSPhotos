@@ -28,6 +28,8 @@ class AlbumListViewController: UIViewController {
     
     // 当前排序类型
     private var currentSortType: SortType = .custom
+    private let isPickerMode: Bool
+    private let onAlbumPicked: ((PHAssetCollection) -> Void)?
     private lazy var addButton: UIBarButtonItem = {
         let addAlbumAction = UIAction(title: "新建相簿", image: UIImage(systemName: "rectangle.stack.badge.plus")) { [weak self] _ in
             self?.createAlbum()
@@ -53,8 +55,14 @@ class AlbumListViewController: UIViewController {
         return button
     }()
     
-    init(collectionList: PHCollectionList? = nil) {
+    init(
+        collectionList: PHCollectionList? = nil,
+        isPickerMode: Bool = false,
+        onAlbumPicked: ((PHAssetCollection) -> Void)? = nil
+    ) {
         self.collectionList = collectionList
+        self.isPickerMode = isPickerMode
+        self.onAlbumPicked = onAlbumPicked
         super.init(nibName: nil, bundle: nil)
     }
     
@@ -104,8 +112,21 @@ class AlbumListViewController: UIViewController {
     }
     
     private func setupNavigationBar() {
-        title = collectionList?.localizedTitle ?? "相册"
+        title = isPickerMode ? (collectionList?.localizedTitle ?? "选择相簿") : (collectionList?.localizedTitle ?? "相册")
         navigationController?.navigationBar.prefersLargeTitles = true
+        
+        if isPickerMode {
+            if collectionList == nil {
+                navigationItem.leftBarButtonItem = UIBarButtonItem(
+                    title: "取消",
+                    style: .plain,
+                    target: self,
+                    action: #selector(cancelPicker)
+                )
+            }
+            navigationItem.rightBarButtonItems = nil
+            return
+        }
         updateToggleExpandCollapseButtonState()
         
         // 允许视图内容延伸到四周
@@ -356,6 +377,14 @@ class AlbumListViewController: UIViewController {
         }
         
         applyCurrentDisplayData(animated: true)
+    }
+    
+    @objc private func cancelPicker() {
+        if let navigationController = navigationController, navigationController.presentingViewController != nil {
+            navigationController.dismiss(animated: true)
+        } else {
+            dismiss(animated: true)
+        }
     }
     
     private func updateToggleExpandCollapseButtonState() {
@@ -679,13 +708,27 @@ extension AlbumListViewController: AlbumListViewDelegate {
     }
     
     func albumListView(_ albumListView: AlbumListView, didSelectItemAt collection: PHAssetCollection) {
+        if isPickerMode {
+            onAlbumPicked?(collection)
+            if let navigationController = navigationController, navigationController.presentingViewController != nil {
+                navigationController.dismiss(animated: true)
+            } else {
+                dismiss(animated: true)
+            }
+            return
+        }
+        
         let photoVC = PhotoGridViewController(collection: collection)
         navigationController?.pushViewController(photoVC, animated: true)
     }
     
     func albumListView(_ albumListView: AlbumListView, didSelectFolder collectionList: PHCollectionList) {
         // 显示文件夹内的子相册列表
-        let folderVC = AlbumListViewController(collectionList: collectionList)
+        let folderVC = AlbumListViewController(
+            collectionList: collectionList,
+            isPickerMode: isPickerMode,
+            onAlbumPicked: onAlbumPicked
+        )
         navigationController?.pushViewController(folderVC, animated: true)
     }
     

@@ -3,6 +3,23 @@ import Photos
 
 class GalleryViewController: BasePhotoViewController {
     
+    private var shareButtonBottomConstraint: NSLayoutConstraint?
+    
+    private lazy var shareButton: UIButton = {
+        var config = UIButton.Configuration.glass()
+        config.image = UIImage(systemName: "square.and.arrow.up")
+        config.baseForegroundColor = UIColor.systemBlue
+        config.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10)
+        
+        let button = UIButton(type: .custom)
+        button.configuration = config
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.addTarget(self, action: #selector(didTapShareButton), for: .touchUpInside)
+        button.isHidden = true
+        button.isEnabled = false
+        return button
+    }()
+    
     internal lazy var sortBarButton: UIBarButtonItem = {
         let button = UIBarButtonItem(image: UIImage(systemName: "arrow.up.arrow.down"), style: .plain, target: nil, action: nil)
         button.menu = createSortMenu()
@@ -26,6 +43,16 @@ class GalleryViewController: BasePhotoViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "图库"
+        
+        view.addSubview(shareButton)
+        shareButtonBottomConstraint = shareButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -8)
+        NSLayoutConstraint.activate([
+            shareButtonBottomConstraint!,
+            shareButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            shareButton.heightAnchor.constraint(equalToConstant: 44),
+            shareButton.widthAnchor.constraint(equalToConstant: 44)
+        ])
+        updateShareButtonState()
     }
     
     // MARK: - 重写方法
@@ -36,12 +63,19 @@ class GalleryViewController: BasePhotoViewController {
             navigationItem.setRightBarButtonItems([selectBarButton, menuBarButton, redoBarButton, undoBarButton], animated: true)
             // 退出选择模式时，隐藏全选按钮
             navigationItem.leftBarButtonItem = nil
+            tabBarController?.tabBar.isHidden = false
+            additionalSafeAreaInsets.bottom = 0
         } else {
             // 选择模式下不显示排序按钮
             navigationItem.setRightBarButtonItems([cancelSelectBarButton, rangeSwitchItem, menuBarButton, redoBarButton, undoBarButton], animated: true)
             // 进入选择模式时，显示全选/取消全选按钮
             updateSelectAllButton()
+            tabBarController?.tabBar.isHidden = true
+            let tabBarHeight = tabBarController?.tabBar.frame.height ?? 0
+            additionalSafeAreaInsets.bottom = -tabBarHeight
         }
+        view.layoutIfNeeded()
+        updateShareButtonState()
     }
     
     override func createSortMenu() -> UIMenu {
@@ -120,6 +154,10 @@ class GalleryViewController: BasePhotoViewController {
     override func createOperationMenu() -> UIMenu {
         let attributes: UIMenuElement.Attributes = gridView.selectedAssets.isEmpty ? .disabled : []
         
+        let addToAlbum = UIAction(title: "添加到相簿", image: UIImage(systemName: "plus.rectangle.on.folder"), attributes: attributes) { [weak self] _ in
+            self?.onAddToAlbumSelectedAssets()
+        }
+        
         let copy = UIAction(title: "拷贝", image: UIImage(systemName: "doc.on.doc"), attributes: attributes) { [weak self] _ in
             self?.onCopy()
         }
@@ -145,9 +183,86 @@ class GalleryViewController: BasePhotoViewController {
             self?.onMove()
         }
         
-        return UIMenu(title: "操作选项", children: [delete, move, paste, copy, duplicate])
+        return UIMenu(title: "操作选项", children: [addToAlbum, delete, move, paste, copy, duplicate])
+    }
+    
+    override func updateOperationMenu() {
+        super.updateOperationMenu()
+        updateShareButtonState()
+    }
+    
+    override func photoGridView(_ photoGridView: PhotoGridView, didSelectedItems assets: [PHAsset]) {
+        super.photoGridView(photoGridView, didSelectedItems: assets)
+        updateShareButtonState()
+    }
+    
+    @objc private func didTapShareButton() {
+        let selectedAssets = gridView.selectedAssets
+        guard !selectedAssets.isEmpty else { return }
+        
+        let addToAlbumActivity = GalleryAddToAlbumActivity { [weak self] in
+            self?.showAddToAlbumPicker(for: selectedAssets)
+        }
+        
+        let activityItems: [Any] = [makeSharePlaceholderText(for: selectedAssets.count)]
+        let activityVC = UIActivityViewController(activityItems: activityItems, applicationActivities: [addToAlbumActivity])
+        if let popover = activityVC.popoverPresentationController {
+            popover.sourceView = shareButton
+            popover.sourceRect = shareButton.bounds
+        }
+        present(activityVC, animated: true)
+    }
+    
+    internal func updateShareButtonState() {
+        let inSelectionMode = selectionMode != .none
+        shareButton.isHidden = !inSelectionMode
+        shareButton.isEnabled = !gridView.selectedAssets.isEmpty
+    }
+    
+    private func makeSharePlaceholderText(for count: Int) -> String {
+        if count == 1 {
+            return "已选择 1 张照片"
+        }
+        return "已选择 \(count) 张照片"
     }
 }
 
 
-
+private final class GalleryAddToAlbumActivity: UIActivity {
+    private let action: () -> Void
+    
+    init(action: @escaping () -> Void) {
+        self.action = action
+        super.init()
+    }
+    
+    override var activityType: UIActivity.ActivityType? {
+        UIActivity.ActivityType("com.hsphotos.gallery.activity.addToAlbum")
+    }
+    
+    override var activityTitle: String? {
+        "添加到相簿"
+    }
+    
+    override var activityImage: UIImage? {
+        UIImage(systemName: "plus.rectangle.on.folder")
+    }
+    
+    override class var activityCategory: UIActivity.Category {
+        .action
+    }
+    
+    override func canPerform(withActivityItems activityItems: [Any]) -> Bool {
+        true
+    }
+    
+    override func prepare(withActivityItems activityItems: [Any]) {
+    }
+    
+    override func perform() {
+        activityDidFinish(true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            self.action()
+        }
+    }
+}

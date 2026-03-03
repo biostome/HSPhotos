@@ -448,6 +448,53 @@ class BasePhotoViewController: UIViewController {
         showAlbumPicker(for: selectedAssets)
     }
     
+    internal func showAddToAlbumPicker(for assets: [PHAsset]) {
+        guard !assets.isEmpty else {
+            showAlert(title: "添加失败", message: "请先选择要添加的照片")
+            return
+        }
+
+        let pickerVC = AlbumListViewController(isPickerMode: true) { [weak self] destinationAlbum in
+            self?.performAdd(assets: assets, to: destinationAlbum)
+        }
+        let nav = UINavigationController(rootViewController: pickerVC)
+        nav.modalPresentationStyle = .formSheet
+        present(nav, animated: true)
+    }
+    
+    internal func performAdd(assets: [PHAsset], to destinationCollection: PHAssetCollection) {
+        let existingAssets = PHAsset.fetchAssets(in: destinationCollection, options: nil)
+        var existingAssetIDs = Set<String>()
+        existingAssets.enumerateObjects { asset, _, _ in
+            existingAssetIDs.insert(asset.localIdentifier)
+        }
+        
+        let assetsToAdd = assets.filter { !existingAssetIDs.contains($0.localIdentifier) }
+        if assetsToAdd.isEmpty {
+            showAlert(title: "提示", message: "所选照片已在目标相簿中")
+            return
+        }
+        
+        let loadingAlert = UIAlertController(title: "添加中", message: "正在添加到相簿...", preferredStyle: .alert)
+        present(loadingAlert, animated: true)
+        
+        PHPhotoLibrary.shared().performChanges({
+            guard let request = PHAssetCollectionChangeRequest(for: destinationCollection) else { return }
+            request.addAssets(assetsToAdd as NSArray)
+        }, completionHandler: { [weak self] success, error in
+            DispatchQueue.main.async {
+                loadingAlert.dismiss(animated: true) {
+                    guard let self = self else { return }
+                    if success {
+                        self.loadPhoto()
+                    } else {
+                        self.showAlert(title: "添加失败", message: error?.localizedDescription ?? "无法添加照片")
+                    }
+                }
+            }
+        })
+    }
+    
     internal func showAlbumPicker(for assets: [PHAsset]) {
         // 获取所有用户创建的相册
         let options = PHFetchOptions()
@@ -701,8 +748,8 @@ class BasePhotoViewController: UIViewController {
     internal func createOperationMenu() -> UIMenu {
         let attributes: UIMenuElement.Attributes = gridView.selectedAssets.isEmpty ? .disabled : []
         
-        let addPhotos = UIAction(title: "添加照片", image: UIImage(systemName: "plus.rectangle.on.folder")) { [weak self] _ in
-            self?.onAddPhotos()
+        let addToAlbum = UIAction(title: "添加到相簿", image: UIImage(systemName: "plus.rectangle.on.folder"), attributes: attributes) { [weak self] _ in
+            self?.onAddToAlbumSelectedAssets()
         }
         
         let copy = UIAction(title: "拷贝", image: UIImage(systemName: "doc.on.doc"), attributes: attributes) { [weak self] _ in
@@ -729,7 +776,7 @@ class BasePhotoViewController: UIViewController {
             self?.onMove()
         }
         
-        return UIMenu(title: "操作选项", children: [addPhotos, delete, move, paste, copy, duplicate, sort])
+        return UIMenu(title: "操作选项", children: [addToAlbum, delete, move, paste, copy, duplicate, sort])
     }
     
     internal func updateOperationMenu() {
@@ -745,6 +792,15 @@ class BasePhotoViewController: UIViewController {
         let picker = PHPickerViewController(configuration: configuration)
         picker.delegate = self
         present(picker, animated: true)
+    }
+    
+    internal func onAddToAlbumSelectedAssets() {
+        let selectedAssets = gridView.selectedAssets
+        guard !selectedAssets.isEmpty else {
+            showAlert(title: "添加失败", message: "请先选择要添加的照片")
+            return
+        }
+        showAddToAlbumPicker(for: selectedAssets)
     }
     
     internal func syncSuccess(message: String) {

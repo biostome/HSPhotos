@@ -10,7 +10,20 @@ import Photos
 
 class PhotoGridViewController: BasePhotoViewController {
     
-
+    private lazy var shareButton: UIButton = {
+        var config = UIButton.Configuration.glass()
+        config.image = UIImage(systemName: "square.and.arrow.up")
+        config.baseForegroundColor = UIColor.systemBlue
+        config.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10)
+        
+        let button = UIButton(type: .custom)
+        button.configuration = config
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.addTarget(self, action: #selector(didTapShareButton), for: .touchUpInside)
+        button.isHidden = true
+        button.isEnabled = false
+        return button
+    }()
     
     private lazy var menuButton: UIButton = {
         // iOS 26 新增的 Glass 样式
@@ -58,12 +71,20 @@ class PhotoGridViewController: BasePhotoViewController {
         
         // 添加底部排序按钮
         view.addSubview(sortButton)
+        view.addSubview(shareButton)
         NSLayoutConstraint.activate([
             sortButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
             sortButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
             sortButton.heightAnchor.constraint(equalToConstant: 44),
-            sortButton.widthAnchor.constraint(equalToConstant: 44)
+            sortButton.widthAnchor.constraint(equalToConstant: 44),
+            
+            shareButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
+            shareButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
+            shareButton.heightAnchor.constraint(equalToConstant: 44),
+            shareButton.widthAnchor.constraint(equalToConstant: 44)
         ])
+        
+        updateBottomActionButtons()
     }
     
     // MARK: - 重写方法
@@ -105,6 +126,11 @@ class PhotoGridViewController: BasePhotoViewController {
     override func updateOperationMenu() {
         menuButton.menu = createOperationMenu()
         menuBarButton.menu = createOperationMenu()
+    }
+    
+    override func updateNavigationBar() {
+        super.updateNavigationBar()
+        updateBottomActionButtons()
     }
     
     @objc(photoGridView:didPasteAssets:after:) override func photoGridView(_ photoGridView: PhotoGridView, didPasteAssets assets: [PHAsset], after: PHAsset) {
@@ -181,8 +207,79 @@ class PhotoGridViewController: BasePhotoViewController {
             // 未全选，显示全选按钮
             navigationItem.setLeftBarButtonItems([selectAllBarButton], animated: true)
         }
+        updateBottomActionButtons()
     }
-
+    
+    @objc private func didTapShareButton() {
+        let selectedAssets = gridView.selectedAssets
+        guard !selectedAssets.isEmpty else { return }
+        
+        let addToAlbumActivity = AddToAlbumActivity { [weak self] in
+            self?.showAddToAlbumPicker(for: selectedAssets)
+        }
+        
+        let activityItems: [Any] = [makeSharePlaceholderText(for: selectedAssets.count)]
+        let activityVC = UIActivityViewController(activityItems: activityItems, applicationActivities: [addToAlbumActivity])
+        if let popover = activityVC.popoverPresentationController {
+            popover.sourceView = shareButton
+            popover.sourceRect = shareButton.bounds
+        }
+        present(activityVC, animated: true)
+    }
+    
+    private func updateBottomActionButtons() {
+        let inSelectionMode = selectionMode != .none
+        let hasSelectedAssets = !gridView.selectedAssets.isEmpty
+        
+        sortButton.isHidden = inSelectionMode
+        shareButton.isHidden = !inSelectionMode
+        shareButton.isEnabled = hasSelectedAssets
+    }
+    
+    private func makeSharePlaceholderText(for count: Int) -> String {
+        if count == 1 {
+            return "已选择 1 张照片"
+        }
+        return "已选择 \(count) 张照片"
+    }
 }
 
 
+private final class AddToAlbumActivity: UIActivity {
+    private let action: () -> Void
+    
+    init(action: @escaping () -> Void) {
+        self.action = action
+        super.init()
+    }
+    
+    override var activityType: UIActivity.ActivityType? {
+        UIActivity.ActivityType("com.hsphotos.activity.addToAlbum")
+    }
+    
+    override var activityTitle: String? {
+        "添加到相簿"
+    }
+    
+    override var activityImage: UIImage? {
+        UIImage(systemName: "plus.rectangle.on.folder")
+    }
+    
+    override class var activityCategory: UIActivity.Category {
+        .action
+    }
+    
+    override func canPerform(withActivityItems activityItems: [Any]) -> Bool {
+        true
+    }
+    
+    override func prepare(withActivityItems activityItems: [Any]) {
+    }
+    
+    override func perform() {
+        activityDidFinish(true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            self.action()
+        }
+    }
+}
