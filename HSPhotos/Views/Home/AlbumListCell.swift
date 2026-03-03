@@ -88,6 +88,7 @@ class AlbumListCell: BaseAlbumCell {
     func configure(with item: AlbumListItem) {
         // 取消之前的图片请求
         cancelImageRequests()
+        applyHierarchyAppearance(level: item.hierarchyLevel)
         
         // 设置相册标题和数量
         titleLabel.text = item.title

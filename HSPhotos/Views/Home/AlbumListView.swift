@@ -26,11 +26,7 @@ class AlbumListView: UIView{
     
     public var delegate: AlbumListViewDelegate?
     
-    public var collections: [AlbumListItem] = [] {
-        didSet{
-            self.collectionView.reloadData()
-        }
-    }
+    public private(set) var collections: [AlbumListItem] = []
     
     /// 布局模式
     public var layoutMode: AlbumListLayoutMode = .grid {
@@ -86,6 +82,60 @@ class AlbumListView: UIView{
     public func scrollToItem(at indexPath: IndexPath, at scrollPosition: UICollectionView.ScrollPosition, animated: Bool) {
         collectionView.scrollToItem(at: indexPath, at: scrollPosition, animated: animated)
     }
+    
+    public func setCollections(_ newCollections: [AlbumListItem], animated: Bool) {
+        if !animated || window == nil {
+            collections = newCollections
+            collectionView.reloadData()
+            return
+        }
+        
+        let oldCollections = collections
+        let oldKeys = oldCollections.map { itemKey(for: $0) }
+        let newKeys = newCollections.map { itemKey(for: $0) }
+        let oldKeySet = Set(oldKeys)
+        let newKeySet = Set(newKeys)
+        
+        let oldItemByKey = Dictionary(uniqueKeysWithValues: zip(oldKeys, oldCollections))
+        let deletedIndexPaths = oldKeys.enumerated().compactMap { entry -> IndexPath? in
+            newKeySet.contains(entry.element) ? nil : IndexPath(item: entry.offset, section: 0)
+        }
+        let insertedIndexPaths = newKeys.enumerated().compactMap { entry -> IndexPath? in
+            oldKeySet.contains(entry.element) ? nil : IndexPath(item: entry.offset, section: 0)
+        }
+        let reloadedIndexPaths = newCollections.enumerated().compactMap { entry -> IndexPath? in
+            let item = entry.element
+            let key = itemKey(for: item)
+            guard let oldItem = oldItemByKey[key] else { return nil }
+            let needsReload = oldItem.isExpanded != item.isExpanded
+                || oldItem.canExpand != item.canExpand
+                || oldItem.hierarchyLevel != item.hierarchyLevel
+            return needsReload ? IndexPath(item: entry.offset, section: 0) : nil
+        }
+        
+        collections = newCollections
+        
+        if deletedIndexPaths.isEmpty && insertedIndexPaths.isEmpty && reloadedIndexPaths.isEmpty {
+            return
+        }
+        
+        collectionView.performBatchUpdates({
+            if !deletedIndexPaths.isEmpty {
+                collectionView.deleteItems(at: deletedIndexPaths)
+            }
+            if !insertedIndexPaths.isEmpty {
+                collectionView.insertItems(at: insertedIndexPaths)
+            }
+            if !reloadedIndexPaths.isEmpty {
+                collectionView.reloadItems(at: reloadedIndexPaths)
+            }
+        })
+    }
+    
+    private func itemKey(for item: AlbumListItem) -> String {
+        let typePrefix = item.isFolder ? "folder" : "album"
+        return "\(typePrefix)-\(item.localIdentifier)-\(item.hierarchyLevel)"
+    }
 }
 
 // MARK: - UICollectionViewDataSource
@@ -126,8 +176,6 @@ extension AlbumListView: UICollectionViewDataSource {
 // MARK: - UICollectionViewDelegateFlowLayout
 extension AlbumListView: UICollectionViewDelegateFlowLayout {
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
-        let item = collections[indexPath.item]
-        
         // 根据布局模式返回不同的大小
         switch layoutMode {
         case .grid:
@@ -155,6 +203,10 @@ extension AlbumListView: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         let item = self.collections[indexPath.item]
         self.delegate?.albumListView(self, didSelectItemAt: indexPath)
+        
+        if layoutMode == .list, item.isFolder {
+            return
+        }
         
         // 根据类型调用不同的代理方法
         switch item.type {

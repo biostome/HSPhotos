@@ -12,6 +12,10 @@ import Photos
 class FolderListCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
     private let collectionView: UICollectionView
     private let photoCountLabel = UILabel()
+    private let disclosureImageView = UIImageView()
+    private var disclosureLeadingConstraint: NSLayoutConstraint?
+    private var collectionViewLeadingConstraint: NSLayoutConstraint?
+    private var titleLeadingConstraint: NSLayoutConstraint?
     private var assets: [PHAsset] = []
 
     override init(frame: CGRect) {
@@ -44,6 +48,12 @@ class FolderListCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewD
         collectionView.register(ThumbnailCell.self, forCellWithReuseIdentifier: "ThumbnailCell")
         contentView.addSubview(collectionView)
         
+        disclosureImageView.image = UIImage(systemName: "chevron.right")
+        disclosureImageView.tintColor = .secondaryLabel
+        disclosureImageView.contentMode = .scaleAspectFit
+        disclosureImageView.translatesAutoresizingMaskIntoConstraints = false
+        contentView.addSubview(disclosureImageView)
+        
         // 标题标签
         titleLabel.textColor = .label
         titleLabel.font = .systemFont(ofSize: 16, weight: .medium)
@@ -60,16 +70,25 @@ class FolderListCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewD
         contentView.addSubview(photoCountLabel)
         
         // 布局约束
+        disclosureLeadingConstraint = disclosureImageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12)
+        collectionViewLeadingConstraint = collectionView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8)
+        titleLeadingConstraint = titleLabel.leadingAnchor.constraint(equalTo: collectionView.trailingAnchor, constant: 12)
+        
         NSLayoutConstraint.activate([
+            disclosureLeadingConstraint!,
+            disclosureImageView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
+            disclosureImageView.widthAnchor.constraint(equalToConstant: 12),
+            disclosureImageView.heightAnchor.constraint(equalToConstant: 12),
+            
             // 左侧4宫格CollectionView
             collectionView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
-            collectionView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
+            collectionViewLeadingConstraint!,
             collectionView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
             collectionView.widthAnchor.constraint(equalTo: collectionView.heightAnchor), // 正方形
             
             // 标题标签（图片右侧，顶部对齐）
             titleLabel.topAnchor.constraint(equalTo: collectionView.topAnchor),
-            titleLabel.leadingAnchor.constraint(equalTo: collectionView.trailingAnchor, constant: 12),
+            titleLeadingConstraint!,
             titleLabel.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -8),
             
             // 照片数量标签（标题下方）
@@ -83,10 +102,17 @@ class FolderListCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewD
     func configure(with item: AlbumListItem) {
         // 取消之前的图片请求
         cancelImageRequests()
+        applyHierarchyAppearance(level: item.hierarchyLevel)
         
         // 设置文件夹标题和数量
         titleLabel.text = item.title
         photoCountLabel.text = "\(item.itemCount) 个相册"
+        
+        disclosureLeadingConstraint?.constant = 12
+        collectionViewLeadingConstraint?.constant = 24
+        titleLeadingConstraint?.constant = 12
+        disclosureImageView.isHidden = !item.canExpand
+        disclosureImageView.transform = item.isExpanded ? CGAffineTransform(rotationAngle: .pi / 2) : .identity
         
         // 加载文件夹缩略图
         loadFolderThumbnails(from: item)
@@ -198,6 +224,11 @@ class FolderListCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewD
         // 重置UI状态
         titleLabel.text = ""
         photoCountLabel.text = ""
+        disclosureImageView.isHidden = false
+        disclosureImageView.transform = .identity
+        disclosureLeadingConstraint?.constant = 12
+        collectionViewLeadingConstraint?.constant = 24
+        titleLeadingConstraint?.constant = 12
         
         // 重置数据
         assets.removeAll()

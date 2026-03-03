@@ -18,6 +18,9 @@ class AlbumListItem {
     let type: AlbumListItemType
     let title: String
     let localIdentifier: String
+    var hierarchyLevel: Int = 0
+    var canExpand: Bool = false
+    var isExpanded: Bool = false
     
     /// 获取子文件夹数量（简化实现：返回 0）
     var subFolderCount: Int {

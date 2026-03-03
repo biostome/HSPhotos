@@ -15,6 +15,7 @@ class BaseAlbumCell: UICollectionViewCell {
     
     // 图片请求ID数组，用于取消请求
     var imageRequests: [PHImageRequestID] = []
+    private var hierarchyLevel: Int = 0
 
     /// 注册trait变化监听
     private var traitChangeToken: UITraitChangeRegistration?
@@ -56,6 +57,12 @@ class BaseAlbumCell: UICollectionViewCell {
         contentView.backgroundColor = UIColor {
             $0.userInterfaceStyle == .dark ? .systemGray5 : .systemGray4
         }
+    }
+    
+    /// 根据层级设置背景与内容的水平缩进
+    func applyHierarchyAppearance(level: Int) {
+        hierarchyLevel = max(level, 0)
+        setNeedsLayout()
     }
     
     /// 取消所有图片请求
@@ -101,5 +108,12 @@ class BaseAlbumCell: UICollectionViewCell {
         super.prepareForReuse()
         titleLabel.text = ""
         cancelImageRequests()
+        applyHierarchyAppearance(level: 0)
+    }
+    
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let inset = CGFloat(hierarchyLevel) * 24.0
+        contentView.frame = bounds.inset(by: UIEdgeInsets(top: 0, left: inset, bottom: 0, right: 0))
     }
 }

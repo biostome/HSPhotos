@@ -12,6 +12,8 @@ import Photos
 class AlbumListViewController: UIViewController {
 
     private var albumListItems: [AlbumListItem] = []
+    private var displayedItems: [AlbumListItem] = []
+    private var expandedFolderIDs: Set<String> = []
     private let backgroundGradientLayer = CAGradientLayer()
     private let collectionList: PHCollectionList?
     
@@ -137,6 +139,7 @@ class AlbumListViewController: UIViewController {
     private func switchToCoverPhotoMode() {
         // 实现封面照片模式逻辑
         albumListView.layoutMode = .grid
+        applyCurrentDisplayData()
         print("切换到封面照片模式")
     }
     
@@ -144,6 +147,7 @@ class AlbumListViewController: UIViewController {
     private func switchToListViewMode() {
         // 实现列表视图模式逻辑
         albumListView.layoutMode = .list
+        applyCurrentDisplayData()
         print("切换到列表视图模式")
     }
     
@@ -176,21 +180,7 @@ class AlbumListViewController: UIViewController {
             
             if let collectionList = self.collectionList {
                 // 加载文件夹内的子内容
-                let options = self.getFetchOptions()
-                
-                let collections = PHCollection.fetchCollections(in: collectionList, options: options)
-                
-                // 遍历所有子内容，区分文件夹和相册
-                collections.enumerateObjects { (collection, _, _) in
-                    if let subFolder = collection as? PHCollectionList {
-                        // 子文件夹
-                        items.append(AlbumListItem(type: .folder(subFolder)))
-                    } else {
-                        // 子相册
-                        let subAlbum = collection as! PHAssetCollection
-                        items.append(AlbumListItem(type: .album(subAlbum)))
-                    }
-                }
+                items = self.fetchItems(in: collectionList)
             } else {
                 // 加载根相册列表
                 // 1. 加载所有文件夹
@@ -273,9 +263,74 @@ class AlbumListViewController: UIViewController {
             // 在主线程上更新UI
             DispatchQueue.main.async {
                 self.albumListItems = sortedItems
-                self.albumListView.collections = self.albumListItems
+                self.applyCurrentDisplayData(animated: false)
             }
         }
+    }
+
+    private func applyCurrentDisplayData(animated: Bool = false) {
+        switch albumListView.layoutMode {
+        case .grid:
+            displayedItems = albumListItems
+        case .list:
+            var visitedFolderIDs = Set<String>()
+            displayedItems = buildVisibleItems(from: albumListItems, level: 0, visitedFolderIDs: &visitedFolderIDs)
+        }
+        albumListView.setCollections(displayedItems, animated: animated)
+    }
+    
+    private func buildVisibleItems(from items: [AlbumListItem], level: Int, visitedFolderIDs: inout Set<String>) -> [AlbumListItem] {
+        var visibleItems: [AlbumListItem] = []
+        
+        for item in items {
+            if item.isFolder, let folder = item.collectionList {
+                if visitedFolderIDs.contains(item.localIdentifier) {
+                    continue
+                }
+                visitedFolderIDs.insert(item.localIdentifier)
+                
+                let childItems = fetchItems(in: folder)
+                let canExpand = !childItems.isEmpty
+                let isExpanded = canExpand && expandedFolderIDs.contains(item.localIdentifier)
+                
+                let displayItem = makeDisplayItem(from: item, level: level, canExpand: canExpand, isExpanded: isExpanded)
+                visibleItems.append(displayItem)
+                
+                if isExpanded {
+                    let childVisibleItems = buildVisibleItems(from: childItems, level: level + 1, visitedFolderIDs: &visitedFolderIDs)
+                    visibleItems.append(contentsOf: childVisibleItems)
+                }
+            } else {
+                let displayItem = makeDisplayItem(from: item, level: level, canExpand: false, isExpanded: false)
+                visibleItems.append(displayItem)
+            }
+        }
+        
+        return visibleItems
+    }
+    
+    private func makeDisplayItem(from item: AlbumListItem, level: Int, canExpand: Bool, isExpanded: Bool) -> AlbumListItem {
+        let displayItem = AlbumListItem(type: item.type)
+        displayItem.hierarchyLevel = level
+        displayItem.canExpand = canExpand
+        displayItem.isExpanded = isExpanded
+        return displayItem
+    }
+    
+    private func fetchItems(in collectionList: PHCollectionList) -> [AlbumListItem] {
+        var items: [AlbumListItem] = []
+        let options = getFetchOptions()
+        let collections = PHCollection.fetchCollections(in: collectionList, options: options)
+        
+        collections.enumerateObjects { collection, _, _ in
+            if let subFolder = collection as? PHCollectionList {
+                items.append(AlbumListItem(type: .folder(subFolder)))
+            } else if let subAlbum = collection as? PHAssetCollection {
+                items.append(AlbumListItem(type: .album(subAlbum)))
+            }
+        }
+        
+        return items
     }
     
 
@@ -342,8 +397,8 @@ class AlbumListViewController: UIViewController {
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                                 // 查找新创建的相册
                                 if let newAlbum = self.albumListItems.first(where: { $0.title == name }) {
-                                    // 找到新相册在数组中的索引
-                                    if let index = self.albumListItems.firstIndex(where: { $0.localIdentifier == newAlbum.localIdentifier }) {
+                                    // 找到新相册在当前可见数组中的索引
+                                    if let index = self.displayedItems.firstIndex(where: { $0.localIdentifier == newAlbum.localIdentifier }) {
                                         // 滚动到新创建的相册位置
                                         let indexPath = IndexPath(item: index, section: 0)
                                         self.albumListView.scrollToItem(at: indexPath, at: .top, animated: true)
@@ -399,8 +454,8 @@ class AlbumListViewController: UIViewController {
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
                                 // 查找新创建的文件夹
                                 if let newFolder = self.albumListItems.first(where: { $0.title == name }) {
-                                    // 找到新文件夹在数组中的索引
-                                    if let index = self.albumListItems.firstIndex(where: { $0.localIdentifier == newFolder.localIdentifier }) {
+                                    // 找到新文件夹在当前可见数组中的索引
+                                    if let index = self.displayedItems.firstIndex(where: { $0.localIdentifier == newFolder.localIdentifier }) {
                                         // 滚动到新创建的文件夹位置
                                         let indexPath = IndexPath(item: index, section: 0)
                                         self.albumListView.scrollToItem(at: indexPath, at: .top, animated: true)
@@ -518,7 +573,20 @@ class AlbumListViewController: UIViewController {
 
 extension AlbumListViewController: AlbumListViewDelegate {
     func albumListView(_ albumListView: AlbumListView, didSelectItemAt indexPath: IndexPath) {
+        guard albumListView.layoutMode == .list else { return }
+        guard indexPath.item < displayedItems.count else { return }
         
+        let item = displayedItems[indexPath.item]
+        guard item.isFolder else { return }
+        guard item.canExpand else { return }
+        
+        if expandedFolderIDs.contains(item.localIdentifier) {
+            expandedFolderIDs.remove(item.localIdentifier)
+        } else {
+            expandedFolderIDs.insert(item.localIdentifier)
+        }
+        
+        applyCurrentDisplayData(animated: true)
     }
     
     func albumListView(_ albumListView: AlbumListView, didSelectItemAt collection: PHAssetCollection) {
@@ -527,6 +595,7 @@ extension AlbumListViewController: AlbumListViewDelegate {
     }
     
     func albumListView(_ albumListView: AlbumListView, didSelectFolder collectionList: PHCollectionList) {
+        guard albumListView.layoutMode == .grid else { return }
         // 显示文件夹内的子相册列表
         let folderVC = AlbumListViewController(collectionList: collectionList)
         navigationController?.pushViewController(folderVC, animated: true)
