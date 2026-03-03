@@ -10,6 +10,7 @@ import Photos
 
 protocol AlbumListViewDelegate {
     func albumListView(_ albumListView: AlbumListView, didSelectItemAt indexPath: IndexPath)
+    func albumListView(_ albumListView: AlbumListView, didTapFolderDisclosureAt indexPath: IndexPath)
     func albumListView(_ albumListView: AlbumListView, didSelectItemAt collection: PHAssetCollection)
     func albumListView(_ albumListView: AlbumListView, didSelectFolder collectionList: PHCollectionList)
     func albumListView(_ albumListView: AlbumListView, didTapEditTitleFor item: AlbumListItem)
@@ -156,6 +157,17 @@ extension AlbumListView: UICollectionViewDataSource {
             case .list:
                 let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "FolderListCell", for: indexPath) as! FolderListCell
                 cell.configure(with: item)
+                cell.onDisclosureTap = { [weak self, weak collectionView, weak cell] in
+                    guard
+                        let self = self,
+                        let collectionView = collectionView,
+                        let cell = cell,
+                        let currentIndexPath = collectionView.indexPath(for: cell)
+                    else {
+                        return
+                    }
+                    self.delegate?.albumListView(self, didTapFolderDisclosureAt: currentIndexPath)
+                }
                 return cell
             }
         } else {
@@ -203,10 +215,6 @@ extension AlbumListView: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
         let item = self.collections[indexPath.item]
         self.delegate?.albumListView(self, didSelectItemAt: indexPath)
-        
-        if layoutMode == .list, item.isFolder {
-            return
-        }
         
         // 根据类型调用不同的代理方法
         switch item.type {

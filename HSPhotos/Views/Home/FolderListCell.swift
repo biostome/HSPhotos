@@ -10,9 +10,12 @@ import Photos
 
 /// 文件夹列表布局Cell，类似于UITableViewCell的布局，左侧显示4宫格缩略图
 class FolderListCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewDataSource, UICollectionViewDelegateFlowLayout {
+    var onDisclosureTap: (() -> Void)?
+    
     private let collectionView: UICollectionView
     private let photoCountLabel = UILabel()
     private let disclosureImageView = UIImageView()
+    private let disclosureButton = UIButton(type: .system)
     private var disclosureLeadingConstraint: NSLayoutConstraint?
     private var collectionViewLeadingConstraint: NSLayoutConstraint?
     private var titleLeadingConstraint: NSLayoutConstraint?
@@ -54,6 +57,11 @@ class FolderListCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewD
         disclosureImageView.translatesAutoresizingMaskIntoConstraints = false
         contentView.addSubview(disclosureImageView)
         
+        disclosureButton.translatesAutoresizingMaskIntoConstraints = false
+        disclosureButton.backgroundColor = .clear
+        disclosureButton.addTarget(self, action: #selector(handleDisclosureTap), for: .touchUpInside)
+        contentView.addSubview(disclosureButton)
+        
         // 标题标签
         titleLabel.textColor = .label
         titleLabel.font = .systemFont(ofSize: 16, weight: .medium)
@@ -79,6 +87,10 @@ class FolderListCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewD
             disclosureImageView.centerYAnchor.constraint(equalTo: contentView.centerYAnchor),
             disclosureImageView.widthAnchor.constraint(equalToConstant: 12),
             disclosureImageView.heightAnchor.constraint(equalToConstant: 12),
+            disclosureButton.centerXAnchor.constraint(equalTo: disclosureImageView.centerXAnchor),
+            disclosureButton.widthAnchor.constraint(equalToConstant: 64),
+            disclosureButton.topAnchor.constraint(equalTo: contentView.topAnchor),
+            disclosureButton.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
             
             // 左侧4宫格CollectionView
             collectionView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 8),
@@ -112,6 +124,7 @@ class FolderListCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewD
         collectionViewLeadingConstraint?.constant = 24
         titleLeadingConstraint?.constant = 12
         disclosureImageView.isHidden = !item.canExpand
+        disclosureButton.isHidden = !item.canExpand
         disclosureImageView.transform = item.isExpanded ? CGAffineTransform(rotationAngle: .pi / 2) : .identity
         
         // 加载文件夹缩略图
@@ -225,7 +238,9 @@ class FolderListCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewD
         titleLabel.text = ""
         photoCountLabel.text = ""
         disclosureImageView.isHidden = false
+        disclosureButton.isHidden = false
         disclosureImageView.transform = .identity
+        onDisclosureTap = nil
         disclosureLeadingConstraint?.constant = 12
         collectionViewLeadingConstraint?.constant = 24
         titleLeadingConstraint?.constant = 12
@@ -235,5 +250,9 @@ class FolderListCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewD
         
         // 重新加载collectionView
         collectionView.reloadData()
+    }
+    
+    @objc private func handleDisclosureTap() {
+        onDisclosureTap?()
     }
 }

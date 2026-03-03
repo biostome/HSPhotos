@@ -573,6 +573,9 @@ class AlbumListViewController: UIViewController {
 
 extension AlbumListViewController: AlbumListViewDelegate {
     func albumListView(_ albumListView: AlbumListView, didSelectItemAt indexPath: IndexPath) {
+    }
+    
+    func albumListView(_ albumListView: AlbumListView, didTapFolderDisclosureAt indexPath: IndexPath) {
         guard albumListView.layoutMode == .list else { return }
         guard indexPath.item < displayedItems.count else { return }
         
@@ -595,7 +598,6 @@ extension AlbumListViewController: AlbumListViewDelegate {
     }
     
     func albumListView(_ albumListView: AlbumListView, didSelectFolder collectionList: PHCollectionList) {
-        guard albumListView.layoutMode == .grid else { return }
         // 显示文件夹内的子相册列表
         let folderVC = AlbumListViewController(collectionList: collectionList)
         navigationController?.pushViewController(folderVC, animated: true)
