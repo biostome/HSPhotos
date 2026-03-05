@@ -24,7 +24,7 @@ class MainViewController: UIViewController {
         view.insertSubview(backgroundImageView, at: 0)
         
         NSLayoutConstraint.activate([
-            backgroundImageView.topAnchor.constraint(equalTo: view.topAnchor),
+            backgroundImageView.topAnchor.constraint(equalTo:   view.topAnchor),
             backgroundImageView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             backgroundImageView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             backgroundImageView.bottomAnchor.constraint(equalTo: view.bottomAnchor)

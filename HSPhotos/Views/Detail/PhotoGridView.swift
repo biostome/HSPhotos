@@ -38,6 +38,8 @@ protocol PhotoGridViewDelegate {
     func photoGridView(_ photoGridView: PhotoGridView, didSelectedItems assets: [PHAsset])
     func photoGridView(_ photoGridView: PhotoGridView, didSetAnchor asset: PHAsset)
     func photoGridView(_ photoGridView: PhotoGridView, didPasteAssets assets: [PHAsset], after: PHAsset)
+    func photoGridView(_ photoGridView: PhotoGridView, didRequestSetHierarchyLevelFor asset: PHAsset)
+    func photoGridView(_ photoGridView: PhotoGridView, didRequestSetTopLevelFor asset: PHAsset)
 }
 
 extension PhotoGridViewDelegate {
@@ -47,6 +49,8 @@ extension PhotoGridViewDelegate {
     func photoGridView(_ photoGridView: PhotoGridView, didDeselectItemAt asset: PHAsset) {}
     func photoGridView(_ photoGridView: PhotoGridView, didSelectedItems assets: [PHAsset]) {}
     func photoGridView(_ photoGridView: PhotoGridView, didSetAnchor asset: PHAsset) {}
+    func photoGridView(_ photoGridView: PhotoGridView, didRequestSetHierarchyLevelFor asset: PHAsset) {}
+    func photoGridView(_ photoGridView: PhotoGridView, didRequestSetTopLevelFor asset: PHAsset) {}
 }
 
 
@@ -65,12 +69,12 @@ class PhotoGridView: UIView {
     
     public var assets: [PHAsset] = [] {
         didSet {
-            // 应用段落折叠过滤
+            // 应用层级折叠过滤
             updateVisibleAssets()
         }
     }
     
-    // 实际显示的照片（经过段落折叠过滤）
+    // 实际显示的照片（经过层级折叠过滤）
     private var visibleAssets: [PHAsset] = [] {
         didSet {
             collectionView.reloadData()
@@ -129,14 +133,16 @@ class PhotoGridView: UIView {
     // 当前锚点照片
     private var anchorPhoto: PHAsset?
     
+    // 当前层级参照照片（用于“设为某项子级/插入到某级后面”）
+    public private(set) var hierarchyReferenceAsset: PHAsset?
+    
     // 当前排序方式
     public var sortPreference: PhotoSortPreference = .custom
     
     // 当前相册引用，用于获取自定义排序数据
     public var currentCollection: PHAssetCollection?
     
-    // 首图服务引用
-    private let headerService = PhotoHeaderService.shared
+    private let hierarchyService = PhotoHierarchyService.shared
     
     private var columns: Int = PhotoGridConstants.defaultColumns
     
@@ -617,17 +623,22 @@ class PhotoGridView: UIView {
     
     // MARK: - Public Methods
     
-    /// 更新可见资产（应用段落折叠过滤）
+    /// 更新可见资产（应用层级折叠过滤）
     private func updateVisibleAssets() {
         guard let collection = currentCollection else {
             visibleAssets = assets
             return
         }
-        
-        visibleAssets = headerService.getVisibleAssets(from: assets, in: collection)
+
+        if let referenceAsset = hierarchyReferenceAsset,
+           !assets.contains(where: { $0.localIdentifier == referenceAsset.localIdentifier }) {
+            hierarchyReferenceAsset = nil
+        }
+
+        visibleAssets = hierarchyService.getVisibleAssets(from: assets, in: collection)
     }
     
-    /// 刷新段落显示
+    /// 刷新层级显示
     func refreshParagraphDisplay() {
         updateVisibleAssets()
     }
@@ -710,8 +721,8 @@ extension PhotoGridView: UICollectionViewDataSource {
         let selectionIndex = selectedMap[photo.localIdentifier]?.0
         let isAnchor = anchorPhoto?.localIdentifier == photo.localIdentifier
         
-        // 检查是否为首图
-        let isHeader = currentCollection != nil ? headerService.isHeader(photo, for: currentCollection!) : false
+        let hierarchyText = currentCollection != nil ? hierarchyService.hierarchyText(for: photo, in: currentCollection!) : nil
+        let isHierarchyCollapsed = currentCollection != nil ? hierarchyService.isCollapsed(photo, in: currentCollection!) : false
         
         // 根据排序方式决定显示的下标
         let displayIndex: Int
@@ -724,7 +735,16 @@ extension PhotoGridView: UICollectionViewDataSource {
             displayIndex = indexPath.item
         }
         
-        cell.configure(with: photo, isSelected: isSelected, selectionIndex: selectionIndex, selectionMode: selectionMode, index: displayIndex, isAnchor: isAnchor, isHeader: isHeader)
+        cell.configure(
+            with: photo,
+            isSelected: isSelected,
+            selectionIndex: selectionIndex,
+            selectionMode: selectionMode,
+            index: displayIndex,
+            isAnchor: isAnchor,
+            hierarchyText: hierarchyText,
+            isHierarchyCollapsed: isHierarchyCollapsed
+        )
         return cell
     }
 }
@@ -1002,10 +1022,14 @@ extension PhotoGridView {
         guard indexPath.item < visibleAssets.count else { return nil }
         let asset = visibleAssets[indexPath.item]
         let isCurrentAnchor = anchorPhoto?.localIdentifier == asset.localIdentifier
-        let isCurrentHeader = currentCollection != nil ? headerService.isHeader(asset, for: currentCollection!) : false
+        let isCurrentHierarchyCollapsed = currentCollection != nil ? hierarchyService.isCollapsed(asset, in: currentCollection!) : false
+        let hasHierarchyDescendants = currentCollection != nil ? hierarchyService.hasDescendants(asset, in: assets, collection: currentCollection!) : false
         
         return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [self] _ in
-            var actions: [UIAction] = []
+            var anchorGroup: [UIMenuElement] = []
+            var hierarchyGroup: [UIMenuElement] = []
+            var tailGroup: [UIMenuElement] = []
+            var hierarchyChildren: [UIMenuElement] = []
             
             // 锚点相关操作
             if isCurrentAnchor {
@@ -1014,7 +1038,7 @@ extension PhotoGridView {
                     self?.collectionView.reloadData()
                     print("锚点已取消")
                 }
-                actions.append(removeAnchorAction)
+                anchorGroup.append(removeAnchorAction)
             } else {
                 let setAnchorAction = UIAction(title: "设为锚点", image: UIImage(systemName: "anchor")) { [weak self] _ in
                     self?.anchorPhoto = asset
@@ -1022,50 +1046,135 @@ extension PhotoGridView {
                     self?.delegate?.photoGridView(self!, didSetAnchor: asset)
                     print("锚点已设置为: \(asset.localIdentifier)")
                 }
-                actions.append(setAnchorAction)
+                anchorGroup.append(setAnchorAction)
             }
             
-            // 首图相关操作
-            if isCurrentHeader {
-                let removeHeaderAction = UIAction(title: "取消首图", image: UIImage(systemName: "photo.badge.minus")) { [weak self] _ in
-                    guard let self = self, let collection = self.currentCollection else { return }
-                    self.headerService.removeHeader(asset, for: collection)
-                    self.refreshParagraphDisplay()
-                    print("首图已取消: \(asset.localIdentifier)")
+            // 层级相关操作
+            if let collection = currentCollection {
+                let setTopLevelAction = UIAction(title: "设为1级（顶级）", image: UIImage(systemName: "list.number")) { [weak self] _ in
+                    guard let self = self else { return }
+                    self.delegate?.photoGridView(self, didRequestSetTopLevelFor: asset)
                 }
-                actions.append(removeHeaderAction)
-                
-                // 段落折叠/展开操作
-                let isCollapsed = currentCollection != nil ? headerService.isParagraphCollapsed(asset, for: currentCollection!) : false
-                let collapseAction = UIAction(
-                    title: isCollapsed ? "展开段落" : "折叠段落",
-                    image: UIImage(systemName: isCollapsed ? "chevron.down" : "chevron.up")
+                hierarchyGroup.append(setTopLevelAction)
+
+                let setSameLevelAction = UIAction(title: "设为同级", image: UIImage(systemName: "equal.circle")) { [weak self] _ in
+                    guard let self = self else { return }
+                    self.hierarchyService.setAsSiblingOfPrevious(asset, in: self.assets, collection: collection)
+                    self.refreshParagraphDisplay()
+                }
+                hierarchyChildren.append(setSameLevelAction)
+
+                let setChildOfPreviousAction = UIAction(title: "设为子级", image: UIImage(systemName: "arrow.down.right")) { [weak self] _ in
+                    guard let self = self else { return }
+                    self.hierarchyService.setAsChildOfPrevious(asset, in: self.assets, collection: collection)
+                    self.refreshParagraphDisplay()
+                }
+                hierarchyChildren.append(setChildOfPreviousAction)
+
+                let setSpecificLevelAction = UIAction(title: "指定层级...", image: UIImage(systemName: "number.circle")) { [weak self] _ in
+                    guard let self = self else { return }
+                    self.delegate?.photoGridView(self, didRequestSetHierarchyLevelFor: asset)
+                }
+                hierarchyChildren.append(setSpecificLevelAction)
+
+                let isReference = hierarchyReferenceAsset?.localIdentifier == asset.localIdentifier
+                let toggleReferenceAction = UIAction(
+                    title: isReference ? "取消层级参照" : "设为层级参照",
+                    image: UIImage(systemName: isReference ? "flag.slash" : "flag")
                 ) { [weak self] _ in
-                    guard let self = self, let collection = self.currentCollection else { return }
-                    self.headerService.toggleParagraphCollapse(asset, for: collection)
+                    guard let self = self else { return }
+                    self.hierarchyReferenceAsset = isReference ? nil : asset
                     self.refreshParagraphDisplay()
-                    print("段落状态已切换: \(asset.localIdentifier)")
                 }
-                actions.append(collapseAction)
-            } else {
-                let setHeaderAction = UIAction(title: "设为首图", image: UIImage(systemName: "photo.badge.plus")) { [weak self] _ in
-                    guard let self = self, let collection = self.currentCollection else { return }
-                    self.headerService.setHeader(asset, for: collection)
+                hierarchyChildren.append(toggleReferenceAction)
+
+                if let referenceAsset = hierarchyReferenceAsset, referenceAsset.localIdentifier != asset.localIdentifier {
+                    let referenceText = hierarchyService.hierarchyText(for: referenceAsset, in: collection) ?? "参照项"
+                    let setAsChildAction = UIAction(
+                        title: "设为“\(referenceText)”的子级",
+                        image: UIImage(systemName: "arrow.down.right")
+                    ) { [weak self] _ in
+                        guard let self = self else { return }
+                        self.hierarchyService.setAsChild(asset, of: referenceAsset, in: collection)
+                        self.refreshParagraphDisplay()
+                    }
+                    hierarchyChildren.append(setAsChildAction)
+
+                    let insertAfterAction = UIAction(
+                        title: "插入到参照后面（同级）",
+                        image: UIImage(systemName: "arrow.right.to.line.compact")
+                    ) { [weak self] _ in
+                        guard let self = self else { return }
+                        self.hierarchyService.insertAsSiblingAfter(asset, reference: referenceAsset, in: collection)
+                        self.refreshParagraphDisplay()
+                    }
+                    hierarchyChildren.append(insertAfterAction)
+                }
+
+                let promoteAction = UIAction(title: "提升一级", image: UIImage(systemName: "arrow.up.left")) { [weak self] _ in
+                    guard let self = self else { return }
+                    self.hierarchyService.promote(asset, in: self.assets, collection: collection)
                     self.refreshParagraphDisplay()
-                    print("首图已设置: \(asset.localIdentifier)")
                 }
-                actions.append(setHeaderAction)
+                hierarchyChildren.append(promoteAction)
+
+                let demoteAction = UIAction(title: "降一级", image: UIImage(systemName: "arrow.down.right.and.arrow.up.left")) { [weak self] _ in
+                    guard let self = self else { return }
+                    self.hierarchyService.setAsChildOfPrevious(asset, in: self.assets, collection: collection)
+                    self.refreshParagraphDisplay()
+                }
+                hierarchyChildren.append(demoteAction)
+
+                let clearHierarchyAction = UIAction(title: "清理层级", image: UIImage(systemName: "xmark.circle")) { [weak self] _ in
+                    guard let self = self else { return }
+                    self.hierarchyService.clearSubtree(of: asset, in: collection)
+                    self.refreshParagraphDisplay()
+                }
+                hierarchyGroup.append(clearHierarchyAction)
+
+                if hasHierarchyDescendants || isCurrentHierarchyCollapsed {
+                    let collapseAction = UIAction(
+                        title: isCurrentHierarchyCollapsed ? "展开分组" : "折叠分组",
+                        image: UIImage(systemName: isCurrentHierarchyCollapsed ? "chevron.down" : "chevron.up")
+                    ) { [weak self] _ in
+                        guard let self = self else { return }
+                        self.hierarchyService.toggleCollapse(asset, in: collection)
+                        self.refreshParagraphDisplay()
+                    }
+                    hierarchyGroup.append(collapseAction)
+                }
+
             }
-            
+
             // 粘贴到此后方操作
             if let pasteAssets = AssetPasteboard.assetsFromPasteboard(), !pasteAssets.isEmpty {
                 let pasteAction = UIAction(title: "粘贴到此后方", image: UIImage(systemName: "doc.on.clipboard")) { [weak self] _ in
                     self?.handlePasteToAfter(asset: asset, assets: pasteAssets)
                 }
-                actions.append(pasteAction)
+                tailGroup.append(pasteAction)
             }
-            
-            return UIMenu(title: "", children: actions)
+
+            if !hierarchyChildren.isEmpty {
+                hierarchyGroup.append(
+                    UIMenu(
+                        title: "层级",
+                        image: UIImage(systemName: "list.bullet.indent"),
+                        children: hierarchyChildren
+                    )
+                )
+            }
+
+            var rootChildren: [UIMenuElement] = []
+            if !anchorGroup.isEmpty {
+                rootChildren.append(UIMenu(title: "锚点", image: UIImage(systemName: "anchor"), options: .displayInline, children: anchorGroup))
+            }
+            if !hierarchyGroup.isEmpty {
+                rootChildren.append(UIMenu(title: "层级", options: .displayInline, children: hierarchyGroup))
+            }
+            if !tailGroup.isEmpty {
+                rootChildren.append(UIMenu(title: "其他", options: .displayInline, children: tailGroup))
+            }
+            return UIMenu(title: "", children: rootChildren)
         }
     }
     
@@ -1122,4 +1231,3 @@ extension PhotoGridView: CustomVerticalScrollIndicatorDelegate {
         self.delegate?.photoGridView(self, didPasteAssets: assets, after: asset)
     }
 }
-

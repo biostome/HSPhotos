@@ -74,29 +74,17 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         return label
     }()
     
-    private lazy var headerLabel: UILabel = {
+    private lazy var hierarchyLabel: UILabel = {
         let label = UILabel()
-        label.text = "首"
         label.textColor = UIColor.white
-        label.backgroundColor = UIColor.systemRed
-        label.font = UIFont.systemFont(ofSize: 12, weight: .bold)
+        label.backgroundColor = UIColor.systemBlue
+        label.font = UIFont.systemFont(ofSize: 10, weight: .semibold)
         label.textAlignment = .center
         label.layer.cornerRadius = 8
         label.clipsToBounds = true
         label.isHidden = true
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
-    }()
-    
-    private lazy var headerBorderView: UIView = {
-        let view = UIView()
-        view.backgroundColor = .clear
-        view.layer.borderWidth = 3
-        view.layer.borderColor = UIColor.systemRed.cgColor
-        view.layer.cornerRadius = 4
-        view.isHidden = true
-        view.translatesAutoresizingMaskIntoConstraints = false
-        return view
     }()
     
     private lazy var topLabelsStackView: UIStackView = {
@@ -188,11 +176,10 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         
         contentView.addSubview(topLabelsStackView)
         contentView.addSubview(bottomStackView)
-        contentView.addSubview(headerBorderView)
         
-        // 将锚点和首图label添加到StackView
+        // 将锚点label添加到StackView
         topLabelsStackView.addArrangedSubview(anchorLabel)
-        topLabelsStackView.addArrangedSubview(headerLabel)
+        topLabelsStackView.addArrangedSubview(hierarchyLabel)
         
         // 将媒体图标、时长标签和收藏图标添加到底部StackView
         bottomStackView.addArrangedSubview(mediaIconView)
@@ -218,14 +205,9 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
             
             anchorLabel.widthAnchor.constraint(equalToConstant: 24),
             anchorLabel.heightAnchor.constraint(equalToConstant: 24),
-            
-            headerLabel.widthAnchor.constraint(equalToConstant: 24),
-            headerLabel.heightAnchor.constraint(equalToConstant: 24),
-            
-            headerBorderView.topAnchor.constraint(equalTo: contentView.topAnchor),
-            headerBorderView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
-            headerBorderView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
-            headerBorderView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor)
+
+            hierarchyLabel.heightAnchor.constraint(equalToConstant: 24),
+            hierarchyLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 24)
         ])
     }
     
@@ -252,7 +234,7 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
     }()
 
     // MARK: - 配置
-    func configure(with asset: PHAsset, isSelected: Bool, selectionIndex: Int?, selectionMode: PhotoSelectionMode, index: Int? = nil, isAnchor: Bool = false, isHeader: Bool = false) {
+    func configure(with asset: PHAsset, isSelected: Bool, selectionIndex: Int?, selectionMode: PhotoSelectionMode, index: Int? = nil, isAnchor: Bool = false, hierarchyText: String? = nil, isHierarchyCollapsed: Bool = false) {
         
         // 保存当前资产
         currentAsset = asset
@@ -283,9 +265,13 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         // 设置锚点标识
         anchorLabel.isHidden = !isAnchor
         
-        // 设置首图标识
-        headerLabel.isHidden = !isHeader
-        headerBorderView.isHidden = !isHeader
+        if let hierarchyText, !hierarchyText.isEmpty {
+            hierarchyLabel.text = isHierarchyCollapsed ? "\(hierarchyText) 折" : hierarchyText
+            hierarchyLabel.isHidden = false
+        } else {
+            hierarchyLabel.text = nil
+            hierarchyLabel.isHidden = true
+        }
         
         // 设置收藏标识
         favoriteIcon.isHidden = !asset.isFavorite
@@ -334,8 +320,7 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         selectionOverlay.isHidden = true
         selectionNumberLabel.isHidden = true
         anchorLabel.isHidden = true
-        headerLabel.isHidden = true
-        headerBorderView.isHidden = true
+        hierarchyLabel.isHidden = true
         mediaIconView.isHidden = true
         mediaDurationLabel.isHidden = true
         favoriteIcon.isHidden = true
@@ -370,4 +355,3 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         }
     }
 }
-
