@@ -117,9 +117,18 @@ class AlbumCell: BaseAlbumCell {
         
         currentAssetID = coverAsset.localIdentifier
         
-        let cellSize = contentView.bounds.size
-        let targetSize = CGSize(width: cellSize.width * 2, height: cellSize.height * 2)
+        // 优化：使用固定的目标尺寸，避免频繁计算
+        let targetSize = CGSize(width: 300, height: 300) // 固定尺寸，适应大多数网格布局
         
+        // 检查缓存
+        let cacheKey = "\(coverAsset.localIdentifier)_\(targetSize.width)_\(targetSize.height)"
+        if let cachedImage = ImageCache.shared.get(key: cacheKey) {
+            imageView.image = cachedImage
+            showImage()
+            return
+        }
+        
+        // 缓存未命中，加载图片
         let requestID = loadImage(for: coverAsset, targetSize: targetSize) { [weak self] image in
             if let image = image {
                 self?.imageView.image = image

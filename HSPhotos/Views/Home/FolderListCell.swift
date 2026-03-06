@@ -170,8 +170,18 @@ class FolderListCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewD
         
         if indexPath.item < assets.count {
             let asset = assets[indexPath.item]
+            // 优化：使用固定的缩略图尺寸
             let thumbnailSize = CGSize(width: 100, height: 100)
             
+            // 检查缓存
+            let cacheKey = "\(asset.localIdentifier)_\(thumbnailSize.width)_\(thumbnailSize.height)"
+            if let cachedImage = ImageCache.shared.get(key: cacheKey) {
+                cell.imageView.image = cachedImage
+                cell.imageView.backgroundColor = .clear
+                return cell
+            }
+            
+            // 缓存未命中，加载图片
             let requestID = loadImage(for: asset, targetSize: thumbnailSize) { image in
                 if let image = image {
                     cell.imageView.image = image
