@@ -120,11 +120,15 @@ class AlbumCell: BaseAlbumCell {
         let cellSize = contentView.bounds.size
         let targetSize = CGSize(width: cellSize.width * 2, height: cellSize.height * 2)
         
-        _ = loadImage(for: coverAsset, targetSize: targetSize) { [weak self] image in
+        let requestID = loadImage(for: coverAsset, targetSize: targetSize) { [weak self] image in
             if let image = image {
                 self?.imageView.image = image
                 self?.showImage()
             }
+        }
+        
+        if let requestID = requestID {
+            imageRequests.append(requestID)
         }
     }
 

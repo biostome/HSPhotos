@@ -8,6 +8,34 @@
 import UIKit
 import Photos
 
+/// 图片缓存工具类
+class ImageCache {
+    static let shared = ImageCache()
+    private let cache = NSCache<NSString, UIImage>()
+    
+    private init() {
+        // 设置缓存大小限制
+        cache.countLimit = 100
+        cache.totalCostLimit = 1024 * 1024 * 50 // 50MB
+    }
+    
+    func get(key: String) -> UIImage? {
+        return cache.object(forKey: key as NSString)
+    }
+    
+    func set(key: String, image: UIImage) {
+        cache.setObject(image, forKey: key as NSString)
+    }
+    
+    func remove(key: String) {
+        cache.removeObject(forKey: key as NSString)
+    }
+    
+    func clear() {
+        cache.removeAllObjects()
+    }
+}
+
 /// 相册Cell的基类，提取共同功能
 class BaseAlbumCell: UICollectionViewCell {
     // 标题标签
@@ -73,18 +101,41 @@ class BaseAlbumCell: UICollectionViewCell {
         imageRequests.removeAll()
     }
     
+    /// 生成图片缓存键
+    private func generateCacheKey(for asset: PHAsset, targetSize: CGSize) -> String {
+        return "\(asset.localIdentifier)_\(targetSize.width)_\(targetSize.height)"
+    }
+    
     /// 加载图片的通用方法
-    func loadImage(for asset: PHAsset, targetSize: CGSize, completion: @escaping (UIImage?) -> Void) -> PHImageRequestID {
+    func loadImage(for asset: PHAsset, targetSize: CGSize, completion: @escaping (UIImage?) -> Void) -> PHImageRequestID? {
+        // 检查缓存
+        let cacheKey = generateCacheKey(for: asset, targetSize: targetSize)
+        if let cachedImage = ImageCache.shared.get(key: cacheKey) {
+            completion(cachedImage)
+            return nil
+        }
+        
+        // 配置图片请求选项
         let options = PHImageRequestOptions()
         options.resizeMode = .fast
-        options.deliveryMode = .opportunistic
+        options.deliveryMode = .highQualityFormat
+        options.isNetworkAccessAllowed = true
         
         let requestID = PHImageManager.default().requestImage(
             for: asset,
             targetSize: targetSize,
             contentMode: .aspectFill,
             options: options
-        ) { image, _ in
+        ) { [weak self] image, info in
+            guard let self = self else { return }
+            
+            // 检查是否是最终图片
+            let isDegraded = info?[PHImageResultIsDegradedKey] as? Bool ?? false
+            if !isDegraded, let image = image {
+                // 缓存图片
+                ImageCache.shared.set(key: cacheKey, image: image)
+            }
+            
             completion(image)
         }
         

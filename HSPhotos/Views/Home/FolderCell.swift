@@ -149,7 +149,9 @@ class FolderCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewDataS
                 }
             }
             // 保存请求ID，以便在需要时取消请求
-            imageRequests.append(requestID)
+            if let requestID = requestID {
+                imageRequests.append(requestID)
+            }
         } else {
             cell.imageView.image = nil
             // 设置四宫格背景色为稍微深一点的灰色，支持深色模式
