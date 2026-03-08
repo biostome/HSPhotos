@@ -317,10 +317,24 @@ extension AlbumListView: UICollectionViewDataSourcePrefetching {
                 let item = collections[indexPath.item]
                 // 预加载封面图
                 if item.isAlbum, let coverAsset = item.coverAsset {
-                    let targetSize = CGSize(width: 160, height: 160) // 预加载稍大尺寸
-                    _ = ImageCache.shared.get(key: "\(coverAsset.localIdentifier)_\(targetSize.width)_\(targetSize.height)")
-                    // 这里可以添加预加载逻辑，但由于我们已经在loadImage中实现了缓存，
-                    // 这里主要是为了触发缓存机制
+                    // 根据布局模式选择合适的预加载尺寸
+                    let targetSize: CGSize
+                    switch layoutMode {
+                    case .grid:
+                        targetSize = CGSize(width: 300, height: 300) // 网格布局使用稍大尺寸
+                    case .list:
+                        targetSize = CGSize(width: 160, height: 160) // 列表布局使用较小尺寸
+                    }
+                    
+                    // 检查缓存
+                    let cacheKey = "\(coverAsset.localIdentifier)_\(targetSize.width)_\(targetSize.height)"
+                    if ImageCache.shared.get(key: cacheKey) == nil {
+                        // 缓存未命中，触发预加载
+                        loadImageForPrefetch(asset: coverAsset, targetSize: targetSize, cacheKey: cacheKey)
+                    }
+                } else if item.isFolder, let collectionList = item.collectionList {
+                    // 预加载文件夹的缩略图
+                    prefetchFolderThumbnails(for: collectionList)
                 }
             }
         }
@@ -328,5 +342,59 @@ extension AlbumListView: UICollectionViewDataSourcePrefetching {
     
     func collectionView(_ collectionView: UICollectionView, cancelPrefetchingForItemsAt indexPaths: [IndexPath]) {
         // 取消预加载，这里可以添加取消逻辑
+    }
+    
+    /// 为预加载加载图片
+    private func loadImageForPrefetch(asset: PHAsset, targetSize: CGSize, cacheKey: String) {
+        let options = PHImageRequestOptions()
+        options.resizeMode = .fast
+        options.deliveryMode = .highQualityFormat
+        options.isNetworkAccessAllowed = true
+        
+        PHImageManager.default().requestImage(
+            for: asset,
+            targetSize: targetSize,
+            contentMode: .aspectFill,
+            options: options
+        ) { image, info in
+            // 检查是否是最终图片
+            let isDegraded = info?[PHImageResultIsDegradedKey] as? Bool ?? false
+            if !isDegraded, let image = image {
+                // 缓存图片
+                ImageCache.shared.set(key: cacheKey, image: image)
+            }
+        }
+    }
+    
+    /// 预加载文件夹的缩略图
+    private func prefetchFolderThumbnails(for collectionList: PHCollectionList) {
+        var assets: [PHAsset] = []
+        
+        // 获取文件夹内的所有子集合（包括相册和子文件夹）
+        let fetchOptions = PHFetchOptions()
+        let subCollections = PHCollection.fetchCollections(in: collectionList, options: fetchOptions)
+        
+        // 遍历子集合，只处理相册类型
+        subCollections.enumerateObjects { (collection, _, stop) in
+            if let album = collection as? PHAssetCollection {
+                // 从相册中获取第一张图片
+                let albumAssets = PHAsset.fetchAssets(in: album, options: nil)
+                if let asset = albumAssets.firstObject {
+                    assets.append(asset)
+                    if assets.count >= 4 {
+                        stop.pointee = true
+                    }
+                }
+            }
+        }
+        
+        // 预加载文件夹缩略图
+        for asset in assets {
+            let targetSize = CGSize(width: 100, height: 100)
+            let cacheKey = "\(asset.localIdentifier)_\(targetSize.width)_\(targetSize.height)"
+            if ImageCache.shared.get(key: cacheKey) == nil {
+                loadImageForPrefetch(asset: asset, targetSize: targetSize, cacheKey: cacheKey)
+            }
+        }
     }
 }

@@ -15,8 +15,16 @@ class ImageCache {
     
     private init() {
         // 设置缓存大小限制
-        cache.countLimit = 100
-        cache.totalCostLimit = 1024 * 1024 * 50 // 50MB
+        cache.countLimit = 200 // 增加缓存数量
+        cache.totalCostLimit = 1024 * 1024 * 100 // 增加缓存大小到100MB
+        
+        // 添加内存警告通知
+        NotificationCenter.default.addObserver(self, selector: #selector(handleMemoryWarning), name: UIApplication.didReceiveMemoryWarningNotification, object: nil)
+    }
+    
+    @objc private func handleMemoryWarning() {
+        // 内存不足时清理缓存
+        clear()
     }
     
     func get(key: String) -> UIImage? {
@@ -24,7 +32,9 @@ class ImageCache {
     }
     
     func set(key: String, image: UIImage) {
-        cache.setObject(image, forKey: key as NSString)
+        // 计算图片内存大小作为缓存成本
+        let cost = Int(image.size.width * image.size.height * image.scale * image.scale * 4) // RGBA
+        cache.setObject(image, forKey: key as NSString, cost: cost)
     }
     
     func remove(key: String) {
@@ -33,6 +43,11 @@ class ImageCache {
     
     func clear() {
         cache.removeAllObjects()
+    }
+    
+    deinit {
+        // 移除通知观察者
+        NotificationCenter.default.removeObserver(self)
     }
 }
 
