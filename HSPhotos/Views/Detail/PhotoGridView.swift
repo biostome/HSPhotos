@@ -75,11 +75,7 @@ class PhotoGridView: UIView {
     }
     
     // 实际显示的照片（经过层级折叠过滤）
-    private var visibleAssets: [PHAsset] = [] {
-        didSet {
-            collectionView.reloadData()
-        }
-    }
+    private var visibleAssets: [PHAsset] = []
     
     public var delegate: PhotoGridViewDelegate?
     
@@ -160,6 +156,10 @@ class PhotoGridView: UIView {
     
     private var lastScale: CGFloat = 3.0
     
+    // 缓存 Cell 尺寸，避免重复计算
+    private var cachedCellSize: CGSize?
+    private var lastCollectionViewWidth: CGFloat = 0
+    
     private lazy var collectionView: UICollectionView = {
         let initialLayout = createLayout(for: columns)
         let collectionView = UICollectionView(frame: .zero, collectionViewLayout: initialLayout)
@@ -169,6 +169,12 @@ class PhotoGridView: UIView {
         collectionView.delegate = self
         collectionView.dataSource = self
         collectionView.translatesAutoresizingMaskIntoConstraints = false
+        
+        // 性能优化设置
+        collectionView.preservesSuperviewLayoutMargins = false
+        collectionView.layoutMargins = .zero
+        collectionView.decelerationRate = .fast
+        
         return collectionView
     }()
     
@@ -248,6 +254,9 @@ class PhotoGridView: UIView {
     
     private func updateColumns(to newColumns: Int) {
         columns = newColumns
+        // 清除缓存
+        cachedCellSize = nil
+        lastCollectionViewWidth = 0
         let newLayout = createLayout(for: columns)
         collectionView.setCollectionViewLayout(newLayout, animated: true)
     }
@@ -625,17 +634,24 @@ class PhotoGridView: UIView {
     
     /// 更新可见资产（应用层级折叠过滤）
     private func updateVisibleAssets() {
-        guard let collection = currentCollection else {
-            visibleAssets = assets
-            return
+        let newVisibleAssets: [PHAsset]
+        
+        if let collection = currentCollection {
+            if let referenceAsset = hierarchyReferenceAsset,
+               !assets.contains(where: { $0.localIdentifier == referenceAsset.localIdentifier }) {
+                hierarchyReferenceAsset = nil
+            }
+            newVisibleAssets = hierarchyService.getVisibleAssets(from: assets, in: collection)
+        } else {
+            newVisibleAssets = assets
         }
-
-        if let referenceAsset = hierarchyReferenceAsset,
-           !assets.contains(where: { $0.localIdentifier == referenceAsset.localIdentifier }) {
-            hierarchyReferenceAsset = nil
+        
+        // 只在数据真正变化时才更新
+        if newVisibleAssets.count != visibleAssets.count ||
+           !newVisibleAssets.elementsEqual(visibleAssets, by: { $0.localIdentifier == $1.localIdentifier }) {
+            visibleAssets = newVisibleAssets
+            collectionView.reloadData()
         }
-
-        visibleAssets = hierarchyService.getVisibleAssets(from: assets, in: collection)
     }
     
     /// 刷新层级显示
@@ -920,13 +936,25 @@ extension PhotoGridView {
 extension PhotoGridView: UICollectionViewDelegateFlowLayout {
     
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
+        // 如果 CollectionView 宽度和列数没有变化，直接返回缓存的尺寸
+        if collectionView.bounds.width == lastCollectionViewWidth,
+           let cachedSize = cachedCellSize {
+            return cachedSize
+        }
+        
         guard let flowLayout = collectionViewLayout as? UICollectionViewFlowLayout else { return .zero }
         let sectionInset = flowLayout.sectionInset
         let interItemSpacing = flowLayout.minimumInteritemSpacing
         
         let totalSpacing = sectionInset.left + sectionInset.right + (CGFloat(columns - 1) * interItemSpacing)
         let width = max(1, (collectionView.bounds.width - totalSpacing) / CGFloat(columns))
-        return CGSize(width: width, height: width)
+        let size = CGSize(width: width, height: width)
+        
+        // 缓存结果
+        cachedCellSize = size
+        lastCollectionViewWidth = collectionView.bounds.width
+        
+        return size
     }
     
     // MARK: - UIScrollViewDelegate

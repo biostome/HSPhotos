@@ -136,6 +136,15 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
     private var currentAssetID: String?
     private var requestID: PHImageRequestID?
     private var currentAsset: PHAsset?
+    
+    // MARK: - 图片缓存
+    private static let imageCache: NSCache<NSString, UIImage> = {
+        let cache = NSCache<NSString, UIImage>()
+        cache.countLimit = 500
+        cache.totalCostLimit = 1024 * 1024 * 200
+        return cache
+    }()
+    private var lastCacheKey: String?
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -243,20 +252,40 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         if currentAssetID != asset.localIdentifier {
             currentAssetID = asset.localIdentifier
 
-            // 计算合理的目标大小，避免请求过大的图片
-            // 使用最小边长100作为基准，确保图片质量的同时避免过大
+            // 生成缓存键
             let maxDimension: CGFloat = 200
-            // 使用通过上下文获取的UIScreen实例
-            let scale = imageView.window?.windowScene?.screen.scale ?? 2.0 // 默认使用2.0作为回退
-            let targetSize = CGSize(width: maxDimension * scale,
-                                    height: maxDimension * scale)
-            requestID = PHImageManager.default().requestImage(
-                for: asset,
-                targetSize: targetSize,
-                contentMode: .aspectFill,
-                options: requestOptions
-            ) { [weak self] image, _ in
-                self?.imageView.image = image
+            let scale = UIScreen.main.scale
+            let targetSize = CGSize(width: maxDimension * scale, height: maxDimension * scale)
+            let cacheKey = "\(asset.localIdentifier)_\(maxDimension)_\(scale)"
+            
+            // 检查缓存
+            if let cachedImage = PhotoCell.imageCache.object(forKey: cacheKey as NSString) {
+                imageView.image = cachedImage
+                lastCacheKey = cacheKey
+            } else {
+                // 取消之前的请求
+                if let requestID = requestID {
+                    PHImageManager.default().cancelImageRequest(requestID)
+                }
+                
+                // 请求新图片
+                requestID = PHImageManager.default().requestImage(
+                    for: asset,
+                    targetSize: targetSize,
+                    contentMode: .aspectFill,
+                    options: requestOptions
+                ) { [weak self] image, info in
+                    guard let self = self, let image = image else { return }
+                    
+                    // 只缓存最终质量的图片
+                    let isDegraded = info?[PHImageResultIsDegradedKey] as? Bool ?? false
+                    if !isDegraded {
+                        PhotoCell.imageCache.setObject(image, forKey: cacheKey as NSString)
+                        self.lastCacheKey = cacheKey
+                    }
+                    
+                    self.imageView.image = image
+                }
             }
         }
         
@@ -330,6 +359,7 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
             PHImageManager.default().cancelImageRequest(requestID)
         }
         requestID = nil
+        lastCacheKey = nil
     }
     
     private func formatDuration(_ seconds: TimeInterval) -> String {
