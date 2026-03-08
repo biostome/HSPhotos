@@ -203,8 +203,16 @@ class FolderListCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewD
         return cell
     }
     
+    // 缓存单元格尺寸
+    private var cachedCellSize: CGSize?
+    
     // MARK: - UICollectionViewDelegateFlowLayout
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
+        // 优化：缓存单元格尺寸，避免每次都重新计算
+        if let cachedSize = cachedCellSize {
+            return cachedSize
+        }
+        
         // 计算单元格大小，确保四宫格大小相等
         // 宽度：(CollectionView宽度 - 间距) / 2
         let collectionViewWidth = collectionView.bounds.width
@@ -214,12 +222,15 @@ class FolderListCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewD
         let collectionViewHeight = collectionView.bounds.height
         let height = floor((collectionViewHeight - 8) / 2) // 2行，间距8
         
-        return CGSize(width: width, height: height)
+        let cellSize = CGSize(width: width, height: height)
+        cachedCellSize = cellSize
+        return cellSize
     }
     
     override func layoutSubviews() {
         super.layoutSubviews()
-        // 当布局改变时，重新计算collectionView的布局
+        // 当布局改变时，清除缓存的尺寸并重新计算collectionView的布局
+        cachedCellSize = nil
         if let flowLayout = collectionView.collectionViewLayout as? UICollectionViewFlowLayout {
             flowLayout.invalidateLayout()
         }
@@ -231,8 +242,9 @@ class FolderListCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewD
     /// 设置trait变化监听
     private func setupTraitChangeObserver() {
         traitChangeToken = registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: FolderListCell, previousTraitCollection: UITraitCollection) in
-            // 当界面模式改变时，更新collectionView
-            self.collectionView.reloadData()
+            // 当界面模式改变时，只更新需要更新的部分，避免全量重加载
+            // 只更新背景色等UI元素，不需要重新加载图片
+            self.collectionView.performBatchUpdates(nil, completion: nil)
         }
     }
     
@@ -260,8 +272,9 @@ class FolderListCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewD
         // 重置数据
         assets.removeAll()
         
-        // 重新加载collectionView
-        collectionView.reloadData()
+        // 优化：只清除缓存的尺寸，不重新加载collectionView
+        // 在下一次布局时会自动重新计算
+        cachedCellSize = nil
     }
     
     @objc private func handleDisclosureTap() {

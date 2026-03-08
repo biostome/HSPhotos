@@ -95,7 +95,25 @@ class AlbumListView: UIView{
     }
     
     public func setCollections(_ newCollections: [AlbumListItem], animated: Bool) {
-        if !animated || window == nil {
+        // 优化：快速路径，当数据相同时直接返回
+        if collections.count == newCollections.count {
+            var hasChanges = false
+            for (old, new) in zip(collections, newCollections) {
+                if old.localIdentifier != new.localIdentifier || 
+                   old.isExpanded != new.isExpanded || 
+                   old.canExpand != new.canExpand || 
+                   old.hierarchyLevel != new.hierarchyLevel {
+                    hasChanges = true
+                    break
+                }
+            }
+            if !hasChanges {
+                return
+            }
+        }
+        
+        if !animated || window == nil || newCollections.count > 100 {
+            // 优化：当数据量较大时，使用reloadData以获得更好的性能
             collections = newCollections
             collectionView.reloadData()
             return
@@ -132,23 +150,29 @@ class AlbumListView: UIView{
 
         let hasStructuralChanges = !deletedIndexPaths.isEmpty || !insertedIndexPaths.isEmpty
         if hasStructuralChanges {
-            collectionView.performBatchUpdates({
+            // 优化：使用weak self避免循环引用
+            collectionView.performBatchUpdates({ [weak self] in
+                guard let self = self else { return }
                 if !deletedIndexPaths.isEmpty {
-                    collectionView.deleteItems(at: deletedIndexPaths)
+                    self.collectionView.deleteItems(at: deletedIndexPaths)
                 }
                 if !insertedIndexPaths.isEmpty {
-                    collectionView.insertItems(at: insertedIndexPaths)
+                    self.collectionView.insertItems(at: insertedIndexPaths)
                 }
-            }, completion: { _ in
-                // Avoid delete/reload index path conflicts in the same batch.
-                self.collectionView.reloadData()
+            }, completion: { [weak self] _ in
+                // 优化：只在必要时重新加载
+                guard let self = self else { return }
+                if !reloadedIndexPaths.isEmpty {
+                    self.collectionView.reloadItems(at: reloadedIndexPaths)
+                }
             })
             return
         }
 
         if !reloadedIndexPaths.isEmpty {
-            collectionView.performBatchUpdates({
-                collectionView.reloadItems(at: reloadedIndexPaths)
+            collectionView.performBatchUpdates({ [weak self] in
+                guard let self = self else { return }
+                self.collectionView.reloadItems(at: reloadedIndexPaths)
             })
         }
     }

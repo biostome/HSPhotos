@@ -89,8 +89,11 @@ class BaseAlbumCell: UICollectionViewCell {
     
     /// 根据层级设置背景与内容的水平缩进
     func applyHierarchyAppearance(level: Int) {
-        hierarchyLevel = max(level, 0)
-        setNeedsLayout()
+        let newLevel = max(level, 0)
+        if hierarchyLevel != newLevel {
+            hierarchyLevel = newLevel
+            setNeedsLayout()
+        }
     }
     
     /// 取消所有图片请求
@@ -159,12 +162,18 @@ class BaseAlbumCell: UICollectionViewCell {
         super.prepareForReuse()
         titleLabel.text = ""
         cancelImageRequests()
-        applyHierarchyAppearance(level: 0)
+        // 优化：不在prepareForReuse中重置层级，避免不必要的布局更新
+        // applyHierarchyAppearance(level: 0)
     }
     
     override func layoutSubviews() {
         super.layoutSubviews()
-        let inset = CGFloat(hierarchyLevel) * 24.0
-        contentView.frame = bounds.inset(by: UIEdgeInsets(top: 0, left: inset, bottom: 0, right: 0))
+        // 优化：只在层级大于0时进行缩进计算
+        if hierarchyLevel > 0 {
+            let inset = CGFloat(hierarchyLevel) * 24.0
+            contentView.frame = bounds.inset(by: UIEdgeInsets(top: 0, left: inset, bottom: 0, right: 0))
+        } else {
+            contentView.frame = bounds
+        }
     }
 }
