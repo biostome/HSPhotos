@@ -15,6 +15,8 @@ class FolderCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewDataS
     private var assets: [PHAsset] = []
     private let gradientView = UIView()
     private var gradientLayer: CAGradientLayer?
+    // 缓存单元格尺寸
+    private var cachedCellSize: CGSize?
 
     override init(frame: CGRect) {
         // 初始化CollectionView
@@ -175,6 +177,11 @@ class FolderCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewDataS
     
     // MARK: - UICollectionViewDelegateFlowLayout
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
+        // 优化：缓存单元格尺寸，避免每次都重新计算
+        if let cachedSize = cachedCellSize {
+            return cachedSize
+        }
+        
         // 计算单元格大小，确保四宫格大小相等
         // 宽度：(CollectionView宽度 - 间距) / 2
         let collectionViewWidth = collectionView.bounds.width
@@ -184,17 +191,22 @@ class FolderCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewDataS
         let collectionViewHeight = collectionView.bounds.height
         let height = floor((collectionViewHeight - 8) / 2) // 2行，间距8
         
-        return CGSize(width: width, height: height)
+        let cellSize = CGSize(width: width, height: height)
+        cachedCellSize = cellSize
+        return cellSize
     }
     
     override func layoutSubviews() {
         super.layoutSubviews()
-        // 当布局改变时，重新计算collectionView的布局
+        // 当布局改变时，清除缓存的尺寸并重新计算collectionView的布局
+        cachedCellSize = nil
         if let flowLayout = collectionView.collectionViewLayout as? UICollectionViewFlowLayout {
             flowLayout.invalidateLayout()
         }
-        // 每次布局时更新渐变层
-        setupGradient()
+        // 只在渐变层不存在或frame改变时更新渐变层
+        if gradientLayer == nil || !gradientLayer!.frame.equalTo(gradientView.bounds) {
+            setupGradient()
+        }
     }
     
     /// 设置渐变层

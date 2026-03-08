@@ -143,8 +143,10 @@ class AlbumCell: BaseAlbumCell {
 
     override func layoutSubviews() {
         super.layoutSubviews()
-        // 每次布局时更新渐变层
-        setupGradient()
+        // 只在渐变层不存在或frame改变时更新渐变层
+        if gradientLayer == nil || !gradientLayer!.frame.equalTo(gradientView.bounds) {
+            setupGradient()
+        }
     }
     
     /// 设置渐变层
