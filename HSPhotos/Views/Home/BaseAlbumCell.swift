@@ -136,9 +136,11 @@ class BaseAlbumCell: UICollectionViewCell {
         // 配置图片请求选项
         let options = PHImageRequestOptions()
         options.resizeMode = .fast
-        options.deliveryMode = .highQualityFormat
+        options.deliveryMode = .opportunistic // 使用机会模式，先返回低质量图片，再返回高质量图片
         options.isNetworkAccessAllowed = true
+        options.progressHandler = nil
         
+        // 使用串行队列处理图片加载，避免并发请求过多
         let requestID = PHImageManager.default().requestImage(
             for: asset,
             targetSize: targetSize,
@@ -149,12 +151,15 @@ class BaseAlbumCell: UICollectionViewCell {
             
             // 检查是否是最终图片
             let isDegraded = info?[PHImageResultIsDegradedKey] as? Bool ?? false
+            
+            // 无论是否是最终图片，都先返回，提高用户体验
+            completion(image)
+            
+            // 只缓存最终图片
             if !isDegraded, let image = image {
                 // 缓存图片
                 ImageCache.shared.set(key: cacheKey, image: image)
             }
-            
-            completion(image)
         }
         
         imageRequests.append(requestID)

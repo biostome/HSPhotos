@@ -73,11 +73,23 @@ class AlbumListView: UIView{
         collectionView.isPrefetchingEnabled = true // 启用预加载
         collectionView.translatesAutoresizingMaskIntoConstraints = false
         
-        // 性能优化设置
+        // 高级性能优化设置
         collectionView.preservesSuperviewLayoutMargins = false
         collectionView.contentInsetAdjustmentBehavior = .automatic
         collectionView.layoutMargins = UIEdgeInsets.zero
-        collectionView.performBatchUpdates(nil, completion: nil) // 触发布局更新
+        
+        // 启用预渲染和离屏渲染优化
+        // 移除了 preferredFocusEnvironments 的设置，因为它是不可变的
+        
+        // 优化滚动性能
+        collectionView.decelerationRate = .fast
+        collectionView.alwaysBounceVertical = true
+        
+        // 优化布局性能
+        if let flowLayout = collectionView.collectionViewLayout as? UICollectionViewFlowLayout {
+            flowLayout.estimatedItemSize = UICollectionViewFlowLayout.automaticSize
+            flowLayout.invalidateLayout()
+        }
         
         addSubview(collectionView)
         
@@ -112,68 +124,79 @@ class AlbumListView: UIView{
             }
         }
         
-        if !animated || window == nil || newCollections.count > 100 {
-            // 优化：当数据量较大时，使用reloadData以获得更好的性能
-            collections = newCollections
-            collectionView.reloadData()
-            return
-        }
-        
-        let oldCollections = collections
-        let oldKeys = oldCollections.map { itemKey(for: $0) }
-        let newKeys = newCollections.map { itemKey(for: $0) }
-        let oldKeySet = Set(oldKeys)
-        let newKeySet = Set(newKeys)
-        
-        let oldItemByKey = Dictionary(uniqueKeysWithValues: zip(oldKeys, oldCollections))
-        let deletedIndexPaths = oldKeys.enumerated().compactMap { entry -> IndexPath? in
-            newKeySet.contains(entry.element) ? nil : IndexPath(item: entry.offset, section: 0)
-        }
-        let insertedIndexPaths = newKeys.enumerated().compactMap { entry -> IndexPath? in
-            oldKeySet.contains(entry.element) ? nil : IndexPath(item: entry.offset, section: 0)
-        }
-        let reloadedIndexPaths = newCollections.enumerated().compactMap { entry -> IndexPath? in
-            let item = entry.element
-            let key = itemKey(for: item)
-            guard let oldItem = oldItemByKey[key] else { return nil }
-            let needsReload = oldItem.isExpanded != item.isExpanded
-                || oldItem.canExpand != item.canExpand
-                || oldItem.hierarchyLevel != item.hierarchyLevel
-            return needsReload ? IndexPath(item: entry.offset, section: 0) : nil
-        }
-        
-        collections = newCollections
-        
-        if deletedIndexPaths.isEmpty && insertedIndexPaths.isEmpty && reloadedIndexPaths.isEmpty {
-            return
-        }
+        // 异步处理数据计算，避免阻塞主线程
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            
+            // 计算变更
+            let oldCollections = self.collections
+            let oldKeys = oldCollections.map { self.itemKey(for: $0) }
+            let newKeys = newCollections.map { self.itemKey(for: $0) }
+            let oldKeySet = Set(oldKeys)
+            let newKeySet = Set(newKeys)
+            
+            let oldItemByKey = Dictionary(uniqueKeysWithValues: zip(oldKeys, oldCollections))
+            let deletedIndexPaths = oldKeys.enumerated().compactMap { entry -> IndexPath? in
+                newKeySet.contains(entry.element) ? nil : IndexPath(item: entry.offset, section: 0)
+            }
+            let insertedIndexPaths = newKeys.enumerated().compactMap { entry -> IndexPath? in
+                oldKeySet.contains(entry.element) ? nil : IndexPath(item: entry.offset, section: 0)
+            }
+            let reloadedIndexPaths = newCollections.enumerated().compactMap { entry -> IndexPath? in
+                let item = entry.element
+                let key = self.itemKey(for: item)
+                guard let oldItem = oldItemByKey[key] else { return nil }
+                let needsReload = oldItem.isExpanded != item.isExpanded
+                    || oldItem.canExpand != item.canExpand
+                    || oldItem.hierarchyLevel != item.hierarchyLevel
+                return needsReload ? IndexPath(item: entry.offset, section: 0) : nil
+            }
+            
+            // 更新主线程
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
+                
+                if !animated || self.window == nil || newCollections.count > 100 {
+                    // 优化：当数据量较大时，使用reloadData以获得更好的性能
+                    self.collections = newCollections
+                    self.collectionView.reloadData()
+                    return
+                }
+                
+                self.collections = newCollections
+                
+                if deletedIndexPaths.isEmpty && insertedIndexPaths.isEmpty && reloadedIndexPaths.isEmpty {
+                    return
+                }
 
-        let hasStructuralChanges = !deletedIndexPaths.isEmpty || !insertedIndexPaths.isEmpty
-        if hasStructuralChanges {
-            // 优化：使用weak self避免循环引用
-            collectionView.performBatchUpdates({ [weak self] in
-                guard let self = self else { return }
-                if !deletedIndexPaths.isEmpty {
-                    self.collectionView.deleteItems(at: deletedIndexPaths)
+                let hasStructuralChanges = !deletedIndexPaths.isEmpty || !insertedIndexPaths.isEmpty
+                if hasStructuralChanges {
+                    // 优化：使用weak self避免循环引用
+                    self.collectionView.performBatchUpdates({ [weak self] in
+                        guard let self = self else { return }
+                        if !deletedIndexPaths.isEmpty {
+                            self.collectionView.deleteItems(at: deletedIndexPaths)
+                        }
+                        if !insertedIndexPaths.isEmpty {
+                            self.collectionView.insertItems(at: insertedIndexPaths)
+                        }
+                    }, completion: { [weak self] _ in
+                        // 优化：只在必要时重新加载
+                        guard let self = self else { return }
+                        if !reloadedIndexPaths.isEmpty {
+                            self.collectionView.reloadItems(at: reloadedIndexPaths)
+                        }
+                    })
+                    return
                 }
-                if !insertedIndexPaths.isEmpty {
-                    self.collectionView.insertItems(at: insertedIndexPaths)
-                }
-            }, completion: { [weak self] _ in
-                // 优化：只在必要时重新加载
-                guard let self = self else { return }
+
                 if !reloadedIndexPaths.isEmpty {
-                    self.collectionView.reloadItems(at: reloadedIndexPaths)
+                    self.collectionView.performBatchUpdates({ [weak self] in
+                        guard let self = self else { return }
+                        self.collectionView.reloadItems(at: reloadedIndexPaths)
+                    })
                 }
-            })
-            return
-        }
-
-        if !reloadedIndexPaths.isEmpty {
-            collectionView.performBatchUpdates({ [weak self] in
-                guard let self = self else { return }
-                self.collectionView.reloadItems(at: reloadedIndexPaths)
-            })
+            }
         }
     }
     
