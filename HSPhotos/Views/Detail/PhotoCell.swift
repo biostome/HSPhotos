@@ -223,21 +223,11 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
     
     
     lazy var requestOptions: PHImageRequestOptions = {
-        
         let options = PHImageRequestOptions()
         options.version = .current
-//        options.deliveryMode = .highQualityFormat
-//        options.resizeMode = .exact
-        
-        // 允许iCloud下载
+        options.deliveryMode = .highQualityFormat // 使用高质量格式，确保滚动时图片清晰
+        options.resizeMode = .fast
         options.isNetworkAccessAllowed = true
-        
-        // 设置进度回调
-        options.progressHandler = { progress, _, _, _ in
-            DispatchQueue.main.async {
-//                print("progress: \(progress)%")
-            }
-        }
         
         return options
     }()
@@ -248,6 +238,11 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         // 保存当前资产
         currentAsset = asset
 
+        // 取消之前的请求（重要：避免滚动时图片延迟显示）
+        if let requestID = requestID {
+            PHImageManager.default().cancelImageRequest(requestID)
+        }
+        
         // 避免重复请求
         if currentAssetID != asset.localIdentifier {
             currentAssetID = asset.localIdentifier
@@ -263,11 +258,6 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
                 imageView.image = cachedImage
                 lastCacheKey = cacheKey
             } else {
-                // 取消之前的请求
-                if let requestID = requestID {
-                    PHImageManager.default().cancelImageRequest(requestID)
-                }
-                
                 // 请求新图片
                 requestID = PHImageManager.default().requestImage(
                     for: asset,
@@ -277,14 +267,15 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
                 ) { [weak self] image, info in
                     guard let self = self, let image = image else { return }
                     
+                    // 立即显示图片（包括渐进式加载的低质量版本）
+                    self.imageView.image = image
+                    
                     // 只缓存最终质量的图片
                     let isDegraded = info?[PHImageResultIsDegradedKey] as? Bool ?? false
                     if !isDegraded {
                         PhotoCell.imageCache.setObject(image, forKey: cacheKey as NSString)
                         self.lastCacheKey = cacheKey
                     }
-                    
-                    self.imageView.image = image
                 }
             }
         }
