@@ -39,6 +39,11 @@ class AlbumListView: UIView{
         }
     }
     
+    // 缓存 Cell 尺寸，避免重复计算
+    private var cachedGridCellSize: CGSize?
+    private var cachedListCellSize: CGSize?
+    private var lastCollectionViewWidth: CGFloat = 0
+    
     private let collectionView: UICollectionView = {
         let layout = UICollectionViewFlowLayout()
         layout.minimumInteritemSpacing = 12
@@ -87,7 +92,8 @@ class AlbumListView: UIView{
         
         // 优化布局性能
         if let flowLayout = collectionView.collectionViewLayout as? UICollectionViewFlowLayout {
-            flowLayout.estimatedItemSize = UICollectionViewFlowLayout.automaticSize
+            // 不使用自动尺寸估计，使用我们在 sizeForItemAt 中计算的固定尺寸
+            flowLayout.estimatedItemSize = .zero
             flowLayout.invalidateLayout()
         }
         
@@ -254,25 +260,59 @@ extension AlbumListView: UICollectionViewDataSource {
 
 // MARK: - UICollectionViewDelegateFlowLayout
 extension AlbumListView: UICollectionViewDelegateFlowLayout {
+    
     func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
+        // 检查 CollectionView 宽度是否变化
+        if collectionView.bounds.width != lastCollectionViewWidth {
+            // 宽度变化，清除缓存
+            cachedGridCellSize = nil
+            cachedListCellSize = nil
+            lastCollectionViewWidth = collectionView.bounds.width
+        }
+        
         // 根据布局模式返回不同的大小
         switch layoutMode {
         case .grid:
             // 网格布局：正方形
-            let totalWidth = collectionView.frame.width
-            let sectionInset = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
-            let interitemSpacing: CGFloat = 12
+            if let cachedSize = cachedGridCellSize {
+                return cachedSize
+            }
+            
+            guard let flowLayout = collectionViewLayout as? UICollectionViewFlowLayout else {
+                return CGSize(width: 100, height: 100)
+            }
+            
+            let sectionInset = flowLayout.sectionInset
+            let interitemSpacing = flowLayout.minimumInteritemSpacing
+            let totalWidth = collectionView.bounds.width
             let availableWidth = totalWidth - sectionInset.left - sectionInset.right - interitemSpacing
             let cellWidth = availableWidth / 2
             let cellHeight = cellWidth // 正方形
-            return CGSize(width: cellWidth, height: cellHeight)
+            let cellSize = CGSize(width: cellWidth, height: cellHeight)
+            
+            // 缓存结果
+            cachedGridCellSize = cellSize
+            return cellSize
+            
         case .list:
             // 列表布局：固定高度的矩形
-            let totalWidth = collectionView.frame.width
-            let sectionInset = UIEdgeInsets(top: 12, left: 12, bottom: 12, right: 12)
+            if let cachedSize = cachedListCellSize {
+                return cachedSize
+            }
+            
+            guard let flowLayout = collectionViewLayout as? UICollectionViewFlowLayout else {
+                return CGSize(width: 300, height: 100)
+            }
+            
+            let sectionInset = flowLayout.sectionInset
+            let totalWidth = collectionView.bounds.width
             let cellWidth = totalWidth - sectionInset.left - sectionInset.right
             let cellHeight: CGFloat = 100 // 固定高度
-            return CGSize(width: cellWidth, height: cellHeight)
+            let cellSize = CGSize(width: cellWidth, height: cellHeight)
+            
+            // 缓存结果
+            cachedListCellSize = cellSize
+            return cellSize
         }
     }
 }
