@@ -137,6 +137,10 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
     private var requestID: PHImageRequestID?
     private var currentAsset: PHAsset?
     
+    // 层级信息缓存，避免重复计算
+    private var lastHierarchyText: String?
+    private var lastIsHierarchyCollapsed: Bool?
+    
     // MARK: - 图片缓存
     private static let imageCache: NSCache<NSString, UIImage> = {
         let cache = NSCache<NSString, UIImage>()
@@ -286,14 +290,21 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         // 设置锚点标识
         anchorLabel.isHidden = !isAnchor
         
-        if let hierarchyText, !hierarchyText.isEmpty {
-            // 简化层级文本，只显示数字，避免过长文本
-            let simplifiedText = hierarchyText.replacingOccurrences(of: "级", with: "")
-            hierarchyLabel.text = isHierarchyCollapsed ? "\(simplifiedText)折" : simplifiedText
-            hierarchyLabel.isHidden = false
-        } else {
-            hierarchyLabel.text = nil
-            hierarchyLabel.isHidden = true
+        // 只有当层级信息变化时才更新
+        if hierarchyText != lastHierarchyText || isHierarchyCollapsed != lastIsHierarchyCollapsed {
+            if let hierarchyText, !hierarchyText.isEmpty {
+                // 简化层级文本，只显示数字，避免过长文本
+                let simplifiedText = hierarchyText.replacingOccurrences(of: "级", with: "")
+                hierarchyLabel.text = isHierarchyCollapsed ? "\(simplifiedText)折" : simplifiedText
+                hierarchyLabel.isHidden = false
+            } else {
+                hierarchyLabel.text = nil
+                hierarchyLabel.isHidden = true
+            }
+            
+            // 更新缓存
+            lastHierarchyText = hierarchyText
+            lastIsHierarchyCollapsed = isHierarchyCollapsed
         }
         
         // 设置收藏标识
@@ -349,6 +360,8 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         favoriteIcon.isHidden = true
         currentAssetID = nil
         currentAsset = nil
+        lastHierarchyText = nil
+        lastIsHierarchyCollapsed = nil
         if let requestID = requestID {
             PHImageManager.default().cancelImageRequest(requestID)
         }
