@@ -247,8 +247,9 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         if currentAssetID != asset.localIdentifier {
             currentAssetID = asset.localIdentifier
 
-            // 生成缓存键
-            let maxDimension: CGFloat = 200
+            // 根据 Cell 大小动态调整图片尺寸
+            let cellSize = bounds.size
+            let maxDimension: CGFloat = min(cellSize.width, cellSize.height) * 2 // 根据 Cell 大小动态调整
             let scale = UIScreen.main.scale
             let targetSize = CGSize(width: maxDimension * scale, height: maxDimension * scale)
             let cacheKey = "\(asset.localIdentifier)_\(maxDimension)_\(scale)"
@@ -267,7 +268,7 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
                 ) { [weak self] image, info in
                     guard let self = self, let image = image else { return }
                     
-                    // 立即显示图片（包括渐进式加载的低质量版本）
+                    // 立即显示图片
                     self.imageView.image = image
                     
                     // 只缓存最终质量的图片
