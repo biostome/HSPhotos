@@ -676,6 +676,8 @@ class PhotoGridView: UIView {
         // 清除层级缓存，确保重新获取最新的层级信息
         hierarchyCache.removeAll()
         updateVisibleAssets()
+        // 强制刷新当前可见的Cell，确保层级信息更新
+        collectionView.reloadData()
     }
     
     /// 定位到指定索引位置的照片
@@ -1208,12 +1210,13 @@ extension PhotoGridView {
             }
 
             // 粘贴到此后方操作
-            if let pasteAssets = AssetPasteboard.assetsFromPasteboard(), !pasteAssets.isEmpty {
-                let pasteAction = UIAction(title: "粘贴到此后方", image: UIImage(systemName: "doc.on.clipboard")) { [weak self] _ in
+            // 不直接检查剪贴板，而是在用户点击时才访问，避免触发权限弹窗
+            let pasteAction = UIAction(title: "粘贴到此后方", image: UIImage(systemName: "doc.on.clipboard")) { [weak self] _ in
+                if let pasteAssets = AssetPasteboard.assetsFromPasteboard(), !pasteAssets.isEmpty {
                     self?.handlePasteToAfter(asset: asset, assets: pasteAssets)
                 }
-                tailGroup.append(pasteAction)
             }
+            tailGroup.append(pasteAction)
 
             if !hierarchyChildren.isEmpty {
                 hierarchyGroup.append(

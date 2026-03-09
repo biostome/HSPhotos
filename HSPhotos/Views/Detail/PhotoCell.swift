@@ -264,11 +264,18 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
                 lastCacheKey = cacheKey
             } else {
                 // 请求新图片
+                // 使用更高效的图片加载策略：先显示低质量图片，再显示高质量图片
+                let options = PHImageRequestOptions()
+                options.version = .current
+                options.deliveryMode = .opportunistic
+                options.resizeMode = .fast
+                options.isNetworkAccessAllowed = true
+                
                 requestID = PHImageManager.default().requestImage(
                     for: asset,
                     targetSize: targetSize,
                     contentMode: .aspectFill,
-                    options: requestOptions
+                    options: options
                 ) { [weak self] image, info in
                     guard let self = self, let image = image else { return }
                     
@@ -308,15 +315,21 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         }
         
         // 设置收藏标识
-        favoriteIcon.isHidden = !asset.isFavorite
-        favoriteIcon.image = UIImage(systemName: asset.isFavorite ? "heart.fill" : "heart")
+        let isFavorite = asset.isFavorite
+        if favoriteIcon.isHidden != !isFavorite {
+            favoriteIcon.isHidden = !isFavorite
+            favoriteIcon.image = UIImage(systemName: isFavorite ? "heart.fill" : "heart")
+        }
         
         // 设置媒体类型标识
-        if asset.mediaSubtypes.contains(.photoLive) {
+        let isLivePhoto = asset.mediaSubtypes.contains(.photoLive)
+        let isVideo = asset.mediaType == .video
+        
+        if isLivePhoto {
             mediaIconView.isHidden = false
             mediaIconView.image = UIImage(systemName: "livephoto")
             mediaDurationLabel.isHidden = true
-        } else if asset.mediaType == .video {
+        } else if isVideo {
             mediaIconView.isHidden = false
             mediaIconView.image = UIImage(systemName: "play.fill")
             mediaDurationLabel.isHidden = false
@@ -326,20 +339,13 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
             mediaDurationLabel.isHidden = true
         }
         
+        // 设置选择状态
+        selectionOverlay.isHidden = !isSelected
+        
         switch selectionMode {
         case .none:
-            selectionOverlay.isHidden = true
             selectionNumberLabel.isHidden = true
-        case .multiple:
-            selectionOverlay.isHidden = !isSelected
-            if isSelected, let index = selectionIndex {
-                selectionNumberLabel.text = "\(index)"
-                selectionNumberLabel.isHidden = false
-            } else {
-                selectionNumberLabel.isHidden = true
-            }
-        case .range:
-            selectionOverlay.isHidden = !isSelected
+        case .multiple, .range:
             if isSelected, let index = selectionIndex {
                 selectionNumberLabel.text = "\(index)"
                 selectionNumberLabel.isHidden = false
@@ -347,6 +353,7 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
                 selectionNumberLabel.isHidden = true
             }
         }
+
     }
 
     override func prepareForReuse() {

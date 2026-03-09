@@ -39,6 +39,11 @@ class PhotoHeaderService {
     
     private init() {}
     
+    // 内存缓存，避免重复从UserDefaults读取
+    private var nodesCache: [String: [String: PhotoHierarchyNode]] = [:]
+    private var headerAssetsCache: [String: [PHAsset]] = [:]
+    private var collapseStatesCache: [String: [String: Bool]] = [:]
+    
     // MARK: - 首图管理
     
     /// 设置首图
@@ -189,6 +194,13 @@ class PhotoHeaderService {
     /// - Returns: 首图数组
     private func getHeaderAssets(for collection: PHAssetCollection) -> [PHAsset] {
         let key = "header_photos_\(collection.localIdentifier)"
+        
+        // 检查缓存
+        if let cached = headerAssetsCache[key] {
+            return cached
+        }
+        
+        // 缓存未命中，从UserDefaults读取
         let headerIdentifiers = UserDefaults.standard.stringArray(forKey: key) ?? []
         
         // 根据标识符获取PHAsset对象
@@ -199,6 +211,8 @@ class PhotoHeaderService {
             }
         }
         
+        // 缓存结果
+        headerAssetsCache[key] = headerAssets
         return headerAssets
     }
     
@@ -210,6 +224,8 @@ class PhotoHeaderService {
         let key = "header_photos_\(collection.localIdentifier)"
         let identifiers = headerAssets.map { $0.localIdentifier }
         UserDefaults.standard.set(identifiers, forKey: key)
+        // 更新缓存
+        headerAssetsCache[key] = headerAssets
     }
     
     /// 获取段落折叠状态
@@ -217,7 +233,18 @@ class PhotoHeaderService {
     /// - Returns: 折叠状态字典
     private func getParagraphCollapseStates(for collection: PHAssetCollection) -> [String: Bool] {
         let key = "paragraph_collapse_\(collection.localIdentifier)"
-        return UserDefaults.standard.dictionary(forKey: key) as? [String: Bool] ?? [:]
+        
+        // 检查缓存
+        if let cached = collapseStatesCache[key] {
+            return cached
+        }
+        
+        // 缓存未命中，从UserDefaults读取
+        let states = UserDefaults.standard.dictionary(forKey: key) as? [String: Bool] ?? [:]
+        
+        // 缓存结果
+        collapseStatesCache[key] = states
+        return states
     }
     
     /// 保存段落折叠状态
@@ -227,6 +254,8 @@ class PhotoHeaderService {
     private func saveParagraphCollapseStates(_ states: [String: Bool], for collection: PHAssetCollection) {
         let key = "paragraph_collapse_\(collection.localIdentifier)"
         UserDefaults.standard.set(states, forKey: key)
+        // 更新缓存
+        collapseStatesCache[key] = states
     }
     
     // MARK: - 数据清理
@@ -283,6 +312,9 @@ final class PhotoHierarchyService {
     static let shared = PhotoHierarchyService()
 
     private init() {}
+
+    // 内存缓存，避免重复从UserDefaults读取
+    private var nodesCache: [String: [String: PhotoHierarchyNode]] = [:]
 
     func node(for asset: PHAsset, in collection: PHAssetCollection) -> PhotoHierarchyNode? {
         loadNodes(for: collection)[asset.localIdentifier]
@@ -564,18 +596,24 @@ final class PhotoHierarchyService {
         var collapsedStack: [[Int]] = []
 
         for asset in assets {
-            let path = nodes[asset.localIdentifier]?.path ?? []
+            let node = nodes[asset.localIdentifier]
+            let path = node?.path ?? []
+
+            // 清理栈中不再是当前路径前缀的折叠路径
             collapsedStack.removeAll { !isPrefix($0, of: path) }
 
-            let shouldHide = collapsedStack.contains { isPrefix($0, of: path) && $0.count < path.count }
-            if shouldHide {
-                continue
+            // 检查是否被任何折叠的父级路径隐藏
+            let shouldHide = collapsedStack.contains { parentPath in
+                isPrefix(parentPath, of: path) && parentPath.count < path.count
             }
 
-            visible.append(asset)
+            if !shouldHide {
+                visible.append(asset)
 
-            if let node = nodes[asset.localIdentifier], node.isCollapsed, !node.path.isEmpty {
-                collapsedStack.append(node.path)
+                // 如果当前节点被折叠且有路径，添加到折叠栈
+                if node?.isCollapsed == true && !path.isEmpty {
+                    collapsedStack.append(path)
+                }
             }
         }
         return visible
@@ -643,12 +681,23 @@ final class PhotoHierarchyService {
     func setAsTopLevels(_ assets: [PHAsset], in orderedAssets: [PHAsset], collection: PHAssetCollection) {
         guard !assets.isEmpty else { return }
         var nodes = loadNodes(for: collection)
-        var currentRoot = nodes.values.compactMap { $0.path.first }.max() ?? 0
+        
+        // 预计算当前最大根节点值，避免重复遍历
+        var currentRoot = 0
+        for node in nodes.values {
+            if let first = node.path.first, first > currentRoot {
+                currentRoot = first
+            }
+        }
+        
+        // 批量处理资产，减少重复计算
         for asset in assets {
             currentRoot += 1
             let oldPath = nodes[asset.localIdentifier]?.path ?? []
             moveSubtree(of: asset.localIdentifier, from: oldPath, to: [currentRoot], nodes: &nodes)
         }
+        
+        // 只执行一次规范化和保存操作
         nodes = normalized(nodes: nodes, in: orderedAssets)
         saveNodes(nodes, for: collection)
     }
@@ -956,6 +1005,7 @@ final class PhotoHierarchyService {
     }
 
     private func firstMissingPositive(in used: Set<Int>) -> Int {
+        // 使用更高效的算法：从1开始检查，直到找到第一个不在集合中的数
         var candidate = 1
         while used.contains(candidate) {
             candidate += 1
@@ -1005,14 +1055,24 @@ final class PhotoHierarchyService {
             return
         }
 
-        let descendants = nodes.filter { key, node in
-            key != assetID && isPrefix(oldPath, of: node.path)
+        // 优化：预计算子节点，减少遍历次数
+        let oldPathCount = oldPath.count
+        var nodesToUpdate: [(String, PhotoHierarchyNode)] = []
+        
+        // 先收集需要更新的节点
+        for (key, node) in nodes {
+            if key == assetID {
+                nodesToUpdate.append((key, PhotoHierarchyNode(path: newPath, isCollapsed: collapse)))
+            } else if isPrefix(oldPath, of: node.path) {
+                let suffix = Array(node.path.dropFirst(oldPathCount))
+                nodesToUpdate.append((key, PhotoHierarchyNode(path: newPath + suffix, isCollapsed: node.isCollapsed)))
+            }
         }
-        for (descendantID, descendantNode) in descendants {
-            let suffix = Array(descendantNode.path.dropFirst(oldPath.count))
-            nodes[descendantID] = PhotoHierarchyNode(path: newPath + suffix, isCollapsed: descendantNode.isCollapsed)
+        
+        // 一次性更新所有节点
+        for (key, node) in nodesToUpdate {
+            nodes[key] = node
         }
-        nodes[assetID] = PhotoHierarchyNode(path: newPath, isCollapsed: collapse)
     }
 
     /// 当某个节点被改级且离开原父级时，将其后续同级自动并入为新节点子级。
@@ -1048,18 +1108,29 @@ final class PhotoHierarchyService {
         var result = nodes
         var usedByParent: [String: Set<Int>] = [:]
 
+        // 预分配空间，减少哈希表扩容开销
+        usedByParent.reserveCapacity(nodes.count)
+
         for assetID in orderedIDs {
             guard var node = result[assetID], !node.path.isEmpty else { continue }
             let parentPath = Array(node.path.dropLast())
             let parentKey = pathKey(parentPath)
             let currentIndex = node.path.last ?? 1
 
-            if usedByParent[parentKey]?.contains(currentIndex) == true {
-                let newIndex = firstMissingPositive(in: usedByParent[parentKey] ?? [])
+            // 检查是否需要更新索引
+            if let usedIndices = usedByParent[parentKey], usedIndices.contains(currentIndex) {
+                // 找到第一个可用的索引
+                var newIndex = 1
+                while usedIndices.contains(newIndex) {
+                    newIndex += 1
+                }
+                // 更新节点路径
                 node.path = parentPath + [newIndex]
                 result[assetID] = node
+                // 更新使用的索引集合
                 usedByParent[parentKey, default: []].insert(newIndex)
             } else {
+                // 直接添加到使用的索引集合
                 usedByParent[parentKey, default: []].insert(currentIndex)
             }
         }
@@ -1169,10 +1240,24 @@ final class PhotoHierarchyService {
 
     private func loadNodes(for collection: PHAssetCollection) -> [String: PhotoHierarchyNode] {
         let key = storageKey(for: collection)
-        guard let data = UserDefaults.standard.data(forKey: key) else { return [:] }
+        
+        // 检查缓存
+        if let cached = nodesCache[key] {
+            return cached
+        }
+        
+        // 缓存未命中，从UserDefaults读取
+        guard let data = UserDefaults.standard.data(forKey: key) else {
+            nodesCache[key] = [:]
+            return [:]
+        }
+        
         do {
-            return try JSONDecoder().decode([String: PhotoHierarchyNode].self, from: data)
+            let nodes = try JSONDecoder().decode([String: PhotoHierarchyNode].self, from: data)
+            nodesCache[key] = nodes
+            return nodes
         } catch {
+            nodesCache[key] = [:]
             return [:]
         }
     }
@@ -1182,8 +1267,12 @@ final class PhotoHierarchyService {
         do {
             let data = try JSONEncoder().encode(nodes)
             UserDefaults.standard.set(data, forKey: key)
+            // 更新缓存
+            nodesCache[key] = nodes
         } catch {
             UserDefaults.standard.removeObject(forKey: key)
+            // 清除缓存
+            nodesCache[key] = [:]
         }
     }
 
