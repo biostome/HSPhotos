@@ -136,9 +136,17 @@ class PhotoGridView: UIView {
     public var sortPreference: PhotoSortPreference = .custom
     
     // 当前相册引用，用于获取自定义排序数据
-    public var currentCollection: PHAssetCollection?
+    public var currentCollection: PHAssetCollection? {
+        didSet {
+            // 当collection变化时，清除缓存
+            hierarchyCache.removeAll()
+        }
+    }
     
     private let hierarchyService = PhotoHierarchyService.shared
+    
+    // 层级信息缓存，避免重复计算
+    private var hierarchyCache: [String: (text: String?, isCollapsed: Bool)] = [:]
     
     private var columns: Int = PhotoGridConstants.defaultColumns
     
@@ -173,7 +181,7 @@ class PhotoGridView: UIView {
         // 性能优化设置
         collectionView.preservesSuperviewLayoutMargins = false
         collectionView.layoutMargins = .zero
-        collectionView.decelerationRate = .fast
+        collectionView.decelerationRate = .normal
         
         return collectionView
     }()
@@ -656,6 +664,8 @@ class PhotoGridView: UIView {
     
     /// 刷新层级显示
     func refreshParagraphDisplay() {
+        // 清除层级缓存，确保重新获取最新的层级信息
+        hierarchyCache.removeAll()
         updateVisibleAssets()
     }
     
@@ -737,8 +747,24 @@ extension PhotoGridView: UICollectionViewDataSource {
         let selectionIndex = selectedMap[photo.localIdentifier]?.0
         let isAnchor = anchorPhoto?.localIdentifier == photo.localIdentifier
         
-        let hierarchyText = currentCollection != nil ? hierarchyService.hierarchyText(for: photo, in: currentCollection!) : nil
-        let isHierarchyCollapsed = currentCollection != nil ? hierarchyService.isCollapsed(photo, in: currentCollection!) : false
+        // 从缓存获取层级信息，避免重复计算
+        let assetID = photo.localIdentifier
+        var hierarchyText: String?
+        var isHierarchyCollapsed: Bool = false
+        
+        // 检查缓存
+        if let cached = hierarchyCache[assetID] {
+            hierarchyText = cached.text
+            isHierarchyCollapsed = cached.isCollapsed
+        } else {
+            // 缓存未命中，获取并缓存
+            if let collection = currentCollection {
+                hierarchyText = hierarchyService.hierarchyText(for: photo, in: collection)
+                isHierarchyCollapsed = hierarchyService.isCollapsed(photo, in: collection)
+            }
+            // 缓存结果
+            hierarchyCache[assetID] = (text: hierarchyText, isCollapsed: isHierarchyCollapsed)
+        }
         
         // 根据排序方式决定显示的下标
         let displayIndex: Int
