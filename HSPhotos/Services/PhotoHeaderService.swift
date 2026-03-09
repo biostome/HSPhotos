@@ -528,10 +528,21 @@ final class PhotoHierarchyService {
 
     func clearSubtree(of asset: PHAsset, in collection: PHAssetCollection) {
         var nodes = loadNodes(for: collection)
-        guard let rootPath = nodes[asset.localIdentifier]?.path, !rootPath.isEmpty else { return }
-        nodes = nodes.filter { (_, node) in
-            !isPrefix(rootPath, of: node.path)
+        let assetID = asset.localIdentifier
+        
+        // 先获取路径，再移除节点
+        let rootPath = nodes[assetID]?.path
+        
+        // 移除节点本身
+        nodes.removeValue(forKey: assetID)
+        
+        // 移除所有子节点
+        if let rootPath = rootPath, !rootPath.isEmpty {
+            nodes = nodes.filter { (_, node) in
+                !isPrefix(rootPath, of: node.path)
+            }
         }
+        
         saveNodes(nodes, for: collection)
     }
 
@@ -1142,9 +1153,17 @@ final class PhotoHierarchyService {
     }
 
     private func clearSubtree(of assetID: String, nodes: inout [String: PhotoHierarchyNode]) {
-        guard let rootPath = nodes[assetID]?.path, !rootPath.isEmpty else { return }
-        nodes = nodes.filter { (_, node) in
-            !isPrefix(rootPath, of: node.path)
+        // 先获取路径，再移除节点
+        let rootPath = nodes[assetID]?.path
+        
+        // 移除节点本身
+        nodes.removeValue(forKey: assetID)
+        
+        // 移除所有子节点
+        if let rootPath = rootPath, !rootPath.isEmpty {
+            nodes = nodes.filter { (_, node) in
+                !isPrefix(rootPath, of: node.path)
+            }
         }
     }
 
