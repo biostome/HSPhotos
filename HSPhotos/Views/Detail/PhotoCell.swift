@@ -216,7 +216,7 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
             anchorLabel.heightAnchor.constraint(equalToConstant: 24),
 
             hierarchyLabel.heightAnchor.constraint(equalToConstant: 24),
-            hierarchyLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 24)
+            hierarchyLabel.widthAnchor.constraint(equalToConstant: 40) // 使用固定宽度，避免动态计算
         ])
     }
     
@@ -287,7 +287,9 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         anchorLabel.isHidden = !isAnchor
         
         if let hierarchyText, !hierarchyText.isEmpty {
-            hierarchyLabel.text = isHierarchyCollapsed ? "\(hierarchyText) 折" : hierarchyText
+            // 简化层级文本，只显示数字，避免过长文本
+            let simplifiedText = hierarchyText.replacingOccurrences(of: "级", with: "")
+            hierarchyLabel.text = isHierarchyCollapsed ? "\(simplifiedText)折" : simplifiedText
             hierarchyLabel.isHidden = false
         } else {
             hierarchyLabel.text = nil
