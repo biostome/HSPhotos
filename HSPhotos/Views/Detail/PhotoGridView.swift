@@ -140,6 +140,7 @@ class PhotoGridView: UIView {
         didSet {
             // 当collection变化时，清除缓存
             hierarchyCache.removeAll()
+            customOrderCache.removeAll()
         }
     }
     
@@ -147,6 +148,9 @@ class PhotoGridView: UIView {
     
     // 层级信息缓存，避免重复计算
     private var hierarchyCache: [String: (text: String?, isCollapsed: Bool)] = [:]
+    
+    // 自定义排序缓存，避免重复从UserDefaults读取
+    private var customOrderCache: [String: [String]] = [:]
     
     private var columns: Int = PhotoGridConstants.defaultColumns
     
@@ -561,23 +565,28 @@ class PhotoGridView: UIView {
     /// - Returns: 自定义排序中的下标位置（从0开始），如果未找到则返回-1
     private func getCustomOrderIndex(for photo: PHAsset) -> Int {
         guard let collection = currentCollection else { 
-            print("❌ getCustomOrderIndex: currentCollection is nil")
             return -1 
         }
         
-        // 获取自定义排序数据
-        let customOrder = PhotoOrder.order(for: collection)
-        print("🔍 getCustomOrderIndex: customOrder count = \(customOrder.count)")
-        print("🔍 getCustomOrderIndex: looking for photo = \(photo.localIdentifier)")
+        // 获取collection的唯一标识
+        let collectionID = collection.localIdentifier
+        
+        // 从缓存获取自定义排序数据
+        var customOrder: [String]
+        if let cachedOrder = customOrderCache[collectionID] {
+            customOrder = cachedOrder
+        } else {
+            // 缓存未命中，从UserDefaults读取并缓存
+            customOrder = PhotoOrder.order(for: collection)
+            customOrderCache[collectionID] = customOrder
+        }
         
         // 在自定义排序中查找照片的位置
         if let index = customOrder.firstIndex(of: photo.localIdentifier) {
-            print("✅ getCustomOrderIndex: found at index = \(index)")
             return index
         }
         
         // 如果在自定义排序中未找到，返回-1表示不在自定义排序中
-        print("❌ getCustomOrderIndex: photo not found in custom order")
         return -1
     }
     
@@ -1090,7 +1099,6 @@ extension PhotoGridView {
                 let removeAnchorAction = UIAction(title: "取消锚点", image: UIImage(systemName: "anchor.slash")) { [weak self] _ in
                     self?.anchorPhoto = nil
                     self?.collectionView.reloadData()
-                    print("锚点已取消")
                 }
                 anchorGroup.append(removeAnchorAction)
             } else {
@@ -1098,7 +1106,6 @@ extension PhotoGridView {
                     self?.anchorPhoto = asset
                     self?.collectionView.reloadData()
                     self?.delegate?.photoGridView(self!, didSetAnchor: asset)
-                    print("锚点已设置为: \(asset.localIdentifier)")
                 }
                 anchorGroup.append(setAnchorAction)
             }
