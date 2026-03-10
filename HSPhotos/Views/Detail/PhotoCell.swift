@@ -150,14 +150,23 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
     /// 共享 PHCachingImageManager，专为快速滚动列表设计
     static let cachingManager: PHCachingImageManager = {
         let m = PHCachingImageManager()
-        m.allowsCachingHighQualityImages = false
+        m.allowsCachingHighQualityImages = true
         return m
     }()
     
-    /// 缩略图共享请求选项：fastFormat 只回调一次，减半主线程调度压力
-    static let thumbnailOptions: PHImageRequestOptions = {
+    /// 小 cell（compact）专用：fastFormat 只回调一次，最大化滚动性能
+    static let thumbnailOptionsFast: PHImageRequestOptions = {
         let o = PHImageRequestOptions()
         o.deliveryMode = .fastFormat
+        o.resizeMode = .fast
+        o.isNetworkAccessAllowed = true
+        return o
+    }()
+    
+    /// 大 cell 专用：opportunistic 先返回低质量再返回高质量，保证最终清晰
+    static let thumbnailOptionsQuality: PHImageRequestOptions = {
+        let o = PHImageRequestOptions()
+        o.deliveryMode = .opportunistic
         o.resizeMode = .fast
         o.isNetworkAccessAllowed = true
         return o
@@ -290,7 +299,7 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
             requestID = nil
         }
         
-        loadImage(for: asset)
+        loadImage(for: asset, compact: compact)
         
         // compact 模式（列数 >= 7）：cell 太小，只显示图片和选中框
         if compact {
@@ -359,8 +368,7 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         }
     }
     
-    /// 图片加载核心逻辑，从 configure 中抽出以保持简洁
-    private func loadImage(for asset: PHAsset) {
+    private func loadImage(for asset: PHAsset, compact: Bool) {
         guard currentAssetID != asset.localIdentifier else { return }
         currentAssetID = asset.localIdentifier
 
@@ -372,12 +380,13 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
             lastCacheKey = cacheKey
         } else {
             let targetSize = Self.thumbnailSize(for: cellSize)
+            let options = compact ? Self.thumbnailOptionsFast : Self.thumbnailOptionsQuality
             
             requestID = Self.cachingManager.requestImage(
                 for: asset,
                 targetSize: targetSize,
                 contentMode: .aspectFill,
-                options: Self.thumbnailOptions
+                options: options
             ) { [weak self] image, info in
                 guard let self = self, let image = image else { return }
                 let isDegraded = info?[PHImageResultIsDegradedKey] as? Bool ?? false

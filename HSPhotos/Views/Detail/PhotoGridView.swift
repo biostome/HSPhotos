@@ -267,11 +267,13 @@ class PhotoGridView: UIView {
     
     private func updateColumns(to newColumns: Int) {
         columns = newColumns
-        // 清除缓存
         cachedCellSize = nil
         lastCollectionViewWidth = 0
         let newLayout = createLayout(for: columns)
-        collectionView.setCollectionViewLayout(newLayout, animated: true)
+        collectionView.setCollectionViewLayout(newLayout, animated: true) { [weak self] _ in
+            guard let self = self else { return }
+            self.collectionView.reloadData()
+        }
     }
     
     // MARK: - Gesture Handling
@@ -829,7 +831,7 @@ extension PhotoGridView: UICollectionViewDataSourcePrefetching {
             for: assets,
             targetSize: targetSize,
             contentMode: .aspectFill,
-            options: PhotoCell.thumbnailOptions
+            options: PhotoCell.thumbnailOptionsFast
         )
     }
     
@@ -842,7 +844,7 @@ extension PhotoGridView: UICollectionViewDataSourcePrefetching {
             for: assets,
             targetSize: targetSize,
             contentMode: .aspectFill,
-            options: PhotoCell.thumbnailOptions
+            options: PhotoCell.thumbnailOptionsFast
         )
     }
     
