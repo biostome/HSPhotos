@@ -112,6 +112,7 @@ class BasePhotoViewController: UIViewController {
     }
     
     private var lastContentOffsetY: CGFloat = 0
+    private var isSearchBarVisible = false
     private var searchTextFieldTopConstraint: NSLayoutConstraint!
     private let backgroundGradientLayer = CAGradientLayer()
     
@@ -198,12 +199,7 @@ class BasePhotoViewController: UIViewController {
     }
     
     private func setupUndoManager() {
-        // 定期检查撤销和重做状态
-        Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { _ in
-            DispatchQueue.main.async {
-                self.updateUndoRedoButtons()
-            }
-        }
+        // 仅在操作后显式调用 updateUndoRedoButtons 即可，不需要定时器轮询
     }
     
     override func viewDidLayoutSubviews() {
@@ -285,29 +281,40 @@ class BasePhotoViewController: UIViewController {
     }
     
     internal func loadPhoto() {
-        let assets = PHAsset.fetchAssets(in: collection, options: fetchOptions)
-        var newAssets: [PHAsset] = []
-        assets.enumerateObjects { asset, _, _ in
-            newAssets.append(asset)
+        // 在后台线程执行耗时操作，避免阻塞主线程造成卡顿
+        let collection = self.collection
+        let options = self.fetchOptions
+        let preference = self.sortPreference
+        
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            
+            let assets = PHAsset.fetchAssets(in: collection, options: options)
+            var newAssets: [PHAsset] = []
+            assets.enumerateObjects { asset, _, _ in
+                newAssets.append(asset)
+            }
+            
+            // 检查是否有自定义排序数据，如果没有则创建默认的
+            let customOrder = PhotoOrder.order(for: collection)
+            if customOrder.isEmpty && !newAssets.isEmpty {
+                print("📝 初始化自定义排序数据")
+                PhotoOrder.set(order: newAssets, for: collection)
+            }
+            
+            // 如果是自定义排序，应用自定义排序
+            if preference == .custom {
+                newAssets = PhotoOrder.apply(to: newAssets, for: collection)
+            }
+            
+            let validAssetIDs = Set(newAssets.map { $0.localIdentifier })
+            PhotoHierarchyService.shared.cleanupInvalidNodes(validAssetIDs: validAssetIDs, for: collection)
+            PhotoHierarchyService.shared.resolveDuplicatePaths(in: newAssets, collection: collection)
+            
+            DispatchQueue.main.async {
+                self.assets = newAssets
+            }
         }
-        
-        // 检查是否有自定义排序数据，如果没有则创建默认的
-        let customOrder = PhotoOrder.order(for: collection)
-        if customOrder.isEmpty && !newAssets.isEmpty {
-            print("📝 初始化自定义排序数据")
-            PhotoOrder.set(order: newAssets, for: collection)
-        }
-        
-        // 如果是自定义排序，应用自定义排序
-        if sortPreference == .custom {
-            newAssets = PhotoOrder.apply(to: newAssets, for: collection)
-        }
-        
-        let validAssetIDs = Set(newAssets.map { $0.localIdentifier })
-        PhotoHierarchyService.shared.cleanupInvalidNodes(validAssetIDs: validAssetIDs, for: collection)
-        PhotoHierarchyService.shared.resolveDuplicatePaths(in: newAssets, collection: collection)
-        
-        self.assets = newAssets
     }
     
     internal func onChanged(sort preference: PhotoSortPreference) {
@@ -317,24 +324,29 @@ class BasePhotoViewController: UIViewController {
         options.sortDescriptors = preference.sortDescriptors
         fetchOptions = options
         
-        let assets = PHAsset.fetchAssets(in: collection, options: fetchOptions)
-        var newAssets: [PHAsset] = []
-        assets.enumerateObjects { asset, _, _ in
-            newAssets.append(asset)
+        let collection = self.collection
+        
+        // 在后台线程执行耗时操作，避免切换排序时卡顿
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
+            
+            let assets = PHAsset.fetchAssets(in: collection, options: options)
+            var newAssets: [PHAsset] = []
+            assets.enumerateObjects { asset, _, _ in
+                newAssets.append(asset)
+            }
+            
+            // 如果是自定义排序，应用自定义排序
+            if preference == .custom {
+                newAssets = PhotoOrder.apply(to: newAssets, for: collection)
+            }
+            
+            DispatchQueue.main.async {
+                self.assets = newAssets
+                self.gridView.sortPreference = preference
+                preference.set(preference: self.collection)
+            }
         }
-        
-        // 如果是自定义排序，应用自定义排序
-        if preference == .custom {
-            newAssets = PhotoOrder.apply(to: newAssets, for: collection)
-        }
-        
-        self.assets = newAssets
-        
-        // 同步排序偏好到 PhotoGridView
-        gridView.sortPreference = preference
-        
-        // 保存排序偏好
-        preference.set(preference: self.collection)
     }
 
     internal func onOrder() {
@@ -1271,37 +1283,31 @@ extension BasePhotoViewController: SearchBarViewDelegate {
 
 extension BasePhotoViewController: UIScrollViewDelegate {
     @objc internal func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        if scrollView.isDragging {
-            let currentOffsetY = scrollView.contentOffset.y
-            let offsetDifference = currentOffsetY - lastContentOffsetY
-            
-            // 如果偏移量为0，显示搜索条（移动到导航栏下方）
-            if currentOffsetY <= 0 {
-                moveSearchBarToHidden()
-            }
-            // 向上滚动（负值）显示搜索条
-            else if offsetDifference < 0 {
-                moveSearchBarToHidden()
-            }
-            // 向下滚动（正值）隐藏搜索条（移动到导航栏上方）
-            else if offsetDifference > 0 {
+        guard scrollView.isDragging else { return }
+        let currentOffsetY = scrollView.contentOffset.y
+        let offsetDifference = currentOffsetY - lastContentOffsetY
+        
+        let shouldShow = offsetDifference > 0 && currentOffsetY > 0
+        if shouldShow != isSearchBarVisible {
+            isSearchBarVisible = shouldShow
+            if shouldShow {
                 moveSearchBarToVisible()
+            } else {
+                moveSearchBarToHidden()
             }
-            
-            lastContentOffsetY = currentOffsetY
-            
         }
+        lastContentOffsetY = currentOffsetY
     }
     
     private func moveSearchBarToVisible() {
         UIView.animate(withDuration: 0.3) {
-            self.searchTextField.transform = CGAffineTransform(translationX: 0, y: 0)
+            self.searchTextField.transform = .identity
             self.searchTextField.alpha = 1.0
         }
     }
     
     private func moveSearchBarToHidden() {
-        let searchBarHeight = searchTextField.frame.height + 8 // 搜索条高度 + 间距
+        let searchBarHeight = searchTextField.frame.height + 8
         UIView.animate(withDuration: 0.3) {
             self.searchTextField.transform = CGAffineTransform(translationX: 0, y: -searchBarHeight)
             self.searchTextField.alpha = 0.0

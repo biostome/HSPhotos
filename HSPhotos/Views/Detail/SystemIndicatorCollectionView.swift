@@ -80,6 +80,8 @@ class CustomVerticalScrollIndicator: UIView {
     private var lastContentOffset: CGPoint = .zero
     private var isDragging = false
     private var isDecelerating = false
+    private var lastTextUpdateProgress: CGFloat = -1
+    private var lastTextUpdateTime: CFAbsoluteTime = 0
     
     // 拖动手势相关
     private var isIndicatorDragging = false
@@ -139,8 +141,6 @@ class CustomVerticalScrollIndicator: UIView {
             NSObject.cancelPreviousPerformRequests(withTarget: self, selector: #selector(hideIndicator), object: nil)
             show()
             
-            print("🎯 开始拖动指示器")
-            
         case .changed:
             // 计算新的指示器位置
             let newOffset = initialIndicatorOffset + translation.y
@@ -165,8 +165,6 @@ class CustomVerticalScrollIndicator: UIView {
             
             // 拖拽结束后，重新设置自动隐藏
             autoHide(after: 2.0)
-            
-            print("🎯 结束拖动指示器")
             
         default:
             break
@@ -210,13 +208,6 @@ class CustomVerticalScrollIndicator: UIView {
         // 查找父视图中的 UIScrollView
         scrollView = findScrollView(in: superview)
         
-        // 调试信息
-        print("🔍 查找滚动视图: \(scrollView != nil ? "找到" : "未找到")")
-        if let scrollView = scrollView {
-            print("📏 滚动视图内容大小: \(scrollView.contentSize)")
-            print("📐 滚动视图边界: \(scrollView.bounds)")
-        }
-        
         // 添加新的观察者
         scrollView?.addObserver(self, forKeyPath: "contentOffset", options: [.new], context: nil)
         scrollView?.addObserver(self, forKeyPath: "contentSize", options: [.new], context: nil)
@@ -244,7 +235,10 @@ class CustomVerticalScrollIndicator: UIView {
     override func observeValue(forKeyPath keyPath: String?, of object: Any?, change: [NSKeyValueChangeKey : Any]?, context: UnsafeMutableRawPointer?) {
         if keyPath == "contentOffset" {
             handleContentOffsetChange()
-            updateScrollPosition()
+            // 指示器不可见时跳过位置计算，减少滚动帧开销
+            if alpha > 0 || isIndicatorDragging {
+                updateScrollPosition()
+            }
         } else if keyPath == "contentSize" {
             configureWithScrollView()
         }
@@ -293,21 +287,16 @@ class CustomVerticalScrollIndicator: UIView {
     
     /// 滚动开始时的处理
     private func scrollViewWillBeginDragging() {
-        print("🚀 滚动开始，显示指示器")
         if scrollView?.contentSize.height ?? 0 > scrollView?.bounds.height ?? 0 {
             show()
         }
     }
     
-    /// 滚动结束时的处理
     private func scrollViewDidEndDragging() {
-        print("🛑 滚动结束，设置自动隐藏")
         autoHide(after: 2.0)
     }
     
-    /// 滚动完全停止时的处理
     private func scrollViewDidEndDecelerating() {
-        print("⏹️ 滚动完全停止，设置自动隐藏")
         autoHide(after: 2.0)
     }
     
@@ -317,19 +306,12 @@ class CustomVerticalScrollIndicator: UIView {
     }
     
     private func configureWithScrollView() {
-        guard let scrollView = scrollView, frame.height > 0 else { 
-            print("⚠️ 配置失败: scrollView=\(scrollView != nil), frame.height=\(frame.height)")
-            return 
-        }
+        guard let scrollView = scrollView, frame.height > 0 else { return }
         
         let contentHeight = scrollView.contentSize.height
         let visibleHeight = scrollView.bounds.height
         
-//        print("📊 配置指示器: contentHeight=\(contentHeight), visibleHeight=\(visibleHeight), frame.height=\(frame.height)")
-        
-        // 如果内容高度小于等于可见高度，隐藏指示器
         if contentHeight <= visibleHeight {
-            print("📏 内容不需要滚动，隐藏指示器")
             indicatorView.isHidden = true
             alpha = 0.0
             isConfigured = true
@@ -368,8 +350,14 @@ class CustomVerticalScrollIndicator: UIView {
         // 更新指示器位置
         indicatorTopConstraint?.constant = indicatorOffset
         
-        // 更新文字内容
-        updateTextContent(for: scrollProgress)
+        // 节流文字更新：快速滚动时避免每帧调用 delegate（PHAsset/DateFormatter 昂贵）
+        let now = CFAbsoluteTimeGetCurrent()
+        let progressDelta = abs(scrollProgress - lastTextUpdateProgress)
+        if progressDelta > 0.02 || now - lastTextUpdateTime > 0.1 {
+            lastTextUpdateProgress = scrollProgress
+            lastTextUpdateTime = now
+            updateTextContent(for: scrollProgress)
+        }
     }
     
     /// 更新文字内容

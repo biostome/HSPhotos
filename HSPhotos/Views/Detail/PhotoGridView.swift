@@ -138,9 +138,8 @@ class PhotoGridView: UIView {
     // 当前相册引用，用于获取自定义排序数据
     public var currentCollection: PHAssetCollection? {
         didSet {
-            // 当collection变化时，清除缓存
             hierarchyCache.removeAll()
-            customOrderCache.removeAll()
+            customOrderIndexCache.removeAll()
         }
     }
     
@@ -149,8 +148,8 @@ class PhotoGridView: UIView {
     // 层级信息缓存，避免重复计算
     private var hierarchyCache: [String: (text: String?, isCollapsed: Bool)] = [:]
     
-    // 自定义排序缓存，避免重复从UserDefaults读取
-    private var customOrderCache: [String: [String]] = [:]
+    // 自定义排序索引缓存：assetID -> index，O(1) 查找
+    private var customOrderIndexCache: [String: Int] = [:]
     
     private var columns: Int = PhotoGridConstants.defaultColumns
     
@@ -180,6 +179,8 @@ class PhotoGridView: UIView {
         collectionView.showsVerticalScrollIndicator = false
         collectionView.delegate = self
         collectionView.dataSource = self
+        collectionView.prefetchDataSource = self
+        collectionView.isPrefetchingEnabled = true
         collectionView.translatesAutoresizingMaskIntoConstraints = false
         
         // 性能优化设置
@@ -560,34 +561,9 @@ class PhotoGridView: UIView {
     
     // 已不需要按次序计算排名，直接从 selectedMap 中读取
     
-    /// 获取照片在自定义排序中的下标位置
-    /// - Parameter photo: 要查询的照片
-    /// - Returns: 自定义排序中的下标位置（从0开始），如果未找到则返回-1
+    /// O(1) 查找照片在自定义排序中的下标
     private func getCustomOrderIndex(for photo: PHAsset) -> Int {
-        guard let collection = currentCollection else { 
-            return -1 
-        }
-        
-        // 获取collection的唯一标识
-        let collectionID = collection.localIdentifier
-        
-        // 从缓存获取自定义排序数据
-        var customOrder: [String]
-        if let cachedOrder = customOrderCache[collectionID] {
-            customOrder = cachedOrder
-        } else {
-            // 缓存未命中，从UserDefaults读取并缓存
-            customOrder = PhotoOrder.order(for: collection)
-            customOrderCache[collectionID] = customOrder
-        }
-        
-        // 在自定义排序中查找照片的位置
-        if let index = customOrder.firstIndex(of: photo.localIdentifier) {
-            return index
-        }
-        
-        // 如果在自定义排序中未找到，返回-1表示不在自定义排序中
-        return -1
+        return customOrderIndexCache[photo.localIdentifier] ?? -1
     }
     
     func sort() throws -> [PHAsset] {
@@ -666,8 +642,41 @@ class PhotoGridView: UIView {
         // 只在数据真正变化时才更新
         if newVisibleAssets.count != visibleAssets.count ||
            !newVisibleAssets.elementsEqual(visibleAssets, by: { $0.localIdentifier == $1.localIdentifier }) {
+            PhotoCell.cachingManager.stopCachingImagesForAllAssets()
             visibleAssets = newVisibleAssets
+            preloadCustomOrderCache()
+            prewarmHierarchyCache(for: newVisibleAssets)
             collectionView.reloadData()
+        }
+    }
+    
+    /// 预构建自定义排序索引字典，将 O(n) 线性搜索降为 O(1)
+    func invalidateCustomOrderCache() {
+        customOrderIndexCache.removeAll()
+    }
+    private func preloadCustomOrderCache() {
+        guard let collection = currentCollection, customOrderIndexCache.isEmpty else { return }
+        let order = PhotoOrder.order(for: collection)
+        var dict = [String: Int](minimumCapacity: order.count)
+        for (i, id) in order.enumerated() {
+            dict[id] = i
+        }
+        customOrderIndexCache = dict
+    }
+    
+    /// 批量预计算首屏层级信息并写入缓存，减少滚动时 cellForItemAt 的计算量
+    private static let hierarchyPrewarmCount = 60
+    private func prewarmHierarchyCache(for assets: [PHAsset]) {
+        guard let collection = currentCollection else { return }
+        let count = min(assets.count, Self.hierarchyPrewarmCount)
+        for i in 0..<count {
+            let asset = assets[i]
+            let id = asset.localIdentifier
+            if hierarchyCache[id] == nil {
+                let text = hierarchyService.hierarchyText(for: asset, in: collection)
+                let collapsed = hierarchyService.isCollapsed(asset, in: collection)
+                hierarchyCache[id] = (text: text, isCollapsed: collapsed)
+            }
         }
     }
     
@@ -755,50 +764,97 @@ extension PhotoGridView: UICollectionViewDataSource {
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "PhotoCell", for: indexPath) as! PhotoCell
         let photo = visibleAssets[indexPath.item]
         let isSelected = selectedMap[photo.localIdentifier] != nil
-        let selectionIndex = selectedMap[photo.localIdentifier]?.0
-        let isAnchor = anchorPhoto?.localIdentifier == photo.localIdentifier
         
-        // 从缓存获取层级信息，避免重复计算
-        let assetID = photo.localIdentifier
-        var hierarchyText: String?
-        var isHierarchyCollapsed: Bool = false
+        // 列数多时 cell 很小，跳过不可见的 UI 计算（层级、媒体图标、收藏等）
+        let isCompact = columns >= 7
         
-        // 检查缓存
-        if let cached = hierarchyCache[assetID] {
-            hierarchyText = cached.text
-            isHierarchyCollapsed = cached.isCollapsed
+        if isCompact {
+            cell.configure(
+                with: photo,
+                isSelected: isSelected,
+                selectionIndex: nil,
+                selectionMode: selectionMode,
+                compact: true
+            )
         } else {
-            // 缓存未命中，获取并缓存
-            if let collection = currentCollection {
-                hierarchyText = hierarchyService.hierarchyText(for: photo, in: collection)
-                isHierarchyCollapsed = hierarchyService.isCollapsed(photo, in: collection)
+            let selectionIndex = selectedMap[photo.localIdentifier]?.0
+            let isAnchor = anchorPhoto?.localIdentifier == photo.localIdentifier
+            
+            let assetID = photo.localIdentifier
+            var hierarchyText: String?
+            var isHierarchyCollapsed: Bool = false
+            
+            if let cached = hierarchyCache[assetID] {
+                hierarchyText = cached.text
+                isHierarchyCollapsed = cached.isCollapsed
+            } else {
+                if let collection = currentCollection {
+                    hierarchyText = hierarchyService.hierarchyText(for: photo, in: collection)
+                    isHierarchyCollapsed = hierarchyService.isCollapsed(photo, in: collection)
+                }
+                hierarchyCache[assetID] = (text: hierarchyText, isCollapsed: isHierarchyCollapsed)
             }
-            // 缓存结果
-            hierarchyCache[assetID] = (text: hierarchyText, isCollapsed: isHierarchyCollapsed)
+            
+            let displayIndex: Int
+            switch sortPreference {
+            case .creationDate, .modificationDate, .recentDate:
+                displayIndex = getCustomOrderIndex(for: photo)
+            case .custom:
+                displayIndex = indexPath.item
+            }
+            
+            cell.configure(
+                with: photo,
+                isSelected: isSelected,
+                selectionIndex: selectionIndex,
+                selectionMode: selectionMode,
+                index: displayIndex,
+                isAnchor: isAnchor,
+                hierarchyText: hierarchyText,
+                isHierarchyCollapsed: isHierarchyCollapsed
+            )
         }
-        
-        // 根据排序方式决定显示的下标
-        let displayIndex: Int
-        switch sortPreference {
-        case .creationDate, .modificationDate, .recentDate:
-            // 时间排序：显示自定义排序的下标
-            displayIndex = getCustomOrderIndex(for: photo)
-        case .custom:
-            // 自定义排序：显示顺序下标
-            displayIndex = indexPath.item
-        }
-        
-        cell.configure(
-            with: photo,
-            isSelected: isSelected,
-            selectionIndex: selectionIndex,
-            selectionMode: selectionMode,
-            index: displayIndex,
-            isAnchor: isAnchor,
-            hierarchyText: hierarchyText,
-            isHierarchyCollapsed: isHierarchyCollapsed
-        )
         return cell
+    }
+}
+
+// MARK: - UICollectionViewDataSourcePrefetching
+extension PhotoGridView: UICollectionViewDataSourcePrefetching {
+    func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
+        let cellSize = effectiveCellSize(for: collectionView)
+        let targetSize = PhotoCell.thumbnailSize(for: cellSize)
+        let assets = indexPaths.compactMap { $0.item < visibleAssets.count ? visibleAssets[$0.item] : nil }
+        guard !assets.isEmpty else { return }
+        PhotoCell.cachingManager.startCachingImages(
+            for: assets,
+            targetSize: targetSize,
+            contentMode: .aspectFill,
+            options: PhotoCell.thumbnailOptions
+        )
+    }
+    
+    func collectionView(_ collectionView: UICollectionView, cancelPrefetchingForItemsAt indexPaths: [IndexPath]) {
+        let cellSize = effectiveCellSize(for: collectionView)
+        let targetSize = PhotoCell.thumbnailSize(for: cellSize)
+        let assets = indexPaths.compactMap { $0.item < visibleAssets.count ? visibleAssets[$0.item] : nil }
+        guard !assets.isEmpty else { return }
+        PhotoCell.cachingManager.stopCachingImages(
+            for: assets,
+            targetSize: targetSize,
+            contentMode: .aspectFill,
+            options: PhotoCell.thumbnailOptions
+        )
+    }
+    
+    private func effectiveCellSize(for collectionView: UICollectionView) -> CGSize {
+        if let cached = cachedCellSize, collectionView.bounds.width == lastCollectionViewWidth {
+            return cached
+        }
+        let sectionInset = (collectionView.collectionViewLayout as? UICollectionViewFlowLayout)?.sectionInset ?? .zero
+        let spacing = (collectionView.collectionViewLayout as? UICollectionViewFlowLayout)?.minimumInteritemSpacing ?? PhotoGridConstants.defaultSpacing
+        let totalSpacing = sectionInset.left + sectionInset.right + (CGFloat(columns - 1) * spacing)
+        let width = max(1, (collectionView.bounds.width - totalSpacing) / CGFloat(columns))
+        return CGSize(width: width, height: width)
     }
 }
 
@@ -997,7 +1053,6 @@ extension PhotoGridView: UICollectionViewDelegateFlowLayout {
     // MARK: - UIScrollViewDelegate
     
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        // 只有在非滑动选择状态下才通知代理
         if !isSlidingSelectionEnabled {
             scrollDelegate?.scrollViewDidScroll?(scrollView)
         }
@@ -1015,16 +1070,13 @@ extension PhotoGridView: UICollectionViewDelegateFlowLayout {
     
     // 新增：重写 scrollViewDidEndDragging 方法来恢复滚动
     func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-        // 如果不是在滑动选择状态，则恢复滚动
         if !isSlidingSelectionEnabled {
             scrollView.isScrollEnabled = true
         }
-        
         scrollDelegate?.scrollViewDidEndDragging?(scrollView, willDecelerate: decelerate)
     }
     
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
-        // 滚动完全停止时的处理
     }
     
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
@@ -1272,10 +1324,12 @@ extension PhotoGridView: CustomVerticalScrollIndicatorDelegate {
         }
     }
     
+    private static let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd HH:mm"
+        return f
+    }()
     private func formatDate(for asset: PHAsset) -> String {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "yyyy-MM-dd HH:mm"
-        
         let date: Date
         switch sortPreference {
         case .creationDate:
@@ -1286,7 +1340,7 @@ extension PhotoGridView: CustomVerticalScrollIndicatorDelegate {
             date = asset.creationDate ?? Date()
         }
         
-        return formatter.string(from: date)
+        return Self.dateFormatter.string(from: date)
     }
     
     // MARK: - 粘贴到此后方处理

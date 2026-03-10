@@ -142,6 +142,27 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
     private var lastIsHierarchyCollapsed: Bool?
     
     // MARK: - 图片缓存
+    private static let heartImage = UIImage(systemName: "heart")
+    private static let heartFillImage = UIImage(systemName: "heart.fill")
+    private static let livePhotoImage = UIImage(systemName: "livephoto")
+    private static let playFillImage = UIImage(systemName: "play.fill")
+    
+    /// 共享 PHCachingImageManager，专为快速滚动列表设计
+    static let cachingManager: PHCachingImageManager = {
+        let m = PHCachingImageManager()
+        m.allowsCachingHighQualityImages = false
+        return m
+    }()
+    
+    /// 缩略图共享请求选项：fastFormat 只回调一次，减半主线程调度压力
+    static let thumbnailOptions: PHImageRequestOptions = {
+        let o = PHImageRequestOptions()
+        o.deliveryMode = .fastFormat
+        o.resizeMode = .fast
+        o.isNetworkAccessAllowed = true
+        return o
+    }()
+    
     private static let imageCache: NSCache<NSString, UIImage> = {
         let cache = NSCache<NSString, UIImage>()
         cache.countLimit = 500
@@ -149,6 +170,18 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         return cache
     }()
     private var lastCacheKey: String?
+    
+    private static let screenScale: CGFloat = UIScreen.main.scale
+    
+    static func thumbnailSize(for cellSize: CGSize) -> CGSize {
+        let dimension = max(cellSize.width, cellSize.height) * screenScale
+        return CGSize(width: dimension, height: dimension)
+    }
+    
+    static func cacheKey(for assetID: String, cellSize: CGSize) -> String {
+        let dimension = Int(max(cellSize.width, cellSize.height) * screenScale)
+        return "\(assetID)_\(dimension)"
+    }
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -160,17 +193,28 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
     }
 
     // MARK: - 布局
+    private var overlaysInstalled = false
+    private var labelsInstalled = false
+    
     private func setupUI() {
         contentView.backgroundColor = .white
-        contentView.layer.cornerRadius = 0
         contentView.clipsToBounds = true
         
+        // 只创建 imageView，其他子视图延迟到首次需要时再创建
         NSLayoutConstraint.activate([
             imageView.topAnchor.constraint(equalTo: contentView.topAnchor),
             imageView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             imageView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
             imageView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
-            
+        ])
+    }
+    
+    /// 首次需要选中/高亮效果时安装 overlay 子视图
+    private func installOverlaysIfNeeded() {
+        guard !overlaysInstalled else { return }
+        overlaysInstalled = true
+        
+        NSLayoutConstraint.activate([
             selectionOverlay.topAnchor.constraint(equalTo: contentView.topAnchor),
             selectionOverlay.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
             selectionOverlay.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
@@ -186,41 +230,41 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
             selectionNumberLabel.widthAnchor.constraint(greaterThanOrEqualToConstant: 20),
             selectionNumberLabel.heightAnchor.constraint(equalToConstant: 20)
         ])
+    }
+    
+    /// 首次需要标签/图标时安装
+    private func installLabelsIfNeeded() {
+        guard !labelsInstalled else { return }
+        labelsInstalled = true
         
         contentView.addSubview(topLabelsStackView)
         contentView.addSubview(bottomStackView)
         
-        // 将锚点label添加到StackView
         topLabelsStackView.addArrangedSubview(anchorLabel)
         topLabelsStackView.addArrangedSubview(hierarchyLabel)
         
-        // 将媒体图标、时长标签和收藏图标添加到底部StackView
         bottomStackView.addArrangedSubview(mediaIconView)
         bottomStackView.addArrangedSubview(mediaDurationLabel)
         bottomStackView.addArrangedSubview(favoriteIcon)
         
-        // 设置约束
         NSLayoutConstraint.activate([
             topLabelsStackView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 6),
             topLabelsStackView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 6),
             
-            // 底部StackView约束
             bottomStackView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
             bottomStackView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
             
-            // 媒体图标约束
             mediaIconView.widthAnchor.constraint(equalToConstant: 16),
             mediaIconView.heightAnchor.constraint(equalToConstant: 16),
             
-            // 收藏图标约束
             favoriteIcon.widthAnchor.constraint(equalToConstant: 24),
             favoriteIcon.heightAnchor.constraint(equalToConstant: 24),
             
             anchorLabel.widthAnchor.constraint(equalToConstant: 24),
             anchorLabel.heightAnchor.constraint(equalToConstant: 24),
-
+            
             hierarchyLabel.heightAnchor.constraint(equalToConstant: 24),
-            hierarchyLabel.widthAnchor.constraint(equalToConstant: 40) // 使用固定宽度，避免动态计算
+            hierarchyLabel.widthAnchor.constraint(equalToConstant: 40)
         ])
     }
     
@@ -237,70 +281,35 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
     }()
 
     // MARK: - 配置
-    func configure(with asset: PHAsset, isSelected: Bool, selectionIndex: Int?, selectionMode: PhotoSelectionMode, index: Int? = nil, isAnchor: Bool = false, hierarchyText: String? = nil, isHierarchyCollapsed: Bool = false) {
+    func configure(with asset: PHAsset, isSelected: Bool, selectionIndex: Int?, selectionMode: PhotoSelectionMode, index: Int? = nil, isAnchor: Bool = false, hierarchyText: String? = nil, isHierarchyCollapsed: Bool = false, compact: Bool = false) {
         
-        // 保存当前资产
         currentAsset = asset
-
-        // 取消之前的请求（重要：避免滚动时图片延迟显示）
-        if let requestID = requestID {
-            PHImageManager.default().cancelImageRequest(requestID)
+        
+        if let rid = requestID {
+            Self.cachingManager.cancelImageRequest(rid)
+            requestID = nil
         }
         
-        // 避免重复请求
-        if currentAssetID != asset.localIdentifier {
-            currentAssetID = asset.localIdentifier
-
-            // 根据 Cell 大小动态调整图片尺寸
-            let cellSize = bounds.size
-            let maxDimension: CGFloat = min(cellSize.width, cellSize.height) * 2 // 根据 Cell 大小动态调整
-            let scale = UIScreen.main.scale
-            let targetSize = CGSize(width: maxDimension * scale, height: maxDimension * scale)
-            let cacheKey = "\(asset.localIdentifier)_\(maxDimension)_\(scale)"
-            
-            // 检查缓存
-            if let cachedImage = PhotoCell.imageCache.object(forKey: cacheKey as NSString) {
-                imageView.image = cachedImage
-                lastCacheKey = cacheKey
-            } else {
-                // 请求新图片
-                // 使用更高效的图片加载策略：先显示低质量图片，再显示高质量图片
-                let options = PHImageRequestOptions()
-                options.version = .current
-                options.deliveryMode = .opportunistic
-                options.resizeMode = .fast
-                options.isNetworkAccessAllowed = true
-                
-                requestID = PHImageManager.default().requestImage(
-                    for: asset,
-                    targetSize: targetSize,
-                    contentMode: .aspectFill,
-                    options: options
-                ) { [weak self] image, info in
-                    guard let self = self, let image = image else { return }
-                    
-                    // 立即显示图片
-                    self.imageView.image = image
-                    
-                    // 只缓存最终质量的图片
-                    let isDegraded = info?[PHImageResultIsDegradedKey] as? Bool ?? false
-                    if !isDegraded {
-                        PhotoCell.imageCache.setObject(image, forKey: cacheKey as NSString)
-                        self.lastCacheKey = cacheKey
-                    }
-                }
+        loadImage(for: asset)
+        
+        // compact 模式（列数 >= 7）：cell 太小，只显示图片和选中框
+        if compact {
+            if isSelected {
+                installOverlaysIfNeeded()
+                selectionOverlay.isHidden = false
+            } else if overlaysInstalled {
+                selectionOverlay.isHidden = true
             }
+            return
         }
         
-
-
-        // 设置锚点标识
+        installOverlaysIfNeeded()
+        installLabelsIfNeeded()
+        
         anchorLabel.isHidden = !isAnchor
         
-        // 只有当层级信息变化时才更新
         if hierarchyText != lastHierarchyText || isHierarchyCollapsed != lastIsHierarchyCollapsed {
             if let hierarchyText, !hierarchyText.isEmpty {
-                // 简化层级文本，只显示数字，避免过长文本
                 let simplifiedText = hierarchyText.replacingOccurrences(of: "级", with: "")
                 hierarchyLabel.text = isHierarchyCollapsed ? "\(simplifiedText)折" : simplifiedText
                 hierarchyLabel.isHidden = false
@@ -308,30 +317,26 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
                 hierarchyLabel.text = nil
                 hierarchyLabel.isHidden = true
             }
-            
-            // 更新缓存
             lastHierarchyText = hierarchyText
             lastIsHierarchyCollapsed = isHierarchyCollapsed
         }
         
-        // 设置收藏标识
         let isFavorite = asset.isFavorite
         if favoriteIcon.isHidden != !isFavorite {
             favoriteIcon.isHidden = !isFavorite
-            favoriteIcon.image = UIImage(systemName: isFavorite ? "heart.fill" : "heart")
+            favoriteIcon.image = isFavorite ? Self.heartFillImage : Self.heartImage
         }
         
-        // 设置媒体类型标识
         let isLivePhoto = asset.mediaSubtypes.contains(.photoLive)
         let isVideo = asset.mediaType == .video
         
         if isLivePhoto {
             mediaIconView.isHidden = false
-            mediaIconView.image = UIImage(systemName: "livephoto")
+            mediaIconView.image = Self.livePhotoImage
             mediaDurationLabel.isHidden = true
         } else if isVideo {
             mediaIconView.isHidden = false
-            mediaIconView.image = UIImage(systemName: "play.fill")
+            mediaIconView.image = Self.playFillImage
             mediaDurationLabel.isHidden = false
             mediaDurationLabel.text = formatDuration(asset.duration)
         } else {
@@ -339,7 +344,6 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
             mediaDurationLabel.isHidden = true
         }
         
-        // 设置选择状态
         selectionOverlay.isHidden = !isSelected
         
         switch selectionMode {
@@ -353,27 +357,63 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
                 selectionNumberLabel.isHidden = true
             }
         }
+    }
+    
+    /// 图片加载核心逻辑，从 configure 中抽出以保持简洁
+    private func loadImage(for asset: PHAsset) {
+        guard currentAssetID != asset.localIdentifier else { return }
+        currentAssetID = asset.localIdentifier
 
+        let cellSize = bounds.size
+        let cacheKey = Self.cacheKey(for: asset.localIdentifier, cellSize: cellSize)
+        
+        if let cachedImage = Self.imageCache.object(forKey: cacheKey as NSString) {
+            imageView.image = cachedImage
+            lastCacheKey = cacheKey
+        } else {
+            let targetSize = Self.thumbnailSize(for: cellSize)
+            
+            requestID = Self.cachingManager.requestImage(
+                for: asset,
+                targetSize: targetSize,
+                contentMode: .aspectFill,
+                options: Self.thumbnailOptions
+            ) { [weak self] image, info in
+                guard let self = self, let image = image else { return }
+                let isDegraded = info?[PHImageResultIsDegradedKey] as? Bool ?? false
+                DispatchQueue.main.async {
+                    guard self.currentAssetID == asset.localIdentifier else { return }
+                    self.imageView.image = image
+                    if !isDegraded {
+                        Self.imageCache.setObject(image, forKey: cacheKey as NSString)
+                        self.lastCacheKey = cacheKey
+                    }
+                }
+            }
+        }
     }
 
     override func prepareForReuse() {
         super.prepareForReuse()
-        selectionOverlay.isHidden = true
-        selectionNumberLabel.isHidden = true
-        anchorLabel.isHidden = true
-        hierarchyLabel.isHidden = true
-        mediaIconView.isHidden = true
-        mediaDurationLabel.isHidden = true
-        favoriteIcon.isHidden = true
-        currentAssetID = nil
+        // 只重置已创建的子视图，避免触发 lazy 初始化
+        if overlaysInstalled {
+            selectionOverlay.isHidden = true
+            selectionNumberLabel.isHidden = true
+        }
+        if labelsInstalled {
+            anchorLabel.isHidden = true
+            hierarchyLabel.isHidden = true
+            mediaIconView.isHidden = true
+            mediaDurationLabel.isHidden = true
+            favoriteIcon.isHidden = true
+        }
         currentAsset = nil
         lastHierarchyText = nil
         lastIsHierarchyCollapsed = nil
-        if let requestID = requestID {
-            PHImageManager.default().cancelImageRequest(requestID)
+        if let rid = requestID {
+            Self.cachingManager.cancelImageRequest(rid)
         }
         requestID = nil
-        lastCacheKey = nil
     }
     
     private func formatDuration(_ seconds: TimeInterval) -> String {
@@ -387,6 +427,7 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
     
     /// 执行渐变柔光高亮效果
     func performHighlightAnimation() {
+        installOverlaysIfNeeded()
         self.highlightOverlay.isHidden = false
         UIView.animate(withDuration: 0.45) {
             self.highlightOverlay.alpha = 0.8
