@@ -65,6 +65,16 @@ class BasePhotoViewController: UIViewController {
         button.menu = createOperationMenu()
         return button
     }()
+
+    internal lazy var tagFilterBarButton: UIBarButtonItem = {
+        let button = UIBarButtonItem(
+            image: UIImage(systemName: "tag"),
+            style: .plain,
+            target: self,
+            action: #selector(didTapTagFilter)
+        )
+        return button
+    }()
     
     internal lazy var undoBarButton: UIBarButtonItem = {
         let button = UIBarButtonItem(
@@ -96,13 +106,23 @@ class BasePhotoViewController: UIViewController {
     
     internal let collection: PHAssetCollection
     internal var sortPreference: PhotoSortPreference = .custom
-    internal var assets: [PHAsset] = {
-        return []
-    }() {
+
+    /// 全量照片（排序后的原始数据），始终保持完整
+    internal var assets: [PHAsset] = [] {
         didSet {
-            gridView.assets = assets
+            applyTagFilter()
         }
     }
+
+    /// 标签过滤状态，变化时自动重新过滤并刷新 gridView
+    internal var filterState: TagFilterState = TagFilterState() {
+        didSet {
+            guard filterState != oldValue else { return }
+            applyTagFilter()
+            syncSearchTokens()
+        }
+    }
+
     internal var selectionMode: PhotoSelectionMode = .none {
         didSet {
             gridView.selectionMode = selectionMode
@@ -191,9 +211,9 @@ class BasePhotoViewController: UIViewController {
             gridView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
         
-        // 初始状态下的按钮顺序，包含menuBarButton
-        navigationItem.setRightBarButtonItems([selectBarButton, menuBarButton, redoBarButton, undoBarButton], animated: true)
-        
+        // 初始状态下的按钮顺序，包含menuBarButton和标签过滤按钮
+        navigationItem.setRightBarButtonItems([selectBarButton, tagFilterBarButton, menuBarButton, redoBarButton, undoBarButton], animated: true)
+
         // 设置 gridView 的滚动委托
         gridView.scrollDelegate = self
     }
@@ -790,7 +810,11 @@ class BasePhotoViewController: UIViewController {
             self?.onMove()
         }
         
-        return UIMenu(title: "操作选项", children: [addToAlbum, hierarchyMenu, delete, move, paste, copy, duplicate, sort])
+        let tagAction = UIAction(title: "添加标签", image: UIImage(systemName: "tag"), attributes: attributes) { [weak self] _ in
+            self?.onTagSelectedAssets()
+        }
+
+        return UIMenu(title: "操作选项", children: [addToAlbum, tagAction, hierarchyMenu, delete, move, paste, copy, duplicate, sort])
     }
 
     internal func createHierarchyMenu(attributes: UIMenuElement.Attributes) -> UIMenu {
@@ -847,6 +871,22 @@ class BasePhotoViewController: UIViewController {
             return
         }
         showAddToAlbumPicker(for: selectedAssets)
+    }
+
+    internal func onTagSelectedAssets() {
+        let selectedAssets = gridView.selectedAssets
+        guard !selectedAssets.isEmpty else { return }
+        showTagAssignPicker(for: selectedAssets.map { $0.localIdentifier })
+    }
+
+    /// 弹出标签分配面板（为多张照片打标签）
+    internal func showTagAssignPicker(for assetIdentifiers: [String]) {
+        let vc = TagAssignViewController(assetIdentifiers: assetIdentifiers)
+        if let sheet = vc.sheetPresentationController {
+            sheet.detents = [.medium(), .large()]
+            sheet.prefersGrabberVisible = true
+        }
+        present(vc, animated: true)
     }
 
     internal func onBatchSetHierarchyAsTopLevel() {
@@ -1035,14 +1075,66 @@ class BasePhotoViewController: UIViewController {
     // MARK: - Search Methods
     
     internal func performSearch(with text: String) {
-        // 判断输入内容是否为数字
         if let index = Int(text) {
-            // 输入的是数字，调用 scrollTo 方法
-            gridView.scrollTo(index: index - 1) // 用户输入从1开始，数组索引从0开始
+            gridView.scrollTo(index: index - 1)
         } else {
-            // 非数字内容的其他搜索逻辑
             print("执行搜索: \(text)")
         }
+    }
+
+    // MARK: - 标签过滤
+
+    /// 根据 filterState 过滤 assets 并更新 gridView
+    @objc internal func applyTagFilter() {
+        if filterState.isActive {
+            let matchedIDs = PhotoTagService.shared.filteredIdentifiers(by: filterState)
+            gridView.assets = assets.filter { matchedIDs.contains($0.localIdentifier) }
+        } else {
+            gridView.assets = assets
+        }
+        updateTagFilterButtonAppearance()
+        syncSearchBarVisibility()
+    }
+
+    /// 弹出标签筛选面板
+    @objc private func didTapTagFilter() {
+        let panel = TagFilterPanelViewController(currentState: filterState)
+        panel.candidateIdentifiers = assets.map { $0.localIdentifier }
+        panel.delegate = self
+        if let sheet = panel.sheetPresentationController {
+            sheet.detents = [.medium(), .large()]
+            sheet.prefersGrabberVisible = true
+            sheet.prefersScrollingExpandsWhenScrolledToEdge = true
+        }
+        present(panel, animated: true)
+    }
+
+    /// 将 filterState 中的标签同步为搜索框 Token
+    private func syncSearchTokens() {
+        let tags = PhotoTagService.shared.loadTags()
+        let activeTags = tags.filter { filterState.selectedTagIDs.contains($0.id) }
+        searchTextField.setFilterTokens(from: activeTags)
+        searchTextField.markTokensSynced()
+    }
+
+    /// 有激活过滤时搜索栏始终可见
+    private func syncSearchBarVisibility() {
+        if filterState.isActive {
+            searchTextField.isHidden = false
+            UIView.animate(withDuration: 0.25) {
+                self.searchTextField.transform = .identity
+                self.searchTextField.alpha = 1.0
+            }
+            isSearchBarVisible = true
+        }
+    }
+
+    /// 更新标签过滤按钮的激活状态外观
+    private func updateTagFilterButtonAppearance() {
+        tagFilterBarButton.image = filterState.isActive
+            ? UIImage(systemName: "tag.fill")
+            : UIImage(systemName: "tag")
+        tagFilterBarButton.tintColor = filterState.isActive ? .systemBlue : nil
     }
 
 }
@@ -1206,6 +1298,10 @@ extension BasePhotoViewController: PhotoGridViewDelegate {
     @objc internal func photoGridView(_ photoGridView: PhotoGridView, didRequestSetHierarchyLevelFor asset: PHAsset) {
         promptSetHierarchyLevel(for: asset)
     }
+
+    @objc internal func photoGridView(_ photoGridView: PhotoGridView, didRequestAddTagFor asset: PHAsset) {
+        showTagAssignPicker(for: [asset.localIdentifier])
+    }
     
     @objc internal func photoGridView(_ photoGridView: PhotoGridView, didPasteAssets assets: [PHAsset], after: PHAsset) {
         guard let index = self.assets.firstIndex(of: after) else {
@@ -1276,6 +1372,19 @@ extension BasePhotoViewController: PhotoGridViewDelegate {
 extension BasePhotoViewController: SearchBarViewDelegate {
     @objc internal func searchBarView(_ searchBarView: SearchBarView, didSearchWith text: String) {
         performSearch(with: text)
+    }
+
+    func searchBarViewDidRemoveToken(_ searchBarView: SearchBarView, tagID: String) {
+        filterState.selectedTagIDs.remove(tagID)
+        // filterState didSet 会触发 applyTagFilter + syncSearchTokens
+    }
+}
+
+// MARK: - TagFilterPanelDelegate
+
+extension BasePhotoViewController: TagFilterPanelDelegate {
+    func tagFilterPanel(_ panel: TagFilterPanelViewController, didApply state: TagFilterState) {
+        filterState = state
     }
 }
 

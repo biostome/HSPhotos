@@ -40,6 +40,7 @@ protocol PhotoGridViewDelegate {
     func photoGridView(_ photoGridView: PhotoGridView, didPasteAssets assets: [PHAsset], after: PHAsset)
     func photoGridView(_ photoGridView: PhotoGridView, didRequestSetHierarchyLevelFor asset: PHAsset)
     func photoGridView(_ photoGridView: PhotoGridView, didRequestSetTopLevelFor asset: PHAsset)
+    func photoGridView(_ photoGridView: PhotoGridView, didRequestAddTagFor asset: PHAsset)
 }
 
 extension PhotoGridViewDelegate {
@@ -51,6 +52,7 @@ extension PhotoGridViewDelegate {
     func photoGridView(_ photoGridView: PhotoGridView, didSetAnchor asset: PHAsset) {}
     func photoGridView(_ photoGridView: PhotoGridView, didRequestSetHierarchyLevelFor asset: PHAsset) {}
     func photoGridView(_ photoGridView: PhotoGridView, didRequestSetTopLevelFor asset: PHAsset) {}
+    func photoGridView(_ photoGridView: PhotoGridView, didRequestAddTagFor asset: PHAsset) {}
 }
 
 
@@ -1262,6 +1264,13 @@ extension PhotoGridView {
                 }
 
             }
+
+            // 标签操作
+            let tagAction = UIAction(title: "添加标签", image: UIImage(systemName: "tag")) { [weak self] _ in
+                guard let self = self else { return }
+                self.delegate?.photoGridView(self, didRequestAddTagFor: asset)
+            }
+            tailGroup.append(tagAction)
 
             // 粘贴到此后方操作
             // 不直接检查剪贴板，而是在用户点击时才访问，避免触发权限弹窗
