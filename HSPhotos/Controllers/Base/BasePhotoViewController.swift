@@ -1075,11 +1075,24 @@ class BasePhotoViewController: UIViewController {
     // MARK: - Search Methods
     
     internal func performSearch(with text: String) {
-        if let index = Int(text) {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+
+        if let index = Int(trimmed), index > 0 {
+            // 数字：跳转到第 N 张照片
             gridView.scrollTo(index: index - 1)
-        } else {
-            print("执行搜索: \(text)")
+            return
         }
+
+        if trimmed.isEmpty {
+            // 清空搜索：移除标签过滤
+            filterState = TagFilterState()
+            return
+        }
+
+        // 文本：按标签名匹配并过滤
+        let allTags = PhotoTagService.shared.loadTags()
+        let matchedTagIDs = Set(allTags.filter { $0.name.localizedCaseInsensitiveContains(trimmed) }.map { $0.id })
+        filterState = TagFilterState(selectedTagIDs: matchedTagIDs, matchRule: .any)
     }
 
     // MARK: - 标签过滤
@@ -1409,17 +1422,20 @@ extension BasePhotoViewController: UIScrollViewDelegate {
     }
     
     private func moveSearchBarToVisible() {
+        searchTextField.isHidden = false
         UIView.animate(withDuration: 0.3) {
             self.searchTextField.transform = .identity
             self.searchTextField.alpha = 1.0
         }
     }
-    
+
     private func moveSearchBarToHidden() {
         let searchBarHeight = searchTextField.frame.height + 8
-        UIView.animate(withDuration: 0.3) {
+        UIView.animate(withDuration: 0.3, animations: {
             self.searchTextField.transform = CGAffineTransform(translationX: 0, y: -searchBarHeight)
             self.searchTextField.alpha = 0.0
-        }
+        }, completion: { _ in
+            self.searchTextField.isHidden = true
+        })
     }
 }
