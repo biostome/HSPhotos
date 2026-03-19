@@ -271,10 +271,10 @@
 				DEVELOPMENT_TEAM = 2PVZB5383Q;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = HSPhotos/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = MagicPhotos;
+				INFOPLIST_KEY_CFBundleDisplayName = "Photo Sequence";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "MagicPhotos needs access to save photos to your library.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "MagicPhotos needs access to your photo library to display your photos.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Photo Sequence needs access to save photos to your library.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Photo Sequence needs access to your photo library to display your photos.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIMainStoryboardFile = Main;
@@ -309,10 +309,10 @@
 				DEVELOPMENT_TEAM = 2PVZB5383Q;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = HSPhotos/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = MagicPhotos;
+				INFOPLIST_KEY_CFBundleDisplayName = "Photo Sequence";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
-				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "MagicPhotos needs access to save photos to your library.";
-				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "MagicPhotos needs access to your photo library to display your photos.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "Photo Sequence needs access to save photos to your library.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "Photo Sequence needs access to your photo library to display your photos.";
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchStoryboardName = LaunchScreen;
 				INFOPLIST_KEY_UIMainStoryboardFile = Main;

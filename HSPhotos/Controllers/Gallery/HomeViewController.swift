@@ -2,7 +2,10 @@ import UIKit
 import Photos
 
 class HomeViewController: GalleryViewController {
-    
+
+    /// 首页（图库）不支持层级编号，仅在相册内支持
+    override var supportsHierarchyNumbering: Bool { false }
+
     override init() {
         // 使用所有照片的集合
         let allPhotosCollection = PHAssetCollection.fetchAssetCollections(with: .smartAlbum, subtype: .smartAlbumUserLibrary, options: nil).firstObject!

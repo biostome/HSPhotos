@@ -107,6 +107,9 @@ class BasePhotoViewController: UIViewController {
     internal let collection: PHAssetCollection
     internal var sortPreference: PhotoSortPreference = .custom
 
+    /// 是否支持层级编号功能。首页（图库）不支持，相册内支持。
+    internal var supportsHierarchyNumbering: Bool { true }
+
     /// 全量照片（排序后的原始数据），始终保持完整
     internal var assets: [PHAsset] = [] {
         didSet {
@@ -161,8 +164,9 @@ class BasePhotoViewController: UIViewController {
         
         // 同步初始排序偏好到 PhotoGridView
         gridView.sortPreference = sortPreference
-        // 设置当前相册引用（必须在loadPhoto之前设置）
+        // 设置当前相册引用与层级支持（必须在loadPhoto之前设置）
         gridView.currentCollection = collection
+        gridView.supportsHierarchyNumbering = supportsHierarchyNumbering
         
         loadPhoto()
         setupUndoManager()
@@ -269,7 +273,21 @@ class BasePhotoViewController: UIViewController {
             guard let self = self else { return }
             loadingAlert.dismiss(animated: true) {
                 if success {
-                    self.loadPhoto() // 重新加载照片列表
+                    if case .sort(_, let originalAssets, _) = action.type {
+                        PhotoOrder.set(order: originalAssets, for: self.collection)
+                    } else if case .delete(_, let assets) = action.type {
+                        var restored = self.assets
+                        restored.append(contentsOf: assets)
+                        PhotoOrder.set(order: restored, for: self.collection)
+                    } else if case .move(let sourceCollection, _, let assets) = action.type, sourceCollection.localIdentifier == self.collection.localIdentifier {
+                        var restored = self.assets
+                        restored.append(contentsOf: assets)
+                        PhotoOrder.set(order: restored, for: self.collection)
+                    } else if case .paste(let assets, let destinationCollection, _) = action.type, destinationCollection.localIdentifier == self.collection.localIdentifier {
+                        let remaining = self.assets.filter { !Set(assets.map(\.localIdentifier)).contains($0.localIdentifier) }
+                        PhotoOrder.set(order: remaining, for: self.collection)
+                    }
+                    self.loadPhoto()
                 } else {
                     self.showAlert(title: "撤销失败", message: error ?? "无法撤销操作")
                 }
@@ -290,7 +308,21 @@ class BasePhotoViewController: UIViewController {
             guard let self = self else { return }
             loadingAlert.dismiss(animated: true) {
                 if success {
-                    self.loadPhoto() // 重新加载照片列表
+                    if case .sort(_, _, let sortedAssets) = action.type {
+                        PhotoOrder.set(order: sortedAssets, for: self.collection)
+                    } else if case .delete(_, let assets) = action.type {
+                        let remaining = self.assets.filter { !Set(assets.map(\.localIdentifier)).contains($0.localIdentifier) }
+                        PhotoOrder.set(order: remaining, for: self.collection)
+                    } else if case .move(let sourceCollection, _, let assets) = action.type, sourceCollection.localIdentifier == self.collection.localIdentifier {
+                        let remaining = self.assets.filter { !Set(assets.map(\.localIdentifier)).contains($0.localIdentifier) }
+                        PhotoOrder.set(order: remaining, for: self.collection)
+                    } else if case .paste(let assets, let destinationCollection, let insertIndex) = action.type, destinationCollection.localIdentifier == self.collection.localIdentifier {
+                        var newOrder = self.assets
+                        let clampedIndex = min(insertIndex, newOrder.count)
+                        newOrder.insert(contentsOf: assets, at: clampedIndex)
+                        PhotoOrder.set(order: newOrder, for: self.collection)
+                    }
+                    self.loadPhoto()
                 } else {
                     self.showAlert(title: "重做失败", message: error ?? "无法重做操作")
                 }
@@ -328,8 +360,7 @@ class BasePhotoViewController: UIViewController {
             }
             
             let validAssetIDs = Set(newAssets.map { $0.localIdentifier })
-            PhotoHierarchyService.shared.cleanupInvalidNodes(validAssetIDs: validAssetIDs, for: collection)
-            PhotoHierarchyService.shared.resolveDuplicatePaths(in: newAssets, collection: collection)
+            PhotoNumberingService.shared.cleanupInvalidNodes(validAssetIDs: validAssetIDs, for: collection)
             
             DispatchQueue.main.async {
                 self.assets = newAssets
@@ -365,6 +396,7 @@ class BasePhotoViewController: UIViewController {
                 self.assets = newAssets
                 self.gridView.sortPreference = preference
                 preference.set(preference: self.collection)
+                self.updateOperationMenu()
             }
         }
     }
@@ -385,6 +417,14 @@ class BasePhotoViewController: UIViewController {
                     if success {
                         // 保存自定义排序数据到 UserDefaults
                         PhotoOrder.set(order: sortedAssets, for: self.collection)
+                        
+                        // 排序后必须切换到自定义排序模式，否则再次进入相册会按日期加载丢失顺序
+                        if self.sortPreference != .custom {
+                            self.sortPreference = .custom
+                            self.gridView.sortPreference = .custom
+                            PhotoSortPreference.custom.set(preference: self.collection)
+                            self.updateOperationMenu()
+                        }
                         
                         // 记录撤销操作
                         let originalAssets = self.assets // 保存原始顺序用于撤销
@@ -577,15 +617,14 @@ class BasePhotoViewController: UIViewController {
             guard let self = self else { return }
             loadingAlert.dismiss(animated: true) {
                 if success {
-                    // 记录撤销操作
                     let undoAction = UndoAction.move(sourceCollection: self.collection, destinationCollection: destinationCollection, assets: assets)
                     self.addAction(undoAction)
-                    
-                    let count = assets.count
-//                    let message = count == 1 ? "已移动 1 张照片" : "已移动 \(count) 张照片"
-//                    self.showAlert(title: "移动成功", message: message)
+                    if self.sortPreference == .custom {
+                        let remaining = self.assets.filter { !Set(assets.map(\.localIdentifier)).contains($0.localIdentifier) }
+                        PhotoOrder.set(order: remaining, for: self.collection)
+                    }
                     self.gridView.clearSelected()
-                    self.loadPhoto() // 重新加载照片列表
+                    self.loadPhoto()
                 } else {
                     let message = error ?? "无法移动照片"
                     self.showAlert(title: "移动失败", message: message)
@@ -620,12 +659,14 @@ class BasePhotoViewController: UIViewController {
             PhotoChangesService.delete(assets: selectedAssets, for: self.collection) { success, error in
                 loadingAlert.dismiss(animated: true) {
                     if success {
-                        // 记录撤销操作
                         let undoAction = UndoAction.delete(collection: self.collection, assets: selectedAssets)
                         self.addAction(undoAction)
-                        
+                        if self.sortPreference == .custom {
+                            let remaining = self.assets.filter { !Set(selectedAssets.map(\.localIdentifier)).contains($0.localIdentifier) }
+                            PhotoOrder.set(order: remaining, for: self.collection)
+                        }
                         self.gridView.clearSelected()
-                        self.loadPhoto() // 重新加载照片列表
+                        self.loadPhoto()
                     } else {
                         let message = error ?? "无法删除照片"
                         self.showAlert(title: "删除失败", message: message)
@@ -780,7 +821,7 @@ class BasePhotoViewController: UIViewController {
     
     internal func createOperationMenu() -> UIMenu {
         let attributes: UIMenuElement.Attributes = gridView.selectedAssets.isEmpty ? .disabled : []
-        let hierarchyMenu = createHierarchyMenu(attributes: attributes)
+        var menuChildren: [UIMenuElement] = []
         
         let addToAlbum = UIAction(title: "添加到相簿", image: UIImage(systemName: "plus.rectangle.on.folder"), attributes: attributes) { [weak self] _ in
             self?.onAddToAlbumSelectedAssets()
@@ -814,39 +855,25 @@ class BasePhotoViewController: UIViewController {
             self?.onTagSelectedAssets()
         }
 
-        return UIMenu(title: "操作选项", children: [addToAlbum, tagAction, hierarchyMenu, delete, move, paste, copy, duplicate, sort])
+        menuChildren = [addToAlbum, tagAction]
+        if sortPreference == .custom, supportsHierarchyNumbering {
+            menuChildren.append(createHierarchyMenu(attributes: attributes))
+        }
+        menuChildren += [delete, move, paste, copy, duplicate, sort]
+        return UIMenu(title: "操作选项", children: menuChildren)
     }
 
     internal func createHierarchyMenu(attributes: UIMenuElement.Attributes) -> UIMenu {
-        let setTopLevel = UIAction(title: "批量设为1级", image: UIImage(systemName: "list.number"), attributes: attributes) { [weak self] _ in
-            self?.onBatchSetHierarchyAsTopLevel()
+        let setLevel1 = UIAction(title: "批量设为主级", image: UIImage(systemName: "list.number"), attributes: attributes) { [weak self] _ in
+            self?.onBatchSetLevel(1)
         }
-
-        let setChildOfReference = UIAction(title: "批量设为参照子级", image: UIImage(systemName: "arrow.down.right"), attributes: attributes) { [weak self] _ in
-            self?.onBatchSetHierarchyAsChildOfReference()
+        let setLevel2 = UIAction(title: "批量设为子级", image: UIImage(systemName: "list.bullet.indent"), attributes: attributes) { [weak self] _ in
+            self?.onBatchSetLevel(2)
         }
-
-        let insertAfterReference = UIAction(title: "批量设为参照同级", image: UIImage(systemName: "equal.circle"), attributes: attributes) { [weak self] _ in
-            self?.onBatchInsertHierarchyAfterReference()
+        let clear = UIAction(title: "批量取消编号", image: UIImage(systemName: "xmark.circle"), attributes: attributes) { [weak self] _ in
+            self?.onBatchClearLevel()
         }
-
-        let setSpecificLevel = UIAction(title: "批量指定层级...", image: UIImage(systemName: "number.circle"), attributes: attributes) { [weak self] _ in
-            self?.onBatchSetHierarchyLevel()
-        }
-
-        let promote = UIAction(title: "批量升一级", image: UIImage(systemName: "arrow.up.left"), attributes: attributes) { [weak self] _ in
-            self?.onBatchPromoteHierarchy()
-        }
-
-        let demote = UIAction(title: "批量降一级", image: UIImage(systemName: "arrow.down.right.and.arrow.up.left"), attributes: attributes) { [weak self] _ in
-            self?.onBatchDemoteHierarchy()
-        }
-
-        let clear = UIAction(title: "批量清理层级", image: UIImage(systemName: "xmark.circle"), attributes: attributes) { [weak self] _ in
-            self?.onBatchClearHierarchy()
-        }
-
-        return UIMenu(title: "层级", children: [setTopLevel, setChildOfReference, insertAfterReference, setSpecificLevel, promote, demote, clear])
+        return UIMenu(title: "层级", children: [setLevel1, setLevel2, clear])
     }
     
     internal func updateOperationMenu() {
@@ -889,166 +916,24 @@ class BasePhotoViewController: UIViewController {
         present(vc, animated: true)
     }
 
-    internal func onBatchSetHierarchyAsTopLevel() {
+    internal func onBatchSetLevel(_ level: Int) {
         let orderedSelected = orderedSelectedAssets()
         guard !orderedSelected.isEmpty else { return }
-        PhotoHierarchyService.shared.setAsTopLevels(orderedSelected, in: assets, collection: collection)
-        gridView.refreshParagraphDisplay()
-        updateOperationMenu()
-    }
-
-    internal func onBatchSetHierarchyAsChildOfReference() {
-        let orderedSelected = orderedSelectedAssets()
-        guard !orderedSelected.isEmpty else { return }
-        guard let reference = gridView.hierarchyReferenceAsset else {
-            showAlert(title: "层级操作失败", message: "请先长按一张照片并设置为“层级参照”")
-            return
+        for asset in orderedSelected {
+            PhotoNumberingService.shared.setLevel(level, for: asset, in: collection)
         }
-        PhotoHierarchyService.shared.setAsChildren(orderedSelected, of: reference, in: assets, collection: collection)
         gridView.refreshParagraphDisplay()
         updateOperationMenu()
     }
 
-    internal func onBatchInsertHierarchyAfterReference() {
+    internal func onBatchClearLevel() {
         let orderedSelected = orderedSelectedAssets()
         guard !orderedSelected.isEmpty else { return }
-        guard let reference = gridView.hierarchyReferenceAsset else {
-            showAlert(title: "层级操作失败", message: "请先长按一张照片并设置为“层级参照”")
-            return
+        for asset in orderedSelected {
+            PhotoNumberingService.shared.clearLevel(for: asset, in: collection)
         }
-        PhotoHierarchyService.shared.setAsSiblings(orderedSelected, of: reference, in: assets, collection: collection)
         gridView.refreshParagraphDisplay()
         updateOperationMenu()
-    }
-
-    internal func onBatchPromoteHierarchy() {
-        let orderedSelected = orderedSelectedAssets()
-        guard !orderedSelected.isEmpty else { return }
-        PhotoHierarchyService.shared.promote(orderedSelected, in: assets, collection: collection)
-        gridView.refreshParagraphDisplay()
-        updateOperationMenu()
-    }
-
-    internal func onBatchDemoteHierarchy() {
-        let orderedSelected = orderedSelectedAssets()
-        guard !orderedSelected.isEmpty else { return }
-        PhotoHierarchyService.shared.setAsChildrenOfPrevious(orderedSelected, in: assets, collection: collection)
-        gridView.refreshParagraphDisplay()
-        updateOperationMenu()
-    }
-
-    internal func onBatchClearHierarchy() {
-        let orderedSelected = orderedSelectedAssets()
-        guard !orderedSelected.isEmpty else { return }
-        PhotoHierarchyService.shared.clearSubtrees(of: orderedSelected, in: collection)
-        gridView.refreshParagraphDisplay()
-        updateOperationMenu()
-    }
-
-    internal func onBatchSetHierarchyLevel() {
-        let orderedSelected = orderedSelectedAssets()
-        guard !orderedSelected.isEmpty else { return }
-
-        let alert = UIAlertController(title: "批量指定层级", message: "0 表示未分级；1 为顶级；层级需连续。", preferredStyle: .alert)
-        alert.addTextField { textField in
-            textField.placeholder = "请输入层级（>=0）"
-            textField.keyboardType = .numberPad
-        }
-        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
-        alert.addAction(UIAlertAction(title: "确定", style: .default) { [weak self, weak alert] _ in
-            guard let self = self else { return }
-            guard let raw = alert?.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  let level = Int(raw), level >= 0 else {
-                self.showAlert(title: "输入无效", message: "请输入大于等于 0 的整数层级")
-                return
-            }
-
-            let failed = PhotoHierarchyService.shared.setLevelOrClear(orderedSelected, to: level, in: self.assets, collection: self.collection)
-            self.gridView.refreshParagraphDisplay()
-            self.updateOperationMenu()
-
-            if !failed.isEmpty {
-                self.showAlert(title: "部分设置失败", message: "有 \(failed.count) 张相片无法设置到目标层级，请确认前方父级层级是否存在。")
-                return
-            }
-        })
-        present(alert, animated: true)
-    }
-
-    private func promptSetHierarchyLevel(for asset: PHAsset) {
-        let alert = UIAlertController(title: "指定层级", message: "支持输入 0、1 或 1.2、2.3.1。", preferredStyle: .alert)
-        alert.addTextField { textField in
-            textField.placeholder = "请输入层级（如 1 或 1.2）"
-            textField.keyboardType = .numbersAndPunctuation
-        }
-        alert.addAction(UIAlertAction(title: "取消", style: .cancel))
-        alert.addAction(UIAlertAction(title: "确定", style: .default) { [weak self, weak alert] _ in
-            guard let self = self else { return }
-            guard let raw = alert?.textFields?.first?.text?.trimmingCharacters(in: .whitespacesAndNewlines),
-                  !raw.isEmpty else {
-                self.showAlert(title: "输入无效", message: "请输入层级，如 1 或 1.2")
-                return
-            }
-            do {
-                if let path = self.parseHierarchyInput(raw) {
-                    try PhotoHierarchyService.shared.setPathOrClear(for: asset, to: path, in: self.assets, collection: self.collection)
-                } else if let level = Int(raw), level >= 0 {
-                    try PhotoHierarchyService.shared.setLevelOrClear(for: asset, to: level, in: self.assets, collection: self.collection)
-                } else {
-                    self.showAlert(title: "输入无效", message: "请使用 0、1 或 1.2、2.3.1 格式")
-                    return
-                }
-                self.gridView.refreshParagraphDisplay()
-                self.updateOperationMenu()
-                if self.hasFollowingAssets(for: asset) {
-                    self.promptAutoAssignUnleveledChildrenIfNeeded(for: asset)
-                }
-            } catch {
-                self.showAlert(title: "设置层级失败", message: error.localizedDescription)
-            }
-        })
-        present(alert, animated: true)
-    }
-
-    private func parseHierarchyInput(_ raw: String) -> [Int]? {
-        let text = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard text.contains(".") else { return nil }
-        let parts = text.split(separator: ".", omittingEmptySubsequences: false)
-        guard !parts.isEmpty else { return nil }
-        var path: [Int] = []
-        for part in parts {
-            guard let value = Int(part), value > 0 else { return nil }
-            path.append(value)
-        }
-        return path
-    }
-
-    private func promptAutoAssignUnleveledChildrenIfNeeded(for asset: PHAsset) {
-        guard hasFollowingAssets(for: asset) else { return }
-        let alert = UIAlertController(
-            title: "批量设为子级",
-            message: "是否将该图片以下未设置级别（0级）的相片自动设为其子级？",
-            preferredStyle: .alert
-        )
-        alert.addAction(UIAlertAction(title: "否", style: .cancel))
-        alert.addAction(UIAlertAction(title: "是", style: .default) { [weak self] _ in
-            guard let self = self else { return }
-            PhotoHierarchyService.shared.assignFollowingUnleveledAsChildren(of: asset, in: self.assets, collection: self.collection)
-            self.gridView.refreshParagraphDisplay()
-            self.updateOperationMenu()
-        })
-        present(alert, animated: true)
-    }
-
-    private func hasFollowingAssets(for asset: PHAsset) -> Bool {
-        guard let index = assets.firstIndex(where: { $0.localIdentifier == asset.localIdentifier }) else { return false }
-        return index < assets.count - 1
-    }
-
-    private func hasFollowingUnleveledAssets(for asset: PHAsset) -> Bool {
-        guard let index = assets.firstIndex(where: { $0.localIdentifier == asset.localIdentifier }) else { return false }
-        guard index < assets.count - 1 else { return false }
-        return assets[(index + 1)...].contains { PhotoHierarchyService.shared.level(for: $0, in: collection) == 0 }
     }
 
     internal func orderedSelectedAssets() -> [PHAsset] {
@@ -1293,23 +1178,6 @@ extension BasePhotoViewController: PhotoGridViewDelegate {
     
     @objc internal func photoGridView(_ photoGridView: PhotoGridView, didSetAnchor asset: PHAsset) {
         updateOperationMenu()
-    }
-
-    @objc internal func photoGridView(_ photoGridView: PhotoGridView, didRequestSetTopLevelFor asset: PHAsset) {
-        do {
-            try PhotoHierarchyService.shared.setLevelOrClear(for: asset, to: 1, in: self.assets, collection: self.collection)
-            self.gridView.refreshParagraphDisplay()
-            self.updateOperationMenu()
-            if self.hasFollowingUnleveledAssets(for: asset) {
-                self.promptAutoAssignUnleveledChildrenIfNeeded(for: asset)
-            }
-        } catch {
-            self.showAlert(title: "设置层级失败", message: error.localizedDescription)
-        }
-    }
-
-    @objc internal func photoGridView(_ photoGridView: PhotoGridView, didRequestSetHierarchyLevelFor asset: PHAsset) {
-        promptSetHierarchyLevel(for: asset)
     }
 
     @objc internal func photoGridView(_ photoGridView: PhotoGridView, didRequestAddTagFor asset: PHAsset) {
