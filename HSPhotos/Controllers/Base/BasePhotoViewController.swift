@@ -162,6 +162,11 @@ class BasePhotoViewController: UIViewController {
         setupUI()
         setupTraitChangeObserver()
         
+        // 进入相册时从 UserDefaults 加载到内存，使用期间仅读写内存
+        PhotoNumberingService.shared.loadForCollection(collection)
+        PhotoOrder.loadForCollection(collection)
+        PhotoHeaderService.shared.loadForCollection(collection)
+        
         // 同步初始排序偏好到 PhotoGridView
         gridView.sortPreference = sortPreference
         // 设置当前相册引用与层级支持（必须在loadPhoto之前设置）
@@ -254,6 +259,14 @@ class BasePhotoViewController: UIViewController {
         }
     }
     
+    override func viewWillDisappear(_ animated: Bool) {
+        super.viewWillDisappear(animated)
+        // 离开相册时将数据持久化到 UserDefaults
+        PhotoNumberingService.shared.saveForCollection(collection)
+        PhotoOrder.saveForCollection(collection)
+        PhotoHeaderService.shared.saveForCollection(collection)
+    }
+
     deinit {
         // 系统会自动处理trait变化注册的清理
     }
@@ -288,10 +301,8 @@ class BasePhotoViewController: UIViewController {
                         PhotoOrder.set(order: remaining, for: self.collection)
                     }
                     self.loadPhoto()
-                } else {
-                    self.showAlert(title: "撤销失败", message: error ?? "无法撤销操作")
                 }
-                // 更新按钮状态
+                // 撤销失败不提示，仅更新按钮状态
                 self.updateUndoRedoButtons()
             }
         }
@@ -652,31 +663,29 @@ class BasePhotoViewController: UIViewController {
     internal func performDelete(assets: [PHAsset]) {
         let loadingAlert = UIAlertController(title: "删除中", message: "正在从相册中删除照片...", preferredStyle: .alert)
         present(loadingAlert, animated: true)
-        
-        let selectedAssets = self.gridView.selectedAssets
-        // 删除照片和 Cell
-        gridView.deleteAssets(assets: selectedAssets) { success in
-            PhotoChangesService.delete(assets: selectedAssets, for: self.collection) { success, error in
-                loadingAlert.dismiss(animated: true) {
-                    if success {
-                        let undoAction = UndoAction.delete(collection: self.collection, assets: selectedAssets)
+
+        // 先执行相册库删除，成功后再刷新 UI（避免「删除失败」但列表已更新的不一致）
+        PhotoChangesService.delete(assets: assets, for: self.collection) { [weak self] success, error in
+            guard let self = self else { return }
+            loadingAlert.dismiss(animated: true) {
+                if success {
+                    // 仅用户相册支持撤销（removeAssets 可 addAssets 恢复），「所有照片」删除不支持
+                    if self.collection.assetCollectionSubtype != .smartAlbumUserLibrary {
+                        let undoAction = UndoAction.delete(collection: self.collection, assets: assets)
                         self.addAction(undoAction)
-                        if self.sortPreference == .custom {
-                            let remaining = self.assets.filter { !Set(selectedAssets.map(\.localIdentifier)).contains($0.localIdentifier) }
-                            PhotoOrder.set(order: remaining, for: self.collection)
-                        }
-                        self.gridView.clearSelected()
-                        self.loadPhoto()
-                    } else {
-                        let message = error ?? "无法删除照片"
-                        self.showAlert(title: "删除失败", message: message)
                     }
-                    // 更新按钮状态
-                    self.updateUndoRedoButtons()
+                    if self.sortPreference == .custom {
+                        let remaining = self.assets.filter { !Set(assets.map(\.localIdentifier)).contains($0.localIdentifier) }
+                        PhotoOrder.set(order: remaining, for: self.collection)
+                    }
+                    self.gridView.clearSelected()
+                    self.loadPhoto()
+                } else {
+                    self.showAlert(title: "删除失败", message: error ?? "无法删除照片")
                 }
+                self.updateUndoRedoButtons()
             }
         }
-
     }
     
     internal func setSelectionMode(_ mode: PhotoSelectionMode) {
@@ -1183,7 +1192,11 @@ extension BasePhotoViewController: PhotoGridViewDelegate {
     @objc internal func photoGridView(_ photoGridView: PhotoGridView, didRequestAddTagFor asset: PHAsset) {
         showTagAssignPicker(for: [asset.localIdentifier])
     }
-    
+
+    @objc internal func photoGridView(_ photoGridView: PhotoGridView, didRequestDelete asset: PHAsset) {
+        showDeleteConfirmationAlert(for: [asset])
+    }
+
     @objc internal func photoGridView(_ photoGridView: PhotoGridView, didPasteAssets assets: [PHAsset], after: PHAsset) {
         guard let index = self.assets.firstIndex(of: after) else {
             showAlert(title: "粘贴失败", message: "无法找到目标照片")

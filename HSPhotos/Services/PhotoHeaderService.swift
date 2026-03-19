@@ -39,10 +39,28 @@ class PhotoHeaderService {
     
     private init() {}
     
-    // 内存缓存，避免重复从UserDefaults读取
-    private var nodesCache: [String: [String: PhotoHierarchyNode]] = [:]
+    // 内存缓存，运行时仅读写此缓存；UserDefaults 仅在 load/save 时访问
+    private var headerIdentifiersCache: [String: [String]] = [:]
     private var headerAssetsCache: [String: [PHAsset]] = [:]
     private var collapseStatesCache: [String: [String: Bool]] = [:]
+
+    /// 进入相册时调用
+    func loadForCollection(_ collection: PHAssetCollection) {
+        let key = collection.localIdentifier
+        let headerKey = "header_photos_\(key)"
+        let collapseKey = "paragraph_collapse_\(key)"
+        headerIdentifiersCache[key] = UserDefaults.standard.stringArray(forKey: headerKey) ?? []
+        collapseStatesCache[key] = (UserDefaults.standard.dictionary(forKey: collapseKey) as? [String: Bool]) ?? [:]
+    }
+
+    /// 离开相册或变更时调用
+    func saveForCollection(_ collection: PHAssetCollection) {
+        let key = collection.localIdentifier
+        let headerKey = "header_photos_\(key)"
+        let collapseKey = "paragraph_collapse_\(key)"
+        if let ids = headerIdentifiersCache[key] { UserDefaults.standard.set(ids, forKey: headerKey) }
+        if let states = collapseStatesCache[key] { UserDefaults.standard.set(states, forKey: collapseKey) }
+    }
     
     // MARK: - 首图管理
     
@@ -189,73 +207,39 @@ class PhotoHeaderService {
     
     // MARK: - 数据持久化
     
-    /// 获取首图列表
-    /// - Parameter collection: 相册
-    /// - Returns: 首图数组
+    /// 获取首图列表（仅用内存缓存，不读 UserDefaults）
     private func getHeaderAssets(for collection: PHAssetCollection) -> [PHAsset] {
-        let key = "header_photos_\(collection.localIdentifier)"
-        
-        // 检查缓存
-        if let cached = headerAssetsCache[key] {
-            return cached
-        }
-        
-        // 缓存未命中，从UserDefaults读取
-        let headerIdentifiers = UserDefaults.standard.stringArray(forKey: key) ?? []
-        
-        // 根据标识符获取PHAsset对象
+        let key = collection.localIdentifier
+        if let cached = headerAssetsCache[key] { return cached }
+        let identifiers = headerIdentifiersCache[key] ?? []
         var headerAssets: [PHAsset] = []
-        for identifier in headerIdentifiers {
-            if let asset = PHAsset.fetchAssets(withLocalIdentifiers: [identifier], options: nil).firstObject {
+        for id in identifiers {
+            if let asset = PHAsset.fetchAssets(withLocalIdentifiers: [id], options: nil).firstObject {
                 headerAssets.append(asset)
             }
         }
-        
-        // 缓存结果
         headerAssetsCache[key] = headerAssets
         return headerAssets
     }
     
-    /// 保存首图列表
-    /// - Parameters:
-    ///   - headerAssets: 首图数组
-    ///   - collection: 相册
+    /// 保存首图列表（更新内存后保存）
     private func saveHeaderAssets(_ headerAssets: [PHAsset], for collection: PHAssetCollection) {
-        let key = "header_photos_\(collection.localIdentifier)"
+        let key = collection.localIdentifier
         let identifiers = headerAssets.map { $0.localIdentifier }
-        UserDefaults.standard.set(identifiers, forKey: key)
-        // 更新缓存
+        headerIdentifiersCache[key] = identifiers
         headerAssetsCache[key] = headerAssets
+        saveForCollection(collection)
     }
     
-    /// 获取段落折叠状态
-    /// - Parameter collection: 相册
-    /// - Returns: 折叠状态字典
+    /// 获取段落折叠状态（仅用内存）
     private func getParagraphCollapseStates(for collection: PHAssetCollection) -> [String: Bool] {
-        let key = "paragraph_collapse_\(collection.localIdentifier)"
-        
-        // 检查缓存
-        if let cached = collapseStatesCache[key] {
-            return cached
-        }
-        
-        // 缓存未命中，从UserDefaults读取
-        let states = UserDefaults.standard.dictionary(forKey: key) as? [String: Bool] ?? [:]
-        
-        // 缓存结果
-        collapseStatesCache[key] = states
-        return states
+        collapseStatesCache[collection.localIdentifier] ?? [:]
     }
     
     /// 保存段落折叠状态
-    /// - Parameters:
-    ///   - states: 折叠状态字典
-    ///   - collection: 相册
     private func saveParagraphCollapseStates(_ states: [String: Bool], for collection: PHAssetCollection) {
-        let key = "paragraph_collapse_\(collection.localIdentifier)"
-        UserDefaults.standard.set(states, forKey: key)
-        // 更新缓存
-        collapseStatesCache[key] = states
+        collapseStatesCache[collection.localIdentifier] = states
+        saveForCollection(collection)
     }
     
     // MARK: - 数据清理

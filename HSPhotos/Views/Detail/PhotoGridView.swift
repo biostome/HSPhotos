@@ -39,6 +39,7 @@ protocol PhotoGridViewDelegate {
     func photoGridView(_ photoGridView: PhotoGridView, didSetAnchor asset: PHAsset)
     func photoGridView(_ photoGridView: PhotoGridView, didPasteAssets assets: [PHAsset], after: PHAsset)
     func photoGridView(_ photoGridView: PhotoGridView, didRequestAddTagFor asset: PHAsset)
+    func photoGridView(_ photoGridView: PhotoGridView, didRequestDelete asset: PHAsset)
 }
 
 extension PhotoGridViewDelegate {
@@ -49,6 +50,7 @@ extension PhotoGridViewDelegate {
     func photoGridView(_ photoGridView: PhotoGridView, didSelectedItems assets: [PHAsset]) {}
     func photoGridView(_ photoGridView: PhotoGridView, didSetAnchor asset: PHAsset) {}
     func photoGridView(_ photoGridView: PhotoGridView, didRequestAddTagFor asset: PHAsset) {}
+    func photoGridView(_ photoGridView: PhotoGridView, didRequestDelete asset: PHAsset) {}
 }
 
 
@@ -639,19 +641,18 @@ class PhotoGridView: UIView {
         customOrderIndexCache = dict
     }
     
-    /// 批量预计算首屏层级信息并写入缓存，减少滚动时 cellForItemAt 的计算量
-    private static let hierarchyPrewarmCount = 60
+    /// 批量预计算层级信息并写入缓存（一次计算整表，避免滚动时每 cell 重复 O(n) 计算）
     private func prewarmHierarchyCache(for visible: [PHAsset]) {
         guard supportsHierarchyNumbering, let collection = currentCollection else { return }
-        let count = min(visible.count, Self.hierarchyPrewarmCount)
-        for i in 0..<count {
-            let asset = visible[i]
+        guard !assets.isEmpty else { return }
+        // 若缓存已满说明已预计算过，跳过
+        if hierarchyCache.count >= assets.count { return }
+        let (numbers, collapsed) = numberingService.computeNumbersAndCollapsed(for: assets, in: collection)
+        for asset in assets {
             let id = asset.localIdentifier
-            if hierarchyCache[id] == nil {
-                let text = numberingService.numberString(for: asset, in: assets, collection: collection)
-                let collapsed = numberingService.isCollapsed(asset, in: collection)
-                hierarchyCache[id] = (text: text, isCollapsed: collapsed)
-            }
+            let text = numbers[id]
+            let isCollapsed = collapsed[id] ?? false
+            hierarchyCache[id] = (text: text, isCollapsed: isCollapsed)
         }
     }
     
@@ -760,11 +761,16 @@ extension PhotoGridView: UICollectionViewDataSource {
                     hierarchyText = cached.text
                     isHierarchyCollapsed = cached.isCollapsed
                 } else {
+                    // 缓存未命中时一次性计算整表并填满缓存，避免每次 cell 都做 O(n) 计算
                     if let collection = currentCollection {
-                        hierarchyText = numberingService.numberString(for: photo, in: assets, collection: collection)
-                        isHierarchyCollapsed = numberingService.isCollapsed(photo, in: collection)
+                        let (numbers, collapsed) = numberingService.computeNumbersAndCollapsed(for: assets, in: collection)
+                        for a in assets {
+                            let id = a.localIdentifier
+                            hierarchyCache[id] = (numbers[id], collapsed[id] ?? false)
+                        }
+                        hierarchyText = numbers[assetID]
+                        isHierarchyCollapsed = collapsed[assetID] ?? false
                     }
-                    hierarchyCache[assetID] = (text: hierarchyText, isCollapsed: isHierarchyCollapsed)
                 }
             }
             
@@ -1152,13 +1158,15 @@ extension PhotoGridView {
                 }
                 hierarchyGroup.append(setLevel2Action)
 
-
-                let clearLevelAction = UIAction(title: "取消编号", image: UIImage(systemName: "xmark.circle")) { [weak self] _ in
-                    guard let self = self else { return }
-                    self.numberingService.clearLevel(for: asset, in: collection)
-                    self.refreshParagraphDisplay()
+                // 仅已设置层级的照片显示「取消编号」
+                if numberingService.level(for: asset, in: collection) != 0 {
+                    let clearLevelAction = UIAction(title: "取消编号", image: UIImage(systemName: "xmark.circle")) { [weak self] _ in
+                        guard let self = self else { return }
+                        self.numberingService.clearLevel(for: asset, in: collection)
+                        self.refreshParagraphDisplay()
+                    }
+                    hierarchyGroup.append(clearLevelAction)
                 }
-                hierarchyGroup.append(clearLevelAction)
 
                 if hasHierarchyDescendants || isCurrentHierarchyCollapsed {
                     let collapseAction = UIAction(
@@ -1174,21 +1182,25 @@ extension PhotoGridView {
 
             }
 
-            // 标签操作
+            // 其他操作：添加标签 → 粘贴到此后方 → 删除（危险操作放最后）
             let tagAction = UIAction(title: "添加标签", image: UIImage(systemName: "tag")) { [weak self] _ in
                 guard let self = self else { return }
                 self.delegate?.photoGridView(self, didRequestAddTagFor: asset)
             }
             tailGroup.append(tagAction)
 
-            // 粘贴到此后方操作
-            // 不直接检查剪贴板，而是在用户点击时才访问，避免触发权限弹窗
             let pasteAction = UIAction(title: "粘贴到此后方", image: UIImage(systemName: "doc.on.clipboard")) { [weak self] _ in
                 if let pasteAssets = AssetPasteboard.assetsFromPasteboard(), !pasteAssets.isEmpty {
                     self?.handlePasteToAfter(asset: asset, assets: pasteAssets)
                 }
             }
             tailGroup.append(pasteAction)
+
+            let deleteAction = UIAction(title: "删除", image: UIImage(systemName: "trash"), attributes: .destructive) { [weak self] _ in
+                guard let self = self else { return }
+                self.delegate?.photoGridView(self, didRequestDelete: asset)
+            }
+            tailGroup.append(deleteAction)
 
             var rootChildren: [UIMenuElement] = []
             if !anchorGroup.isEmpty {

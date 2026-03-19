@@ -90,31 +90,25 @@ class PhotoChangesService {
     ///   - collection: 目标相册
     ///   - isUndoOperation: 是否为撤销操作，撤销操作不添加新的撤销记录
     static func delete(assets: [PHAsset], for collection: PHAssetCollection, isUndoOperation: Bool = false, completion: @escaping SortCompletion) {
-        PHPhotoLibrary.shared().performChanges({
-            // Remove assets from the collection
-            guard let changeRequest = PHAssetCollectionChangeRequest(for: collection) else {
-                return
-            }
-            // Convert to NSArray for the method call
-            let assetsArray = NSArray(array: assets)
-            
-            // Remove assets from the collection
-            changeRequest.removeAssets(assetsArray)
-        }, completionHandler: { success, error in
-            if success && !isUndoOperation {
-                // 添加撤销操作（仅当不是撤销操作时）
-                let undoAction = UndoAction(
-                    type: .delete(collection: collection, assets: assets),
-                    timestamp: Date(),
-                    description: "删除照片"
-                )
-                UndoManagerService.shared.addUndoAction(undoAction)
-            }
-            
-            DispatchQueue.main.async {
-                completion(success, error?.localizedDescription ?? (success ? nil : "Delete operation failed"))
-            }
-        })
+        let isAllPhotos = collection.assetCollectionSubtype == .smartAlbumUserLibrary
+        if isAllPhotos {
+            // 「所有照片」：必须用 deleteAssets（智能相册不支持 removeAssets），撤销不可用故不记录
+            PHPhotoLibrary.shared().performChanges({
+                PHAssetChangeRequest.deleteAssets(assets as NSFastEnumeration)
+            }, completionHandler: { success, error in
+                // 不记录撤销：deleteAssets 后照片移至「最近删除」，无法通过 addAssets 恢复
+                DispatchQueue.main.async { completion(success, error?.localizedDescription ?? (success ? nil : "Delete operation failed")) }
+            })
+        } else {
+            // 用户相册：removeAssets 仅从相册移除，照片仍在库中，撤销可 addAssets 恢复
+            PHPhotoLibrary.shared().performChanges({
+                guard let changeRequest = PHAssetCollectionChangeRequest(for: collection) else { return }
+                changeRequest.removeAssets(assets as NSArray)
+            }, completionHandler: { success, error in
+                // 撤销由 controller 记录
+                DispatchQueue.main.async { completion(success, error?.localizedDescription ?? (success ? nil : "Delete operation failed")) }
+            })
+        }
     }
     
     // 移动相片到另一个相册的方法

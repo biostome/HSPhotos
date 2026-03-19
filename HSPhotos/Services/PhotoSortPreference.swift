@@ -4,42 +4,40 @@
 //
 //  Created by Hans on 2025/8/29.
 //
+//  运行时仅使用内存缓存，UserDefaults 仅在首次读取及变更时读写
+//
 
 import Foundation
 import Photos
 
-extension UserDefaults {
-    func set(preference: String, for collection: PHAssetCollection) {
-        let key = "system_sort_preference_\(collection.localIdentifier)"
-        set(preference, forKey: key)
-    }
-    
-    func preference(for collection: PHAssetCollection) -> String? {
-        let key = "system_sort_preference_\(collection.localIdentifier)"
-        return string(forKey: key)
-    }
-}
+private let preferenceKeyPrefix = "system_sort_preference_"
 
 enum PhotoSortPreference: String {
-    /// 创建时间
     case creationDate = "creationDate"
-    /// 修改时间
     case modificationDate = "modificationDate"
-    /// 最近加入时间
     case recentDate = "recentDate"
-    /// 自定义
     case custom = "custom"
-    
+
+    /// 首次访问时从 UserDefaults 加载并缓存，后续从内存读取
     func preference(for collection: PHAssetCollection) -> Self {
-        let key = "system_sort_preference_\(collection.localIdentifier)"
+        let key = "\(preferenceKeyPrefix)\(collection.localIdentifier)"
+        if let cached = PhotoSortPreference._cache[key] {
+            return cached
+        }
         let value = UserDefaults.standard.string(forKey: key) ?? PhotoSortPreference.custom.rawValue
-        return PhotoSortPreference(rawValue: value) ?? .custom
+        let pref = PhotoSortPreference(rawValue: value) ?? .custom
+        PhotoSortPreference._cache[key] = pref
+        return pref
     }
-    
+
+    /// 变更时更新缓存并保存
     func set(preference collection: PHAssetCollection) {
-        let key = "system_sort_preference_\(collection.localIdentifier)"
+        let key = "\(preferenceKeyPrefix)\(collection.localIdentifier)"
+        PhotoSortPreference._cache[key] = self
         UserDefaults.standard.set(self.rawValue, forKey: key)
     }
+
+    fileprivate static var _cache: [String: PhotoSortPreference] = [:]
 }
 
 extension PhotoSortPreference {

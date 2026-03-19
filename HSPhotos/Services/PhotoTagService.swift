@@ -4,6 +4,8 @@
 //
 //  Created by Hans on 2026/3/14.
 //
+//  运行时仅使用内存缓存，UserDefaults 仅在首次加载及变更时读写
+//
 
 import Foundation
 
@@ -13,15 +15,26 @@ class PhotoTagService {
     private init() {}
 
     private let tagsKey = "custom_photo_tags"
+    private var tagsCache: [PhotoTag]?
 
     // MARK: - Load / Save
 
+    /// 首次调用时从 UserDefaults 加载到内存，后续从内存读取
     func loadTags() -> [PhotoTag] {
-        guard let data = UserDefaults.standard.data(forKey: tagsKey) else { return [] }
-        return (try? JSONDecoder().decode([PhotoTag].self, from: data)) ?? []
+        if let cached = tagsCache { return cached }
+        let tags: [PhotoTag]
+        if let data = UserDefaults.standard.data(forKey: tagsKey) {
+            tags = (try? JSONDecoder().decode([PhotoTag].self, from: data)) ?? []
+        } else {
+            tags = []
+        }
+        tagsCache = tags
+        return tags
     }
 
+    /// 仅变更时写入 UserDefaults
     private func saveTags(_ tags: [PhotoTag]) {
+        tagsCache = tags
         guard let data = try? JSONEncoder().encode(tags) else { return }
         UserDefaults.standard.set(data, forKey: tagsKey)
     }
@@ -85,29 +98,25 @@ class PhotoTagService {
     // MARK: - 查询
 
     func tags(forAsset identifier: String) -> [PhotoTag] {
-        return loadTags().filter { $0.assetIdentifiers.contains(identifier) }
+        loadTags().filter { $0.assetIdentifiers.contains(identifier) }
     }
 
     func hasTag(_ tagID: String, forAsset identifier: String) -> Bool {
-        return loadTags().first(where: { $0.id == tagID })?.assetIdentifiers.contains(identifier) ?? false
+        loadTags().first(where: { $0.id == tagID })?.assetIdentifiers.contains(identifier) ?? false
     }
 
     // MARK: - 过滤核心方法
 
-    /// 根据过滤状态，返回符合条件的 assetIdentifier 集合
     func filteredIdentifiers(by state: TagFilterState) -> Set<String> {
         guard state.isActive else { return [] }
         let tags = loadTags()
         let selectedTags = tags.filter { state.selectedTagIDs.contains($0.id) }
-
         switch state.matchRule {
         case .any:
-            // OR：属于任一选中标签的照片
             return selectedTags.reduce(into: Set<String>()) { result, tag in
                 result.formUnion(tag.assetIdentifiers)
             }
         case .all:
-            // AND：属于所有选中标签的照片
             guard let first = selectedTags.first else { return [] }
             var result = Set(first.assetIdentifiers)
             for tag in selectedTags.dropFirst() {
@@ -117,7 +126,6 @@ class PhotoTagService {
         }
     }
 
-    /// 预览：在给定的 assetIdentifiers 中，有多少符合过滤状态
     func previewCount(in candidates: [String], state: TagFilterState) -> Int {
         guard state.isActive else { return candidates.count }
         let matched = filteredIdentifiers(by: state)
@@ -127,7 +135,7 @@ class PhotoTagService {
     // MARK: - 最近使用
 
     func recentlyUsedTags(limit: Int = 5) -> [PhotoTag] {
-        return loadTags()
+        loadTags()
             .filter { $0.lastUsedAt != nil }
             .sorted { ($0.lastUsedAt ?? .distantPast) > ($1.lastUsedAt ?? .distantPast) }
             .prefix(limit)
