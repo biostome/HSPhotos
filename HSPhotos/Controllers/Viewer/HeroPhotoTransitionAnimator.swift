@@ -24,9 +24,17 @@ final class HeroPhotoTransitionAnimator: NSObject, UIViewControllerAnimatedTrans
         }
     }
 
+    private func galleryViewer(in transitionContext: UIViewControllerContextTransitioning, key: UITransitionContextViewControllerKey) -> GalleryViewerViewController? {
+        guard let vc = transitionContext.viewController(forKey: key) else { return nil }
+        if let g = vc as? GalleryViewerViewController { return g }
+        if let nav = vc as? UINavigationController { return nav.topViewController as? GalleryViewerViewController }
+        return nil
+    }
+
     private func animatePresent(using transitionContext: UIViewControllerContextTransitioning) {
-        guard let toVC = transitionContext.viewController(forKey: .to) as? GalleryViewerViewController,
-              let _ = transitionContext.viewController(forKey: .from) else {
+        guard let toPresented = transitionContext.viewController(forKey: .to),
+              galleryViewer(in: transitionContext, key: .to) != nil,
+              transitionContext.viewController(forKey: .from) != nil else {
             transitionContext.completeTransition(false)
             return
         }
@@ -72,14 +80,10 @@ final class HeroPhotoTransitionAnimator: NSObject, UIViewControllerAnimatedTrans
             // 背景从透明变为不透明
             blackBackground.alpha = 1
         } completion: { _ in
-            // 动画完成后，添加真实的视图控制器
-            toVC.view.frame = container.bounds
-            container.addSubview(toVC.view)
-            
-            // 移除过渡元素
+            toPresented.view.frame = container.bounds
+            container.addSubview(toPresented.view)
             snapshotView.removeFromSuperview()
             blackBackground.removeFromSuperview()
-            
             transitionContext.completeTransition(!transitionContext.transitionWasCancelled)
         }
     }
@@ -110,8 +114,9 @@ final class HeroPhotoTransitionAnimator: NSObject, UIViewControllerAnimatedTrans
     }
 
     private func animateDismiss(using transitionContext: UIViewControllerContextTransitioning) {
-        guard let fromVC = transitionContext.viewController(forKey: .from) as? GalleryViewerViewController,
-              let _ = transitionContext.viewController(forKey: .to) else {
+        guard let fromPresented = transitionContext.viewController(forKey: .from),
+              galleryViewer(in: transitionContext, key: .from) != nil,
+              transitionContext.viewController(forKey: .to) != nil else {
             transitionContext.completeTransition(false)
             return
         }
@@ -126,17 +131,17 @@ final class HeroPhotoTransitionAnimator: NSObject, UIViewControllerAnimatedTrans
             iv.frame = container.bounds
             snapshotView = iv
         } else {
-            snapshotView = fromVC.view.snapshotView(afterScreenUpdates: false) ?? UIView()
+            snapshotView = fromPresented.view.snapshotView(afterScreenUpdates: false) ?? UIView()
             snapshotView.frame = container.bounds
         }
-        container.insertSubview(snapshotView, aboveSubview: fromVC.view)
-        fromVC.view.alpha = 0
+        container.insertSubview(snapshotView, aboveSubview: fromPresented.view)
+        fromPresented.view.alpha = 0
 
         UIView.animate(withDuration: duration, delay: 0, options: [.curveEaseOut, .allowUserInteraction]) {
             snapshotView.frame = self.sourceFrame
         } completion: { _ in
             snapshotView.removeFromSuperview()
-            fromVC.view.alpha = 1
+            fromPresented.view.alpha = 1
             transitionContext.completeTransition(!transitionContext.transitionWasCancelled)
         }
     }

@@ -145,8 +145,13 @@ class GalleryViewController: BasePhotoViewController {
                     sourceImage = image
                 }
                 
-                let viewerVC = GalleryViewerViewController(assets: self.assets, initialIndex: index, sourceFrame: sourceFrame, sourceImage: sourceImage)
-                present(viewerVC, animated: true)
+                let nav = GalleryViewerViewController.makePresentingNavigationContainer(
+                    assets: self.assets,
+                    initialIndex: index,
+                    sourceFrame: sourceFrame,
+                    sourceImage: sourceImage
+                )
+                present(nav, animated: true)
             }
         }
     }

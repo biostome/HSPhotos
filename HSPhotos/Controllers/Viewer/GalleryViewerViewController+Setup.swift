@@ -89,6 +89,38 @@ extension GalleryViewerViewController {
     }
 
     func setupTopBar() {
+        titleButton.titleLabel?.numberOfLines = 2
+        titleButton.titleLabel?.textAlignment = .center
+        titleButton.setTitleColor(.label, for: .normal)
+        titleButton.titleLabel?.font = .systemFont(ofSize: 14, weight: .medium)
+        titleButton.addTarget(self, action: #selector(infoTapped), for: .touchUpInside)
+        titleButton.translatesAutoresizingMaskIntoConstraints = false
+
+        if navigationController != nil {
+            topBar.isHidden = true
+            titleButton.setTitleColor(.white, for: .normal)
+            let appearance = UINavigationBarAppearance()
+            appearance.configureWithTransparentBackground()
+            appearance.shadowColor = .clear
+            appearance.titleTextAttributes = [.foregroundColor: UIColor.white]
+            let navBar = navigationController?.navigationBar
+            navBar?.standardAppearance = appearance
+            navBar?.scrollEdgeAppearance = appearance
+            navBar?.compactAppearance = appearance
+            navBar?.compactScrollEdgeAppearance = appearance
+            navBar?.isTranslucent = true
+            navBar?.tintColor = .white
+
+            navigationItem.leftBarButtonItem = UIBarButtonItem(
+                image: UIImage(systemName: "chevron.left"),
+                style: .plain,
+                target: self,
+                action: #selector(closeTapped)
+            )
+            navigationItem.titleView = titleButton
+            return
+        }
+
         topBar.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(topBar)
 
@@ -97,15 +129,7 @@ extension GalleryViewerViewController {
         closeButton.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.85)
         closeButton.layer.cornerRadius = 18
         closeButton.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
-
-        titleButton.titleLabel?.numberOfLines = 2
-        titleButton.titleLabel?.textAlignment = .center
-        titleButton.setTitleColor(.label, for: .normal)
-        titleButton.titleLabel?.font = .systemFont(ofSize: 14, weight: .medium)
-        titleButton.addTarget(self, action: #selector(infoTapped), for: .touchUpInside)
-
         closeButton.translatesAutoresizingMaskIntoConstraints = false
-        titleButton.translatesAutoresizingMaskIntoConstraints = false
         topBar.addSubview(closeButton)
         topBar.addSubview(titleButton)
 

@@ -60,13 +60,30 @@ class GalleryViewerViewController: UIViewController {
             heroTransitionDelegate = HeroPhotoTransitionDelegate()
             heroTransitionDelegate?.sourceFrame = sourceFrame
             heroTransitionDelegate?.sourceImage = sourceImage
-            transitioningDelegate = heroTransitionDelegate
         }
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
+
+    /// 以 `UINavigationController` 包一层再 present，与 App 内其它页一致使用系统导航栏；Hero 转场需赋给外层 `transitioningDelegate`。
+    static func makePresentingNavigationContainer(
+        assets: [PHAsset],
+        initialIndex: Int,
+        sourceFrame: CGRect = .zero,
+        sourceImage: UIImage? = nil
+    ) -> UINavigationController {
+        let viewer = GalleryViewerViewController(assets: assets, initialIndex: initialIndex, sourceFrame: sourceFrame, sourceImage: sourceImage)
+        let nav = UINavigationController(rootViewController: viewer)
+        nav.modalPresentationStyle = .overFullScreen
+        if let hero = viewer.heroTransitionDelegate {
+            nav.transitioningDelegate = hero
+        }
+        return nav
+    }
+
+    override var preferredStatusBarStyle: UIStatusBarStyle { .lightContent }
 
     override func viewDidLoad() {
         super.viewDidLoad()

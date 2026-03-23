@@ -18,10 +18,7 @@ extension GalleryViewerViewController {
         isChromeHidden.toggle()
         let alpha: CGFloat = isChromeHidden ? 0 : 1
         UIView.animate(withDuration: 0.3, delay: 0, options: .curveEaseInOut, animations: {
-            self.topBar.alpha = alpha
-            self.bottomChromeContainer.alpha = alpha
-            self.thumbnailStripView.alpha = alpha
-            self.pageIndicator.alpha = alpha
+            self.applyChromeVisibilityAlpha(alpha)
         })
     }
 
@@ -279,6 +276,15 @@ extension GalleryViewerViewController {
         pageIndicator.text = "\(currentIndex + 1)/\(assets.count)"
     }
 
+    /// 顶栏：自定义 topBar 或包在 NavigationController 时的系统导航栏
+    func applyChromeVisibilityAlpha(_ alpha: CGFloat) {
+        topBar.alpha = alpha
+        bottomChromeContainer.alpha = alpha
+        thumbnailStripView.alpha = alpha
+        pageIndicator.alpha = alpha
+        navigationController?.navigationBar.alpha = alpha
+    }
+
     private func getAssetInfo(_ asset: PHAsset) -> String {
         var info = [String]()
         let mediaType: String
@@ -325,10 +331,7 @@ extension GalleryViewerViewController {
             pageViewController.view.transform = CGAffineTransform(translationX: tx, y: ty).scaledBy(x: scale, y: scale)
             view.backgroundColor = UIColor.black.withAlphaComponent(backgroundAlpha)
             let chromeAlpha = isChromeHidden ? 0 : (1.0 - progress)
-            topBar.alpha = chromeAlpha
-            bottomChromeContainer.alpha = chromeAlpha
-            thumbnailStripView.alpha = chromeAlpha
-            pageIndicator.alpha = chromeAlpha
+            applyChromeVisibilityAlpha(chromeAlpha)
         case .ended, .cancelled:
             let ty = translation.y
             let tx = translation.x
@@ -345,10 +348,7 @@ extension GalleryViewerViewController {
                         self.pageViewController.view.transform = CGAffineTransform(translationX: tx, y: self.view.bounds.height)
                             .scaledBy(x: 0.3, y: 0.3)
                         self.view.backgroundColor = .clear
-                        self.topBar.alpha = 0
-                        self.bottomChromeContainer.alpha = 0
-                        self.thumbnailStripView.alpha = 0
-                        self.pageIndicator.alpha = 0
+                        self.applyChromeVisibilityAlpha(0)
                     },
                     completion: { _ in
                         self.dismiss(animated: false)
@@ -365,10 +365,7 @@ extension GalleryViewerViewController {
                         self.pageViewController.view.transform = .identity
                         self.view.backgroundColor = .black
                         let chromeAlpha: CGFloat = self.isChromeHidden ? 0 : 1
-                        self.topBar.alpha = chromeAlpha
-                        self.bottomChromeContainer.alpha = chromeAlpha
-                        self.thumbnailStripView.alpha = chromeAlpha
-                        self.pageIndicator.alpha = chromeAlpha
+                        self.applyChromeVisibilityAlpha(chromeAlpha)
                     },
                     completion: nil
                 )
