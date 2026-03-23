@@ -1,5 +1,20 @@
 # HSPhotos 修改日志
 
+## 2026-03-20
+
+### 大图浏览器 · 单页媒体（`PhotoPageViewController`）
+
+- **iCloud / 慢加载**：大图请求在需要云端拉取时显示加载指示与文案；视频在较慢时延迟显示「正在载入视频…」，避免本地秒开闪一下。
+- **视频清晰度**：`PHVideoRequestOptions.deliveryMode` 使用 **`.highQualityFormat`**（`.fastFormat` 易得到低码率变体、全屏发糊）。
+
+### 大图浏览器 · 底部缩略条（`GalleryViewerThumbnailStripView` 等）
+
+- **点击缩略图**：条滚到居中；已选中再点同一格不再重复滚动（防竞态与重复 `syncSelection`）。
+- **滑大图**：缩略条与当前页对齐；**程序滚动**与**用户拖条**分两路：`scrollViewDidScroll` 仅在用户 **拖动/减速** 时按视口中心改选中，避免程序 `scrollToItem` 后的 `didScroll` 把选中改错。
+- **重构**：用 `isProgrammaticAlignmentActive` + **`alignmentGeneration`** 管理「程序对齐」生命周期；用户拖条时 `userInterruptedProgrammaticAlignment()` 作废未完成回调；去掉 `immediateScroll` 双路径，统一先 `reloadItems` 再 `scrollToItem`；程序带动画时用 **延迟 + gen 校验** 解锁（替代不可靠的连续 `scrollToItem` 与 `didEndScrollingAnimation` 一一对应）。
+
+---
+
 ## 2026-03-19
 
 ### 📸 照片多级编号

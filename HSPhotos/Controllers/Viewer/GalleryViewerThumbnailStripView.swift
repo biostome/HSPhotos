@@ -197,8 +197,14 @@ final class GalleryViewerThumbnailStripView: UIView {
     }
 
     private var selectedIndex: Int = 0
-    /// 由 `scrollToItem` 等引起的滚动，不触发「居中换页」逻辑。
-    private var isProgrammaticStripScroll = false
+
+    // MARK: - 程序对齐 vs 用户拖条（避免 scrollViewDidScroll 误改 selectedIndex）
+
+    /// 程序正在执行 reload + scrollToItem；为 true 时忽略「视口中心」推断。
+    private var isProgrammaticAlignmentActive = false
+    /// 每次开始一次程序对齐自增；用于丢弃过期的解锁（快速滑大图时）。
+    private var alignmentGeneration: UInt = 0
+
     var onSelect: ((Int) -> Void)?
     /// 横向滑动缩略条，视口中心对准的索引变化时回调（用于同步大图）。
     var onCenteredIndexChanged: ((Int) -> Void)?
@@ -273,31 +279,60 @@ final class GalleryViewerThumbnailStripView: UIView {
         rightFadeMask.frame = rightEdgeFade.bounds
     }
 
+    /// 将选中索引与滚动位置对齐到大图当前页（唯一「程序」来源；与 `scrollViewDidScroll` 用户拖条路径隔离）。
     func syncSelection(_ index: Int, animated: Bool) {
         guard !assets.isEmpty else { return }
         let clamped = min(max(0, index), assets.count - 1)
+        guard clamped != selectedIndex else { return }
+
         let previous = selectedIndex
         selectedIndex = clamped
-        if previous != selectedIndex {
-            let paths = [IndexPath(item: previous, section: 0), IndexPath(item: selectedIndex, section: 0)]
-                .filter { $0.item >= 0 && $0.item < assets.count }
-            let unique = Array(Set(paths))
-            collectionView.performBatchUpdates {
-                collectionView.reloadItems(at: unique)
-            }
+        let paths = [IndexPath(item: previous, section: 0), IndexPath(item: selectedIndex, section: 0)]
+            .filter { $0.item >= 0 && $0.item < assets.count }
+        let unique = Array(Set(paths))
+
+        let gen = beginProgrammaticAlignment()
+        UIView.performWithoutAnimation {
+            collectionView.reloadItems(at: unique)
+            collectionView.layoutIfNeeded()
         }
-        scrollToSelected(animated: animated)
+        scrollToFocusedThumbnail(animated: animated, alignmentGeneration: gen)
     }
 
-    private func scrollToSelected(animated: Bool) {
-        guard selectedIndex >= 0, selectedIndex < assets.count else { return }
+    private func beginProgrammaticAlignment() -> UInt {
+        alignmentGeneration += 1
+        isProgrammaticAlignmentActive = true
+        return alignmentGeneration
+    }
+
+    /// 仅当 `gen` 仍为当前一次程序对齐时结束屏障；快速连滑时旧动画的结束不会错误地解锁。
+    private func endProgrammaticAlignmentIfCurrent(_ gen: UInt) {
+        guard gen == alignmentGeneration else { return }
+        isProgrammaticAlignmentActive = false
+    }
+
+    /// 用户手指接管缩略条时，作废未完成的程序对齐回调。
+    private func userInterruptedProgrammaticAlignment() {
+        alignmentGeneration += 1
+        isProgrammaticAlignmentActive = false
+    }
+
+    private func scrollToFocusedThumbnail(animated: Bool, alignmentGeneration gen: UInt) {
+        guard selectedIndex >= 0, selectedIndex < assets.count else {
+            endProgrammaticAlignmentIfCurrent(gen)
+            return
+        }
         let ip = IndexPath(item: selectedIndex, section: 0)
         collectionView.layoutIfNeeded()
-        isProgrammaticStripScroll = true
         collectionView.scrollToItem(at: ip, at: .centeredHorizontally, animated: animated)
-        if !animated {
+        if animated {
+            // 连续 scrollToItem 时 didEnd 与「第几次动画」难一一对应；用延迟 + gen 只结束对应会话
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) { [weak self] in
+                self?.endProgrammaticAlignmentIfCurrent(gen)
+            }
+        } else {
             DispatchQueue.main.async { [weak self] in
-                self?.isProgrammaticStripScroll = false
+                self?.endProgrammaticAlignmentIfCurrent(gen)
             }
         }
     }
@@ -347,19 +382,22 @@ extension GalleryViewerThumbnailStripView: UICollectionViewDataSource, UICollect
     }
 
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        guard indexPath.item != selectedIndex else { return }
+        syncSelection(indexPath.item, animated: true)
         onSelect?(indexPath.item)
     }
 
     // MARK: UIScrollViewDelegate（滑动缩略条时按居中项切换大图）
 
     func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
-        if scrollView === collectionView {
-            isProgrammaticStripScroll = false
-        }
+        guard scrollView === collectionView else { return }
+        userInterruptedProgrammaticAlignment()
     }
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        guard scrollView === collectionView, !isProgrammaticStripScroll, !assets.isEmpty else { return }
+        guard scrollView === collectionView, !isProgrammaticAlignmentActive, !assets.isEmpty else { return }
+        // 仅用户拖条时按视口中心驱动大图；程序 scrollToItem 触发的 didScroll 由 isProgrammaticAlignmentActive 屏蔽
+        guard collectionView.isDragging || collectionView.isDecelerating else { return }
         guard let idx = indexAtViewportCenter(), idx != selectedIndex else { return }
         let previous = selectedIndex
         selectedIndex = idx
@@ -371,15 +409,4 @@ extension GalleryViewerThumbnailStripView: UICollectionViewDataSource, UICollect
         onCenteredIndexChanged?(idx)
     }
 
-    func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
-        if scrollView === collectionView {
-            isProgrammaticStripScroll = false
-        }
-    }
-
-    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
-        if scrollView === collectionView {
-            isProgrammaticStripScroll = false
-        }
-    }
 }

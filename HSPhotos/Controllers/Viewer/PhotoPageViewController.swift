@@ -24,6 +24,12 @@ final class PhotoPageViewController: UIViewController {
     private var isPlaying = false
     private var timeObserver: Any?
 
+    private let loadingContainer = UIView()
+    private let loadingActivityIndicator = UIActivityIndicatorView(style: .large)
+    private let loadingStatusLabel = UILabel()
+    /// 视频较慢时才显示转圈，本地秒开则取消，避免闪一下
+    private var videoLoadingDelayedWorkItem: DispatchWorkItem?
+
     let asset: PHAsset
     var index: Int = 0
     var scrollViewZoomScale: CGFloat { scrollView.zoomScale }
@@ -89,7 +95,61 @@ final class PhotoPageViewController: UIViewController {
         scrollView.addGestureRecognizer(singleTapGesture)
 
         playerContainerView.isHidden = true
+        setupLoadingOverlay()
         loadMedia()
+    }
+
+    private func setupLoadingOverlay() {
+        loadingContainer.translatesAutoresizingMaskIntoConstraints = false
+        loadingContainer.isUserInteractionEnabled = false
+        loadingContainer.isHidden = true
+        view.addSubview(loadingContainer)
+
+        loadingActivityIndicator.translatesAutoresizingMaskIntoConstraints = false
+        loadingActivityIndicator.hidesWhenStopped = true
+        loadingActivityIndicator.color = .white
+        loadingContainer.addSubview(loadingActivityIndicator)
+
+        loadingStatusLabel.translatesAutoresizingMaskIntoConstraints = false
+        loadingStatusLabel.textColor = UIColor.white.withAlphaComponent(0.95)
+        loadingStatusLabel.font = .systemFont(ofSize: 14, weight: .medium)
+        loadingStatusLabel.textAlignment = .center
+        loadingStatusLabel.numberOfLines = 2
+        loadingContainer.addSubview(loadingStatusLabel)
+
+        NSLayoutConstraint.activate([
+            loadingContainer.centerXAnchor.constraint(equalTo: view.centerXAnchor),
+            loadingContainer.centerYAnchor.constraint(equalTo: view.centerYAnchor),
+            loadingActivityIndicator.topAnchor.constraint(equalTo: loadingContainer.topAnchor),
+            loadingActivityIndicator.centerXAnchor.constraint(equalTo: loadingContainer.centerXAnchor),
+            loadingStatusLabel.topAnchor.constraint(equalTo: loadingActivityIndicator.bottomAnchor, constant: 12),
+            loadingStatusLabel.leadingAnchor.constraint(equalTo: loadingContainer.leadingAnchor),
+            loadingStatusLabel.trailingAnchor.constraint(equalTo: loadingContainer.trailingAnchor),
+            loadingStatusLabel.bottomAnchor.constraint(equalTo: loadingContainer.bottomAnchor)
+        ])
+    }
+
+    private func showLoadingOverlay(message: String?) {
+        loadingStatusLabel.text = message
+        loadingContainer.isHidden = false
+        loadingActivityIndicator.startAnimating()
+    }
+
+    private func hideLoadingOverlay() {
+        videoLoadingDelayedWorkItem?.cancel()
+        videoLoadingDelayedWorkItem = nil
+        loadingActivityIndicator.stopAnimating()
+        loadingStatusLabel.text = nil
+        loadingContainer.isHidden = true
+    }
+
+    private func scheduleVideoLoadingOverlayIfSlow() {
+        videoLoadingDelayedWorkItem?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.showLoadingOverlay(message: "正在载入视频…")
+        }
+        videoLoadingDelayedWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.22, execute: work)
     }
 
     private func setupVideoControls() {
@@ -227,10 +287,17 @@ final class PhotoPageViewController: UIViewController {
             let options = PHImageRequestOptions()
             options.deliveryMode = .highQualityFormat
             options.isNetworkAccessAllowed = true
+            options.progressHandler = { [weak self] progress, _, _, _ in
+                guard progress < 1 else { return }
+                DispatchQueue.main.async {
+                    self?.showLoadingOverlay(message: "正在从 iCloud 获取照片…")
+                }
+            }
             loadThumbnail(targetSize: CGSize(width: 200, height: 200))
             PHImageManager.default().requestImage(for: asset, targetSize: targetSize, contentMode: .aspectFit, options: options) { [weak self] image, _ in
                 DispatchQueue.main.async {
                     guard let self else { return }
+                    self.hideLoadingOverlay()
                     if let image = image {
                         self.transitionToHighQualityImage(image: image)
                     } else {
@@ -240,40 +307,44 @@ final class PhotoPageViewController: UIViewController {
             }
         case .video:
             playerContainerView.isHidden = false
-            loadThumbnail(targetSize: targetSize)
+            scheduleVideoLoadingOverlayIfSlow()
+            // 封面用较小尺寸，避免全屏像素解码拖慢首帧
+            loadThumbnail(targetSize: posterThumbnailPixelSize(reference: targetSize))
             let videoOptions = PHVideoRequestOptions()
+            // fastFormat 首帧快但常为低码率变体，全屏观感糊；大图浏览用高质量
             videoOptions.deliveryMode = .highQualityFormat
             videoOptions.isNetworkAccessAllowed = true
-            DispatchQueue.global(qos: .userInitiated).async {
-                PHImageManager.default().requestAVAsset(forVideo: self.asset, options: videoOptions) { [weak self] avAsset, _, _ in
-                    DispatchQueue.main.async {
-                        guard let self else { return }
-                        if let avAsset = avAsset {
-                            let playerItem = AVPlayerItem(asset: avAsset)
-                            let player = AVPlayer(playerItem: playerItem)
-                            self.player = player
-                            self.isPlaying = true
-                            let playerLayer = AVPlayerLayer(player: player)
-                            playerLayer.videoGravity = .resizeAspect
-                            playerLayer.frame = self.playerContainerView.bounds
-                            self.playerContainerView.layer.addSublayer(playerLayer)
-                            self.playerLayer = playerLayer
-                            player.play()
-                            let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
-                            self.timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] _ in
-                                self?.updateProgress()
-                            }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                                UIView.animate(withDuration: 0.3) {
-                                    self?.imageView.alpha = 0
-                                } completion: { _ in
-                                    self?.imageView.isHidden = true
-                                    self?.imageView.alpha = 1
-                                }
-                            }
-                        } else {
-                            self.showErrorPlaceholder()
+            PHImageManager.default().requestAVAsset(forVideo: asset, options: videoOptions) { [weak self] avAsset, _, _ in
+                DispatchQueue.main.async {
+                    guard let self else { return }
+                    self.hideLoadingOverlay()
+                    if let avAsset = avAsset {
+                        let playerItem = AVPlayerItem(asset: avAsset)
+                        let player = AVPlayer(playerItem: playerItem)
+                        // 更快开始播放，减少「卡住等缓冲」体感（弱网下可能更易卡顿，可接受）
+                        player.automaticallyWaitsToMinimizeStalling = false
+                        self.player = player
+                        self.isPlaying = true
+                        let playerLayer = AVPlayerLayer(player: player)
+                        playerLayer.videoGravity = .resizeAspect
+                        playerLayer.frame = self.playerContainerView.bounds
+                        self.playerContainerView.layer.addSublayer(playerLayer)
+                        self.playerLayer = playerLayer
+                        player.play()
+                        let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
+                        self.timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] _ in
+                            self?.updateProgress()
                         }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                            UIView.animate(withDuration: 0.3) {
+                                self?.imageView.alpha = 0
+                            } completion: { _ in
+                                self?.imageView.isHidden = true
+                                self?.imageView.alpha = 1
+                            }
+                        }
+                    } else {
+                        self.showErrorPlaceholder()
                     }
                 }
             }
@@ -283,6 +354,7 @@ final class PhotoPageViewController: UIViewController {
     }
 
     private func showErrorPlaceholder() {
+        hideLoadingOverlay()
         imageView.image = UIImage(systemName: "exclamationmark.triangle")
         imageView.tintColor = .systemRed
         imageView.contentMode = .center
@@ -298,6 +370,16 @@ final class PhotoPageViewController: UIViewController {
         let size = screen.bounds.size
         let scale = screen.scale
         return CGSize(width: size.width * scale, height: size.height * scale)
+    }
+
+    /// 视频封面图请求尺寸：限制长边，减轻解码与相册回调压力，播放仍用 AVAsset 全质量
+    private func posterThumbnailPixelSize(reference: CGSize) -> CGSize {
+        guard reference.width > 0, reference.height > 0 else { return reference }
+        let maxEdge: CGFloat = 1280
+        let edge = max(reference.width, reference.height)
+        guard edge > maxEdge else { return reference }
+        let s = maxEdge / edge
+        return CGSize(width: reference.width * s, height: reference.height * s)
     }
 
     override func viewDidLayoutSubviews() {

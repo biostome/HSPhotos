@@ -40,8 +40,13 @@ extension GalleryViewerViewController {
         thumbnailStripView.onSelect = { [weak self] idx in
             guard let self else { return }
             guard idx >= 0, idx < self.assets.count, idx != self.currentIndex else { return }
+            // 缩略条已在 didSelect 里 syncSelection；避免分页结束后再滚一次
+            self.isPagingDrivenByThumbnailStrip = true
             let dir: UIPageViewController.NavigationDirection = idx > self.currentIndex ? .forward : .reverse
-            guard let page = self.pageForIndex(idx) else { return }
+            guard let page = self.pageForIndex(idx) else {
+                self.isPagingDrivenByThumbnailStrip = false
+                return
+            }
             self.pageViewController.setViewControllers([page], direction: dir, animated: true)
         }
         thumbnailStripView.onCenteredIndexChanged = { [weak self] idx in
