@@ -9,9 +9,9 @@ import UIKit
 enum GalleryViewerChromeMetrics {
     static let horizontalInset: CGFloat = 20
     /// 与 safeArea 底边的间距（safeArea 已不含 Home 指示条区域）
-    static let bottomInset: CGFloat = 18
+    static let bottomInset: CGFloat = 0
     /// 缩略图条下缘与底栏（Liquid Glass）上缘的间距
-    static let thumbnailStripAboveChromeGap: CGFloat = 40
+    static let thumbnailStripAboveChromeGap: CGFloat = 12
     /// 两侧 Liquid Glass 外框边长
     static let sideControlSide: CGFloat = 48
     static let sideGlassIconPointSize: CGFloat = 17

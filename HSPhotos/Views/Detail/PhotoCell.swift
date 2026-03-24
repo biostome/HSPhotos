@@ -149,9 +149,7 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
     
     /// 共享 PHCachingImageManager，专为快速滚动列表设计
     static let cachingManager: PHCachingImageManager = {
-        let m = PHCachingImageManager()
-        m.allowsCachingHighQualityImages = true
-        return m
+        PHCachingImageManager()
     }()
     
     /// 小 cell（compact）专用：fastFormat 只回调一次，最大化滚动性能
@@ -180,15 +178,13 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
     }()
     private var lastCacheKey: String?
     
-    private static let screenScale: CGFloat = UIScreen.main.scale
-    
-    static func thumbnailSize(for cellSize: CGSize) -> CGSize {
-        let dimension = max(cellSize.width, cellSize.height) * screenScale
+    static func thumbnailSize(for cellSize: CGSize, scale: CGFloat) -> CGSize {
+        let dimension = max(cellSize.width, cellSize.height) * scale
         return CGSize(width: dimension, height: dimension)
     }
     
-    static func cacheKey(for assetID: String, cellSize: CGSize) -> String {
-        let dimension = Int(max(cellSize.width, cellSize.height) * screenScale)
+    static func cacheKey(for assetID: String, cellSize: CGSize, scale: CGFloat) -> String {
+        let dimension = Int(max(cellSize.width, cellSize.height) * scale)
         return "\(assetID)_\(dimension)"
     }
 
@@ -373,13 +369,14 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         currentAssetID = asset.localIdentifier
 
         let cellSize = bounds.size
-        let cacheKey = Self.cacheKey(for: asset.localIdentifier, cellSize: cellSize)
+        let scale = traitCollection.displayScale
+        let cacheKey = Self.cacheKey(for: asset.localIdentifier, cellSize: cellSize, scale: scale)
         
         if let cachedImage = Self.imageCache.object(forKey: cacheKey as NSString) {
             imageView.image = cachedImage
             lastCacheKey = cacheKey
         } else {
-            let targetSize = Self.thumbnailSize(for: cellSize)
+            let targetSize = Self.thumbnailSize(for: cellSize, scale: scale)
             let options = compact ? Self.thumbnailOptionsFast : Self.thumbnailOptionsQuality
             
             requestID = Self.cachingManager.requestImage(

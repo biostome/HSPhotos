@@ -15,14 +15,16 @@ final class PhotoPageViewController: UIViewController {
     private var playerLayer: AVPlayerLayer?
     private(set) var player: AVPlayer?
 
-    private let playPauseButton = UIButton(type: .system)
-    private let progressSlider = UISlider()
-    private let timeLabel = UILabel()
-    private let videoControlView = UIView()
+    private let videoControlsView = VideoPlaybackControlsView()
 
     private var isControlsVisible = false
     private var isPlaying = false
     private var timeObserver: Any?
+    /// 记录离开页面前的播放状态：避免用户滑动切页后回到该页时播放图标/状态错乱。
+    private var wasPlayingBeforeDisappear: Bool = false
+    /// 当前页是否处于可见/交互状态：用于避免在滑走后异步回调又启动播放。
+    private var isPageActive: Bool = false
+    private var videoThumbnailHideWorkItem: DispatchWorkItem?
 
     private let loadingContainer = UIView()
     private let loadingActivityIndicator = UIActivityIndicatorView(style: .large)
@@ -33,6 +35,8 @@ final class PhotoPageViewController: UIViewController {
     let asset: PHAsset
     var index: Int = 0
     var scrollViewZoomScale: CGFloat { scrollView.zoomScale }
+    private var videoControlsHeightConstraint: NSLayoutConstraint?
+    private var isScrubbingProgress = false
 
     init(asset: PHAsset) {
         self.asset = asset
@@ -50,6 +54,11 @@ final class PhotoPageViewController: UIViewController {
         scrollView.delegate = self
         scrollView.minimumZoomScale = 1
         scrollView.maximumZoomScale = 4
+        // 视频控制条需要“浮层”效果：当我们把进度条/控制条向上挪到缩略条区域时，
+        // 若 scrollView 默认裁剪，会导致进度条看不到。
+        if asset.mediaType == .video {
+            scrollView.clipsToBounds = false
+        }
         scrollView.showsHorizontalScrollIndicator = false
         scrollView.showsVerticalScrollIndicator = false
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -153,49 +162,36 @@ final class PhotoPageViewController: UIViewController {
     }
 
     private func setupVideoControls() {
-        videoControlView.backgroundColor = UIColor.black.withAlphaComponent(0.6)
-        videoControlView.translatesAutoresizingMaskIntoConstraints = false
-        playerContainerView.addSubview(videoControlView)
+        // 固定屏幕浮层：不随 scrollView zoom 内容缩放移动
+        view.addSubview(videoControlsView)
 
-        playPauseButton.setImage(UIImage(systemName: "pause.fill"), for: .normal)
-        playPauseButton.tintColor = .white
-        playPauseButton.translatesAutoresizingMaskIntoConstraints = false
-        playPauseButton.addTarget(self, action: #selector(togglePlayPause), for: .touchUpInside)
-        videoControlView.addSubview(playPauseButton)
-
-        progressSlider.minimumTrackTintColor = .white
-        progressSlider.maximumTrackTintColor = UIColor.white.withAlphaComponent(0.5)
-        progressSlider.thumbTintColor = .white
-        progressSlider.translatesAutoresizingMaskIntoConstraints = false
-        progressSlider.addTarget(self, action: #selector(sliderValueChanged(_:)), for: .valueChanged)
-        videoControlView.addSubview(progressSlider)
-
-        timeLabel.textColor = .white
-        timeLabel.font = .systemFont(ofSize: 12)
-        timeLabel.translatesAutoresizingMaskIntoConstraints = false
-        videoControlView.addSubview(timeLabel)
+        videoControlsView.onPlayPauseTapped = { [weak self] in
+            self?.togglePlayPause()
+        }
+        videoControlsView.onSliderValueChanged = { [weak self] slider in
+            self?.sliderValueChanged(slider)
+        }
+        videoControlsView.onMuteTapped = { [weak self] in
+            self?.toggleMute()
+        }
+        videoControlsView.onSliderTrackingChanged = { [weak self] isTracking in
+            self?.setProgressScrubbingState(isTracking)
+        }
 
         NSLayoutConstraint.activate([
-            videoControlView.leadingAnchor.constraint(equalTo: playerContainerView.leadingAnchor),
-            videoControlView.trailingAnchor.constraint(equalTo: playerContainerView.trailingAnchor),
-            videoControlView.bottomAnchor.constraint(equalTo: playerContainerView.bottomAnchor),
-            videoControlView.heightAnchor.constraint(equalToConstant: 60),
-
-            playPauseButton.leadingAnchor.constraint(equalTo: videoControlView.leadingAnchor, constant: 16),
-            playPauseButton.centerYAnchor.constraint(equalTo: videoControlView.centerYAnchor),
-            playPauseButton.widthAnchor.constraint(equalToConstant: 30),
-            playPauseButton.heightAnchor.constraint(equalToConstant: 30),
-
-            timeLabel.trailingAnchor.constraint(equalTo: videoControlView.trailingAnchor, constant: -16),
-            timeLabel.centerYAnchor.constraint(equalTo: videoControlView.centerYAnchor),
-
-            progressSlider.leadingAnchor.constraint(equalTo: playPauseButton.trailingAnchor, constant: 16),
-            progressSlider.trailingAnchor.constraint(equalTo: timeLabel.leadingAnchor, constant: -16),
-            progressSlider.centerYAnchor.constraint(equalTo: videoControlView.centerYAnchor),
-            progressSlider.heightAnchor.constraint(equalToConstant: 40)
+            videoControlsView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            videoControlsView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            {
+                let c = videoControlsView.heightAnchor.constraint(equalToConstant: 60)
+                videoControlsHeightConstraint = c
+                return c
+            }(),
+            {
+                return videoControlsView.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -150)
+            }()
         ])
 
-        videoControlView.alpha = 0
+        videoControlsView.setControlsVisible(false, animated: false)
     }
 
     @objc private func handleDoubleTap(_ gesture: UITapGestureRecognizer) {
@@ -215,19 +211,17 @@ final class PhotoPageViewController: UIViewController {
 
     private func toggleControlsVisibility() {
         isControlsVisible.toggle()
-        UIView.animate(withDuration: 0.3) {
-            self.videoControlView.alpha = self.isControlsVisible ? 1 : 0
-        }
+        videoControlsView.setControlsVisible(isControlsVisible, animated: true)
     }
 
     @objc private func togglePlayPause() {
         guard let player = player else { return }
         if isPlaying {
             player.pause()
-            playPauseButton.setImage(UIImage(systemName: "play.fill"), for: .normal)
+            videoControlsView.setPlayPauseIcon(isPlaying: false)
         } else {
             player.play()
-            playPauseButton.setImage(UIImage(systemName: "pause.fill"), for: .normal)
+            videoControlsView.setPlayPauseIcon(isPlaying: true)
         }
         isPlaying.toggle()
     }
@@ -236,21 +230,54 @@ final class PhotoPageViewController: UIViewController {
         guard let player = player, let duration = player.currentItem?.duration else { return }
         let seekTime = CMTime(seconds: Double(slider.value) * duration.seconds, preferredTimescale: 600)
         player.seek(to: seekTime) { _ in }
+        if isScrubbingProgress {
+            let current = Double(slider.value) * duration.seconds
+            videoControlsView.setScrubInfo("\(formatDuration(current)) / \(formatDuration(duration.seconds))")
+        }
+    }
+
+    @objc private func toggleMute() {
+        guard let player else { return }
+        player.isMuted.toggle()
+        videoControlsView.setMuteIcon(isMuted: player.isMuted)
     }
 
     private func updateProgress() {
         guard let player = player, let currentItem = player.currentItem else { return }
         let duration = currentItem.duration.seconds
+        guard duration.isFinite, duration > 0 else { return }
         let currentTime = player.currentTime().seconds
-        progressSlider.value = Float(currentTime / duration)
-        timeLabel.text = formatTime(currentTime) + " / " + formatTime(duration)
+        videoControlsView.progressSlider.value = Float(currentTime / duration)
+        if isScrubbingProgress {
+            videoControlsView.setScrubInfo("\(formatDuration(currentTime)) / \(formatDuration(duration))")
+        }
     }
 
-    private func formatTime(_ seconds: Double) -> String {
-        let totalSeconds = Int(seconds)
-        let minutes = totalSeconds / 60
-        let remainingSeconds = totalSeconds % 60
-        return String(format: "%02d:%02d", minutes, remainingSeconds)
+    private func setProgressScrubbingState(_ isTracking: Bool) {
+        isScrubbingProgress = isTracking
+        videoControlsHeightConstraint?.constant = isTracking ? 84 : 60
+
+        if isTracking, let player, let duration = player.currentItem?.duration.seconds, duration.isFinite, duration > 0 {
+            let current = Double(videoControlsView.progressSlider.value) * duration
+            videoControlsView.setScrubInfo("\(formatDuration(current)) / \(formatDuration(duration))")
+        }
+        videoControlsView.setScrubInfoVisible(isTracking, animated: true)
+
+        UIView.animate(withDuration: 0.2) {
+            self.view.layoutIfNeeded()
+        }
+    }
+
+    private func formatDuration(_ seconds: Double) -> String {
+        guard seconds.isFinite, seconds >= 0 else { return "00:00" }
+        let total = Int(seconds.rounded())
+        let h = total / 3600
+        let m = (total % 3600) / 60
+        let s = total % 60
+        if h > 0 {
+            return String(format: "%d:%02d:%02d", h, m, s)
+        }
+        return String(format: "%02d:%02d", m, s)
     }
 
     private func loadThumbnail(targetSize: CGSize) {
@@ -324,24 +351,36 @@ final class PhotoPageViewController: UIViewController {
                         // 更快开始播放，减少「卡住等缓冲」体感（弱网下可能更易卡顿，可接受）
                         player.automaticallyWaitsToMinimizeStalling = false
                         self.player = player
-                        self.isPlaying = true
                         let playerLayer = AVPlayerLayer(player: player)
                         playerLayer.videoGravity = .resizeAspect
                         playerLayer.frame = self.playerContainerView.bounds
-                        self.playerContainerView.layer.addSublayer(playerLayer)
+                        // 作为底层视频图层：插入到最底部，避免被控制条遮挡。
+                        self.playerContainerView.layer.insertSublayer(playerLayer, at: 0)
                         self.playerLayer = playerLayer
-                        player.play()
-                        let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
-                        self.timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] _ in
-                            self?.updateProgress()
-                        }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
-                            UIView.animate(withDuration: 0.3) {
-                                self?.imageView.alpha = 0
-                            } completion: { _ in
-                                self?.imageView.isHidden = true
-                                self?.imageView.alpha = 1
+
+                        // 如果用户已经滑走，这里不要无条件播放，否则会造成“后台播放/画面错乱”。
+                        let shouldShowVideoNow = self.isPageActive
+                        if shouldShowVideoNow {
+                            self.isPlaying = true
+                            self.videoControlsView.setPlayPauseIcon(isPlaying: true)
+                            self.videoControlsView.setMuteIcon(isMuted: player.isMuted)
+                            player.play()
+
+                            let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
+                            self.timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] _ in
+                                self?.updateProgress()
                             }
+                            self.updateProgress()
+                            self.hideVideoThumbnailAnimatedIfNeeded()
+                        } else {
+                            self.isPlaying = false
+                            self.videoControlsView.setPlayPauseIcon(isPlaying: false)
+                            self.videoControlsView.setMuteIcon(isMuted: player.isMuted)
+                            player.pause()
+
+                            // 保持封面可见，避免淡出任务在后台执行导致遮挡/闪烁。
+                            self.imageView.isHidden = false
+                            self.imageView.alpha = 1
                         }
                     } else {
                         self.showErrorPlaceholder()
@@ -389,14 +428,70 @@ final class PhotoPageViewController: UIViewController {
 
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
+        // UIPageViewController 交互式滑动切页时会触发 viewWillDisappear；
+        // 若直接移除 playerLayer，切回/继续滑动后就可能出现“画面层消失”。
+        wasPlayingBeforeDisappear = isPlaying
+        isPageActive = false
+        videoThumbnailHideWorkItem?.cancel()
+        videoThumbnailHideWorkItem = nil
         player?.pause()
+        isPlaying = false
+        videoControlsView.setPlayPauseIcon(isPlaying: false)
+        videoControlsView.setMuteIcon(isMuted: player?.isMuted ?? false)
         if let observer = timeObserver {
             player?.removeTimeObserver(observer)
             timeObserver = nil
         }
-        playerLayer?.removeFromSuperlayer()
-        playerLayer = nil
-        player = nil
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        guard asset.mediaType == .video else { return }
+        isPageActive = true
+
+        // 重新挂载进度观察者（离开时已移除），并根据离开前状态决定是否恢复播放。
+        if timeObserver == nil, let player {
+            let interval = CMTime(seconds: 0.5, preferredTimescale: 600)
+            timeObserver = player.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak self] _ in
+                self?.updateProgress()
+            }
+            updateProgress()
+        }
+
+        if wasPlayingBeforeDisappear, let player {
+            player.play()
+            isPlaying = true
+            videoControlsView.setPlayPauseIcon(isPlaying: true)
+            videoControlsView.setMuteIcon(isMuted: player.isMuted)
+        } else {
+            isPlaying = false
+            videoControlsView.setPlayPauseIcon(isPlaying: false)
+            videoControlsView.setMuteIcon(isMuted: player?.isMuted ?? false)
+        }
+
+        // 若视频 layer 已就绪，则把封面图淡出，避免遮挡播放器画面。
+        if playerLayer != nil, !imageView.isHidden {
+            hideVideoThumbnailAnimatedIfNeeded()
+        }
+    }
+
+    private func hideVideoThumbnailAnimatedIfNeeded() {
+        guard !imageView.isHidden else { return }
+        videoThumbnailHideWorkItem?.cancel()
+
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            guard self.isPageActive else { return }
+            UIView.animate(withDuration: 0.3) {
+                self.imageView.alpha = 0
+            } completion: { _ in
+                guard self.isPageActive else { return }
+                self.imageView.isHidden = true
+                self.imageView.alpha = 1
+            }
+        }
+        videoThumbnailHideWorkItem = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1, execute: work)
     }
 }
 

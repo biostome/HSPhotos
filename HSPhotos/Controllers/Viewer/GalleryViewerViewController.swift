@@ -11,6 +11,7 @@ import Photos
 
 class GalleryViewerViewController: UIViewController {
     var assets: [PHAsset]
+    let mediaActionService: GalleryViewerMediaActionHandling
 
     let pageViewController = UIPageViewController(
         transitionStyle: .scroll,
@@ -50,8 +51,22 @@ class GalleryViewerViewController: UIViewController {
 
     var heroTransitionDelegate: HeroPhotoTransitionDelegate?
 
-    init(assets: [PHAsset], initialIndex: Int, sourceFrame: CGRect = .zero, sourceImage: UIImage? = nil) {
+    /// 初始贴满屏底；`setupThumbnailStrip` 后改为贴到缩略条上方，避免分页容器盖住底栏触摸。
+    var pageViewBottomConstraint: NSLayoutConstraint!
+
+    var currentPage: PhotoPageViewController? {
+        pageViewController.viewControllers?.first as? PhotoPageViewController
+    }
+
+    init(
+        assets: [PHAsset],
+        initialIndex: Int,
+        sourceFrame: CGRect = .zero,
+        sourceImage: UIImage? = nil,
+        mediaActionService: GalleryViewerMediaActionHandling = GalleryViewerMediaActionService()
+    ) {
         self.assets = assets
+        self.mediaActionService = mediaActionService
         self.currentIndex = min(max(0, initialIndex), max(0, assets.count - 1))
         super.init(nibName: nil, bundle: nil)
         modalPresentationStyle = .overFullScreen
@@ -72,9 +87,16 @@ class GalleryViewerViewController: UIViewController {
         assets: [PHAsset],
         initialIndex: Int,
         sourceFrame: CGRect = .zero,
-        sourceImage: UIImage? = nil
+        sourceImage: UIImage? = nil,
+        mediaActionService: GalleryViewerMediaActionHandling = GalleryViewerMediaActionService()
     ) -> UINavigationController {
-        let viewer = GalleryViewerViewController(assets: assets, initialIndex: initialIndex, sourceFrame: sourceFrame, sourceImage: sourceImage)
+        let viewer = GalleryViewerViewController(
+            assets: assets,
+            initialIndex: initialIndex,
+            sourceFrame: sourceFrame,
+            sourceImage: sourceImage,
+            mediaActionService: mediaActionService
+        )
         let nav = UINavigationController(rootViewController: viewer)
         nav.modalPresentationStyle = .overFullScreen
         if let hero = viewer.heroTransitionDelegate {
@@ -95,21 +117,40 @@ class GalleryViewerViewController: UIViewController {
         setupThumbnailStrip()
         setupPageIndicator()
         updateTitleAndFavorite()
+        setupPageGestures()
+    }
 
+    /// 保持 chrome 在最上层；**底栏必须在缩略条之后** `bringSubviewToFront`，否则缩略条会盖住 Liquid Glass 按钮。
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        bringChromeToFront()
+    }
+}
+
+private extension GalleryViewerViewController {
+    func setupPageGestures() {
+        // 点按仅加在分页容器上：避免挂在根 view 上与顶栏/底栏控件抢触摸；根 view 上的全屏手势在 iOS 上常与按钮冲突。
         let toggleTap = UITapGestureRecognizer(target: self, action: #selector(toggleChrome))
         toggleTap.cancelsTouchesInView = false
         toggleTap.delegate = self
-        view.addGestureRecognizer(toggleTap)
+        pageViewController.view.addGestureRecognizer(toggleTap)
 
         dismissPan.addTarget(self, action: #selector(handleDismissPan(_:)))
         dismissPan.delegate = self
         pageViewController.view.addGestureRecognizer(dismissPan)
 
-        for subview in pageViewController.view.subviews {
-            if let sv = subview as? UIScrollView {
-                sv.panGestureRecognizer.require(toFail: dismissPan)
-                break
-            }
+        guard let pageScrollView = pageViewController.view.subviews.first(where: { $0 is UIScrollView }) as? UIScrollView else {
+            return
         }
+        pageScrollView.panGestureRecognizer.require(toFail: dismissPan)
+    }
+
+    func bringChromeToFront() {
+        if !topBar.isHidden {
+            view.bringSubviewToFront(topBar)
+        }
+        view.bringSubviewToFront(thumbnailStripView)
+        view.bringSubviewToFront(bottomChromeContainer)
+        view.bringSubviewToFront(pageIndicator)
     }
 }

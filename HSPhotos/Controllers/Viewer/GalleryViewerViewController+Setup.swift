@@ -19,8 +19,7 @@ extension GalleryViewerViewController {
 
         NSLayoutConstraint.activate([
             pageIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            pageIndicator.bottomAnchor.constraint(equalTo: thumbnailStripView.topAnchor, constant: -12),
-            pageIndicator.widthAnchor.constraint(equalToConstant: 60),
+            pageIndicator.bottomAnchor.constraint( equalTo: view.bottomAnchor, constant: 4),
             pageIndicator.heightAnchor.constraint(equalToConstant: 24)
         ])
     }
@@ -41,27 +40,21 @@ extension GalleryViewerViewController {
             guard let self else { return }
             guard idx >= 0, idx < self.assets.count, idx != self.currentIndex else { return }
             // 缩略条已在 didSelect 里 syncSelection；避免分页结束后再滚一次
-            self.isPagingDrivenByThumbnailStrip = true
-            let dir: UIPageViewController.NavigationDirection = idx > self.currentIndex ? .forward : .reverse
-            guard let page = self.pageForIndex(idx) else {
-                self.isPagingDrivenByThumbnailStrip = false
-                return
-            }
-            self.pageViewController.setViewControllers([page], direction: dir, animated: true)
+            self.navigateToIndexFromThumbnailStrip(idx, animated: true)
         }
         thumbnailStripView.onCenteredIndexChanged = { [weak self] idx in
             guard let self else { return }
             guard idx >= 0, idx < self.assets.count, idx != self.currentIndex else { return }
-            let oldIndex = self.currentIndex
-            self.isPagingDrivenByThumbnailStrip = true
-            guard let page = self.pageForIndex(idx) else {
-                self.isPagingDrivenByThumbnailStrip = false
-                return
-            }
-            let dir: UIPageViewController.NavigationDirection = idx > oldIndex ? .forward : .reverse
-            self.pageViewController.setViewControllers([page], direction: dir, animated: false)
+            self.navigateToIndexFromThumbnailStrip(idx, animated: false)
         }
         thumbnailStripView.syncSelection(currentIndex, animated: false)
+
+        // 保持分页容器贴满屏底：单页内的图片布局使用其自身 bounds 做 aspectFit，
+        // 底部留空会造成视觉“中心偏移”。
+        // 触摸冲突后续再通过手势取消策略/滚动内容 inset 微调处理。
+        pageViewBottomConstraint.isActive = false
+        pageViewBottomConstraint = pageViewController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        pageViewBottomConstraint.isActive = true
     }
 
     func setupPageViewController() {
@@ -72,11 +65,12 @@ extension GalleryViewerViewController {
         pageViewController.view.translatesAutoresizingMaskIntoConstraints = false
         pageViewController.view.backgroundColor = .clear
 
+        pageViewBottomConstraint = pageViewController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         NSLayoutConstraint.activate([
             pageViewController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             pageViewController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             pageViewController.view.topAnchor.constraint(equalTo: view.topAnchor),
-            pageViewController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+            pageViewBottomConstraint
         ])
 
         pageViewController.didMove(toParent: self)
@@ -91,6 +85,17 @@ extension GalleryViewerViewController {
         let page = PhotoPageViewController(asset: assets[index])
         page.index = index
         return page
+    }
+
+    private func navigateToIndexFromThumbnailStrip(_ targetIndex: Int, animated: Bool) {
+        let previousIndex = currentIndex
+        isPagingDrivenByThumbnailStrip = true
+        guard let page = pageForIndex(targetIndex) else {
+            isPagingDrivenByThumbnailStrip = false
+            return
+        }
+        let dir: UIPageViewController.NavigationDirection = targetIndex > previousIndex ? .forward : .reverse
+        pageViewController.setViewControllers([page], direction: dir, animated: animated)
     }
 
     func setupTopBar() {
@@ -187,6 +192,8 @@ extension GalleryViewerViewController {
 
         let leftSpacer = UIView()
         let rightSpacer = UIView()
+        leftSpacer.isUserInteractionEnabled = false
+        rightSpacer.isUserInteractionEnabled = false
         leftSpacer.translatesAutoresizingMaskIntoConstraints = false
         rightSpacer.translatesAutoresizingMaskIntoConstraints = false
 
@@ -201,6 +208,8 @@ extension GalleryViewerViewController {
             bottomChromeContainer.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: m.horizontalInset),
             bottomChromeContainer.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -m.horizontalInset),
             bottomChromeContainer.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -m.bottomInset),
+            // 必须给出正高度：否则 Auto Layout 可把容器压成 0pt，按钮虽画出在容器外，但父视图 pointInside 失败，整行无法 hitTest。
+            bottomChromeContainer.heightAnchor.constraint(equalToConstant: m.sideControlSide),
 
             shareButton.leadingAnchor.constraint(equalTo: bottomChromeContainer.leadingAnchor),
             shareButton.centerYAnchor.constraint(equalTo: bottomChromeContainer.centerYAnchor),

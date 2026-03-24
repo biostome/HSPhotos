@@ -2,6 +2,18 @@
 
 ## 2026-03-20
 
+### 大图浏览器 · 底栏可点
+
+- **`UIPageViewController` 布局**：分页容器底边在缩略条就绪后改为约束到 **`thumbnailStripView.topAnchor`**（留小间距），避免内部 `UIScrollView` 在几何上铺满屏底抢走底栏/胶囊按钮触摸；移除自定义根视图 `hitTest` 绕行。
+- **`bottomChromeContainer` 高度**：为底栏容器增加与 **`sideControlSide`** 相等的固定高度；原先仅靠无固有高度的 spacer 撑满上下，容器可被压成 0pt，导致子按钮落在父 bounds 外、系统不向下命中。
+
+### 大图浏览器 · 照片信息
+
+- **Sheet 弹窗**：工具栏「信息」与顶栏标题入口改为与「添加标签」相同的 **`UISheetPresentationController`**（`.medium()` / `.large()`、`prefersGrabberVisible`），由 `PhotoAssetInfoSheetViewController` 展示。
+- **完整元数据**：在同页按板块列出 Photos 可读信息——`localIdentifier`、媒体大类 / **`PHAsset.PlaybackStyle`** / 来源 / 全部适用的 **`PHAssetMediaSubtype`**、像素与 MP、音视频时长、创建与修改时间、嵌入 **GPS**（经纬度、海拔、精度、时间）、连拍相关、收藏 / 隐藏 / 调整 / **`canPerform`**，以及 **`PHAssetResource`** 逐条（类型、原始文件名、UTI）。
+- **系统相册式界面**：**`UITableView` inset 分组** + **`UIListContentConfiguration.valueCell` 纵向堆叠**（小写标题 + 正文值、等宽字体用于标识符）；标题行使用较大 **`semibold` 20pt**；有 GPS 时在 **`tableHeaderView`** 展示 **`MKMapView`（`mutedStandard`）**、底部渐变叠字、**反向地理编码** 地点文案、**「在地图中查看」** 与 **点按地图** 跳转 **`MKMapItem.openInMaps`**。
+- **信息面板 UI（对齐 HIG）**：去掉地图 **重阴影 / 渐变叠白字 / 字阴影**，改为 **`systemChromeMaterial` 底栏** + **`label` 色正文**；地图外框 **`secondarySystemGroupedBackground` + 10pt 连续圆角** 与 inset 分组一致；跳转改为 **plain + `arrow.up.right.square`**；**标题 Title3**、抓取条回到 **`separator`**；分组头恢复 **系统默认 footnote**（无每段 SF Symbol）；列表 **Subheadline + Body** 的 **valueCell**，短字段 **左右排列**、长文/多行/等宽 **自动纵向堆叠**；**layoutMargins** 统一约 **20**。
+
 ### 大图浏览器 · 单页媒体（`PhotoPageViewController`）
 
 - **iCloud / 慢加载**：大图请求在需要云端拉取时显示加载指示与文案；视频在较慢时延迟显示「正在载入视频…」，避免本地秒开闪一下。

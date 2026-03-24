@@ -5,7 +5,6 @@
 
 import UIKit
 import Photos
-import AVFoundation
 
 // MARK: - 工具栏与操作
 
@@ -29,139 +28,24 @@ extension GalleryViewerViewController {
     @objc func infoTapped() {
         guard currentIndex >= 0, currentIndex < assets.count else { return }
         let asset = assets[currentIndex]
-        let infoView = createInfoView(asset: asset)
-        view.addSubview(infoView)
-        infoView.alpha = 0
-        infoView.transform = CGAffineTransform(scaleX: 0.9, y: 0.9)
-        UIView.animate(withDuration: 0.3, delay: 0, options: .curveEaseOut, animations: {
-            infoView.alpha = 1
-            infoView.transform = .identity
-        })
-    }
-
-    private func createInfoView(asset: PHAsset) -> UIView {
-        let containerView = UIView()
-        containerView.backgroundColor = UIColor.systemBackground.withAlphaComponent(0.95)
-        containerView.layer.cornerRadius = 16
-        containerView.clipsToBounds = true
-        containerView.translatesAutoresizingMaskIntoConstraints = false
-
-        let titleLabel = UILabel()
-        titleLabel.text = "照片信息"
-        titleLabel.font = .systemFont(ofSize: 18, weight: .bold)
-        titleLabel.textAlignment = .center
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        containerView.addSubview(titleLabel)
-
-        let infoLabel = UILabel()
-        infoLabel.text = getAssetInfo(asset)
-        infoLabel.font = .systemFont(ofSize: 14)
-        infoLabel.numberOfLines = 0
-        infoLabel.textAlignment = .left
-        infoLabel.translatesAutoresizingMaskIntoConstraints = false
-        containerView.addSubview(infoLabel)
-
-        let closeBtn = UIButton(type: .system)
-        let attributedTitle = NSAttributedString(
-            string: "关闭",
-            attributes: [
-                .font: UIFont.systemFont(ofSize: 16, weight: .medium),
-                .foregroundColor: UIColor.systemBlue
-            ]
-        )
-        closeBtn.setAttributedTitle(attributedTitle, for: .normal)
-        closeBtn.translatesAutoresizingMaskIntoConstraints = false
-        closeBtn.addTarget(self, action: #selector(closeInfoView(_:)), for: .touchUpInside)
-        containerView.addSubview(closeBtn)
-
-        NSLayoutConstraint.activate([
-            containerView.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            containerView.centerYAnchor.constraint(equalTo: view.centerYAnchor),
-            containerView.widthAnchor.constraint(equalTo: view.widthAnchor, multiplier: 0.8),
-            containerView.heightAnchor.constraint(lessThanOrEqualTo: view.heightAnchor, multiplier: 0.6),
-            titleLabel.topAnchor.constraint(equalTo: containerView.topAnchor, constant: 20),
-            titleLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 20),
-            titleLabel.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -20),
-            infoLabel.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 20),
-            infoLabel.leadingAnchor.constraint(equalTo: containerView.leadingAnchor, constant: 20),
-            infoLabel.trailingAnchor.constraint(equalTo: containerView.trailingAnchor, constant: -20),
-            closeBtn.topAnchor.constraint(equalTo: infoLabel.bottomAnchor, constant: 20),
-            closeBtn.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
-            closeBtn.bottomAnchor.constraint(equalTo: containerView.bottomAnchor, constant: -20),
-            closeBtn.widthAnchor.constraint(equalToConstant: 80),
-            closeBtn.heightAnchor.constraint(equalToConstant: 40)
-        ])
-
-        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(closeInfoView(_:)))
-        tapGesture.delegate = self
-        view.addGestureRecognizer(tapGesture)
-
-        return containerView
-    }
-
-    @objc func closeInfoView(_ sender: Any) {
-        for subview in view.subviews {
-            if subview.backgroundColor == UIColor.systemBackground.withAlphaComponent(0.95) && subview.layer.cornerRadius == 16 {
-                UIView.animate(withDuration: 0.3, delay: 0, options: .curveEaseIn, animations: {
-                    subview.alpha = 0
-                    subview.transform = CGAffineTransform(scaleX: 0.9, y: 0.9)
-                }, completion: { _ in
-                    subview.removeFromSuperview()
-                })
-            }
+        let vc = PhotoAssetInfoSheetViewController(asset: asset)
+        if let sheet = vc.sheetPresentationController {
+            sheet.detents = [.medium(), .large()]
+            sheet.prefersGrabberVisible = true
         }
+        present(vc, animated: true)
     }
 
     @objc func shareTapped() {
         guard currentIndex >= 0, currentIndex < assets.count else { return }
         let asset = assets[currentIndex]
-        if asset.mediaType == .image {
-            shareImage(asset: asset)
-        } else if asset.mediaType == .video {
-            shareVideo(asset: asset)
-        }
-    }
-
-    private func shareImage(asset: PHAsset) {
-        let options = PHImageRequestOptions()
-        options.isSynchronous = true
-        options.deliveryMode = .highQualityFormat
-        PHImageManager.default().requestImage(for: asset, targetSize: PHImageManagerMaximumSize, contentMode: .aspectFit, options: options) { image, _ in
-            DispatchQueue.main.async {
-                guard let image = image else {
-                    self.presentAlert(title: "分享失败", message: "无法获取图片")
-                    return
-                }
-                let activity = UIActivityViewController(activityItems: [image], applicationActivities: nil)
-                if let popover = activity.popoverPresentationController {
-                    popover.sourceView = self.view
-                    popover.sourceRect = CGRect(x: self.view.bounds.midX, y: self.view.bounds.maxY, width: 1, height: 1)
-                }
-                self.present(activity, animated: true)
-            }
-        }
-    }
-
-    private func shareVideo(asset: PHAsset) {
-        let options = PHVideoRequestOptions()
-        options.deliveryMode = .highQualityFormat
-        options.isNetworkAccessAllowed = true
-        PHImageManager.default().requestAVAsset(forVideo: asset, options: options) { avAsset, _, _ in
-            DispatchQueue.main.async {
-                guard let avAsset = avAsset else {
-                    self.presentAlert(title: "分享失败", message: "无法获取视频")
-                    return
-                }
-                if let urlAsset = avAsset as? AVURLAsset {
-                    let activity = UIActivityViewController(activityItems: [urlAsset.url], applicationActivities: nil)
-                    if let popover = activity.popoverPresentationController {
-                        popover.sourceView = self.view
-                        popover.sourceRect = CGRect(x: self.view.bounds.midX, y: self.view.bounds.maxY, width: 1, height: 1)
-                    }
-                    self.present(activity, animated: true)
-                } else {
-                    self.presentAlert(title: "分享失败", message: "无法处理视频资产")
-                }
+        mediaActionService.loadShareItem(for: asset) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success(let item):
+                self.presentShareSheet(item)
+            case .failure(let error):
+                self.presentAlert(title: "分享失败", message: error.localizedDescription)
             }
         }
     }
@@ -169,6 +53,21 @@ extension GalleryViewerViewController {
     @objc func favoriteTapped() {
         guard currentIndex >= 0, currentIndex < assets.count else { return }
         let asset = assets[currentIndex]
+        animateFavoriteButtonTap()
+        mediaActionService.toggleFavorite(asset: asset) { [weak self] result in
+            guard let self = self else { return }
+            switch result {
+            case .success(let updatedAsset):
+                self.assets[self.currentIndex] = updatedAsset
+                self.updateTitleAndFavorite()
+            case .failure(let error):
+                let msg = error.localizedDescription.isEmpty ? "无法更新收藏状态" : error.localizedDescription
+                self.presentAlert(title: "操作失败", message: msg)
+            }
+        }
+    }
+
+    private func animateFavoriteButtonTap() {
         UIView.animate(withDuration: 0.2, delay: 0, options: .curveEaseInOut, animations: {
             self.favoriteButton.transform = CGAffineTransform(scaleX: 1.2, y: 1.2)
         }, completion: { _ in
@@ -176,18 +75,6 @@ extension GalleryViewerViewController {
                 self.favoriteButton.transform = .identity
             })
         })
-        PhotoChangesService.toggleFavorite(asset: asset) { [weak self] success, error in
-            guard let self = self else { return }
-            if success {
-                let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: [asset.localIdentifier], options: nil)
-                if let updatedAsset = fetchResult.firstObject {
-                    self.assets[self.currentIndex] = updatedAsset
-                }
-                self.updateTitleAndFavorite()
-            } else {
-                self.presentAlert(title: "操作失败", message: error ?? "无法更新收藏状态")
-            }
-        }
     }
 
     @objc func deleteTapped() {
@@ -212,49 +99,60 @@ extension GalleryViewerViewController {
     }
 
     private func performDelete(asset: PHAsset) {
-        PHPhotoLibrary.shared().performChanges {
-            PHAssetChangeRequest.deleteAssets([asset] as NSArray)
-        } completionHandler: { [weak self] success, error in
-            guard let self = self else { return }
-            DispatchQueue.main.async {
-                if success {
-                    var newAssets = self.assets
-                    newAssets.remove(at: self.currentIndex)
-                    if newAssets.isEmpty {
-                        self.dismiss(animated: true)
-                        return
-                    }
-                    if let currentPage = self.pageViewController.viewControllers?.first as? PhotoPageViewController {
-                        UIView.animate(withDuration: 0.3, delay: 0, options: .curveEaseIn, animations: {
-                            currentPage.view.alpha = 0
-                            currentPage.view.transform = CGAffineTransform(scaleX: 0.8, y: 0.8)
-                        }, completion: { [weak self] _ in
-                            guard let self = self else { return }
-                            self.currentIndex = min(self.currentIndex, newAssets.count - 1)
-                            self.assets = newAssets
-                            self.thumbnailStripView.assets = newAssets
-                            if let page = self.pageForIndex(self.currentIndex) {
-                                self.pageViewController.setViewControllers([page], direction: .forward, animated: false)
-                            }
-                            self.updateTitleAndFavorite()
-                            self.thumbnailStripView.syncSelection(self.currentIndex, animated: false)
-                        })
-                    } else {
-                        self.assets = newAssets
-                        self.thumbnailStripView.assets = newAssets
-                        self.currentIndex = min(self.currentIndex, newAssets.count - 1)
-                        if let page = self.pageForIndex(self.currentIndex) {
-                            self.pageViewController.setViewControllers([page], direction: .forward, animated: false)
-                        }
-                        self.updateTitleAndFavorite()
-                        self.thumbnailStripView.syncSelection(self.currentIndex, animated: false)
-                    }
-                } else {
-                    let errorMessage = error?.localizedDescription ?? "无法删除媒体文件"
-                    self.presentAlert(title: "删除失败", message: errorMessage)
+        mediaActionService.delete(asset: asset) { [weak self] result in
+            guard let self else { return }
+            switch result {
+            case .success:
+                var newAssets = self.assets
+                newAssets.remove(at: self.currentIndex)
+                if newAssets.isEmpty {
+                    self.dismiss(animated: true)
+                    return
                 }
+                if let currentPage = self.currentPage {
+                    UIView.animate(withDuration: 0.3, delay: 0, options: .curveEaseIn, animations: {
+                        currentPage.view.alpha = 0
+                        currentPage.view.transform = CGAffineTransform(scaleX: 0.8, y: 0.8)
+                    }, completion: { [weak self] _ in
+                        guard let self else { return }
+                        self.applyStateAfterDelete(newAssets)
+                    })
+                } else {
+                    self.applyStateAfterDelete(newAssets)
+                }
+            case .failure(let error):
+                let errorMessage = error.localizedDescription.isEmpty ? "无法删除媒体文件" : error.localizedDescription
+                self.presentAlert(title: "删除失败", message: errorMessage)
             }
         }
+    }
+
+    private func presentShareSheet(_ item: GalleryViewerShareItem) {
+        let activityItems: [Any]
+        switch item {
+        case .image(let image):
+            activityItems = [image]
+        case .videoURL(let url):
+            activityItems = [url]
+        }
+
+        let activity = UIActivityViewController(activityItems: activityItems, applicationActivities: nil)
+        if let popover = activity.popoverPresentationController {
+            popover.sourceView = view
+            popover.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.maxY, width: 1, height: 1)
+        }
+        present(activity, animated: true)
+    }
+
+    private func applyStateAfterDelete(_ newAssets: [PHAsset]) {
+        currentIndex = min(currentIndex, newAssets.count - 1)
+        assets = newAssets
+        thumbnailStripView.assets = newAssets
+        if let page = pageForIndex(currentIndex) {
+            pageViewController.setViewControllers([page], direction: .forward, animated: false)
+        }
+        updateTitleAndFavorite()
+        thumbnailStripView.syncSelection(currentIndex, animated: false)
     }
 
     func updateTitleAndFavorite() {
@@ -283,25 +181,6 @@ extension GalleryViewerViewController {
         thumbnailStripView.alpha = alpha
         pageIndicator.alpha = alpha
         navigationController?.navigationBar.alpha = alpha
-    }
-
-    private func getAssetInfo(_ asset: PHAsset) -> String {
-        var info = [String]()
-        let mediaType: String
-        switch asset.mediaType {
-        case .image: mediaType = "图片"
-        case .video: mediaType = "视频"
-        default: mediaType = "未知"
-        }
-        info.append("类型: \(mediaType)")
-        if let creationDate = asset.creationDate {
-            let df = DateFormatter()
-            df.dateFormat = "yyyy年M月d日 HH:mm:ss"
-            info.append("创建日期: \(df.string(from: creationDate))")
-        }
-        info.append("尺寸: \(asset.pixelWidth) × \(asset.pixelHeight)")
-        info.append("收藏: \(asset.isFavorite ? "是" : "否")")
-        return info.joined(separator: "\n")
     }
 
     func presentAlert(title: String, message: String) {
@@ -396,22 +275,18 @@ extension GalleryViewerViewController: UIGestureRecognizerDelegate {
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        let location = touch.location(in: view)
-        if bottomChromeContainer.frame.contains(location) {
-            return false
-        }
-        if thumbnailStripView.frame.contains(location) {
-            return false
-        }
-        for subview in view.subviews {
-            if subview.backgroundColor == UIColor.systemBackground.withAlphaComponent(0.95) && subview.layer.cornerRadius == 16 {
-                if subview.frame.contains(location) {
-                    return false
-                }
+        // 外层 toggleTap 不应抢占视频控件/按钮/slider 的点击，
+        // 否则在播放、暂停、拖动进度时会误触发 chrome 隐藏。
+        var current: UIView? = touch.view
+        while let v = current {
+            if v is UIControl {
+                return false
             }
+            current = v.superview
         }
         return true
     }
+
 }
 
 // MARK: - UIPageViewController
@@ -428,20 +303,26 @@ extension GalleryViewerViewController: UIPageViewControllerDataSource, UIPageVie
     }
 
     func pageViewController(_ pageViewController: UIPageViewController, didFinishAnimating finished: Bool, previousViewControllers: [UIViewController], transitionCompleted completed: Bool) {
-        guard let page = pageViewController.viewControllers?.first as? PhotoPageViewController else {
-            if isPagingDrivenByThumbnailStrip { isPagingDrivenByThumbnailStrip = false }
+        guard let page = currentPage else {
+            finishThumbnailDrivenPagingIfNeeded()
             return
         }
         guard completed else {
-            if isPagingDrivenByThumbnailStrip { isPagingDrivenByThumbnailStrip = false }
+            finishThumbnailDrivenPagingIfNeeded()
             return
         }
         currentIndex = page.index
         updateTitleAndFavorite()
         if isPagingDrivenByThumbnailStrip {
-            isPagingDrivenByThumbnailStrip = false
+            finishThumbnailDrivenPagingIfNeeded()
             return
         }
         thumbnailStripView.syncSelection(currentIndex, animated: true)
+    }
+
+    private func finishThumbnailDrivenPagingIfNeeded() {
+        if isPagingDrivenByThumbnailStrip {
+            isPagingDrivenByThumbnailStrip = false
+        }
     }
 }

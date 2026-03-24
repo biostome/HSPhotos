@@ -41,10 +41,12 @@ private final class GalleryThumbnailStripFlowLayout: UICollectionViewFlowLayout 
 
     override func layoutAttributesForElements(in rect: CGRect) -> [UICollectionViewLayoutAttributes]? {
         guard let attrs = super.layoutAttributesForElements(in: rect) else { return nil }
+        let shiftX = horizontalContentShiftXIfNeeded()
         return attrs.compactMap { a in
             guard let copy = a.copy() as? UICollectionViewLayoutAttributes else { return nil }
             if copy.representedElementCategory == .cell {
                 centerCellVertically(copy)
+                copy.frame.origin.x += shiftX
             }
             return copy
         }
@@ -53,6 +55,7 @@ private final class GalleryThumbnailStripFlowLayout: UICollectionViewFlowLayout 
     override func layoutAttributesForItem(at indexPath: IndexPath) -> UICollectionViewLayoutAttributes? {
         guard let attrs = super.layoutAttributesForItem(at: indexPath)?.copy() as? UICollectionViewLayoutAttributes else { return nil }
         centerCellVertically(attrs)
+        attrs.frame.origin.x += horizontalContentShiftXIfNeeded()
         return attrs
     }
 
@@ -65,6 +68,42 @@ private final class GalleryThumbnailStripFlowLayout: UICollectionViewFlowLayout 
         var f = attrs.frame
         f.origin.y = top + (h - f.height) / 2
         attrs.frame = f
+    }
+
+    /// 当缩略条内容总宽度小于视口宽度时，把 cell 们整体向右偏移，使其在容器内居中显示。
+    /// 当内容宽度大于视口时返回 0：保持原本左对齐 + 可滚动行为。
+    private func horizontalContentShiftXIfNeeded() -> CGFloat {
+        guard let cv = collectionView else { return 0 }
+        let n = cv.numberOfItems(inSection: 0)
+        guard n > 0 else { return 0 }
+
+        let viewportWidth = cv.bounds.width - cv.adjustedContentInset.left - cv.adjustedContentInset.right
+        guard viewportWidth > 0 else { return 0 }
+
+        let leftInset = sectionInset.left
+        let rightInset = sectionInset.right
+        let spacing = minimumLineSpacing
+
+        let inactiveW = GalleryViewerStripMetrics.inactiveWidth
+        let activeW = GalleryViewerStripMetrics.activeWidth
+
+        // 不区分 selectedIndex 的“最小宽度”判断，避免在大列表里无谓遍历。
+        let minContentWidth = leftInset + rightInset
+            + CGFloat(n) * inactiveW
+            + CGFloat(max(0, n - 1)) * spacing
+
+        if minContentWidth > viewportWidth { return 0 }
+
+        var contentWidth = minContentWidth
+        if let stripView = cv.superview as? GalleryViewerThumbnailStripView {
+            let idx = stripView.selectedIndex
+            if idx >= 0, idx < n {
+                contentWidth += (activeW - inactiveW)
+            }
+        }
+
+        guard contentWidth <= viewportWidth else { return 0 }
+        return (viewportWidth - contentWidth) / 2
     }
 }
 
@@ -196,7 +235,8 @@ final class GalleryViewerThumbnailStripView: UIView {
         }
     }
 
-    private var selectedIndex: Int = 0
+    /// `fileprivate`：同文件内 `GalleryThumbnailStripFlowLayout` 需读取以计算居中留白。
+    fileprivate var selectedIndex: Int = 0
 
     // MARK: - 程序对齐 vs 用户拖条（避免 scrollViewDidScroll 误改 selectedIndex）
 
@@ -368,7 +408,7 @@ extension GalleryViewerThumbnailStripView: UICollectionViewDataSource, UICollect
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: GalleryThumbnailStripCell.reuseId, for: indexPath) as! GalleryThumbnailStripCell
         let asset = assets[indexPath.item]
         let isSelected = indexPath.item == selectedIndex
-        let scale = window?.screen.scale ?? UIScreen.main.scale
+        let scale = window?.screen.scale ?? traitCollection.displayScale
         cell.configure(asset: asset, isSelected: isSelected, targetScale: scale)
         return cell
     }

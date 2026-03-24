@@ -801,7 +801,8 @@ extension PhotoGridView: UICollectionViewDataSource {
 extension PhotoGridView: UICollectionViewDataSourcePrefetching {
     func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
         let cellSize = effectiveCellSize(for: collectionView)
-        let targetSize = PhotoCell.thumbnailSize(for: cellSize)
+        let scale = collectionView.window?.screen.scale ?? collectionView.traitCollection.displayScale
+        let targetSize = PhotoCell.thumbnailSize(for: cellSize, scale: scale)
         let assets = indexPaths.compactMap { $0.item < visibleAssets.count ? visibleAssets[$0.item] : nil }
         guard !assets.isEmpty else { return }
         PhotoCell.cachingManager.startCachingImages(
@@ -814,7 +815,8 @@ extension PhotoGridView: UICollectionViewDataSourcePrefetching {
     
     func collectionView(_ collectionView: UICollectionView, cancelPrefetchingForItemsAt indexPaths: [IndexPath]) {
         let cellSize = effectiveCellSize(for: collectionView)
-        let targetSize = PhotoCell.thumbnailSize(for: cellSize)
+        let scale = collectionView.window?.screen.scale ?? collectionView.traitCollection.displayScale
+        let targetSize = PhotoCell.thumbnailSize(for: cellSize, scale: scale)
         let assets = indexPaths.compactMap { $0.item < visibleAssets.count ? visibleAssets[$0.item] : nil }
         guard !assets.isEmpty else { return }
         PhotoCell.cachingManager.stopCachingImages(
