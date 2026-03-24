@@ -6,8 +6,6 @@
 import UIKit
 import Photos
 
-// MARK: - 工具栏与操作
-
 extension GalleryViewerViewController {
     @objc func closeTapped() {
         dismiss(animated: true)
@@ -16,9 +14,9 @@ extension GalleryViewerViewController {
     @objc func toggleChrome() {
         isChromeHidden.toggle()
         let alpha: CGFloat = isChromeHidden ? 0 : 1
-        UIView.animate(withDuration: 0.3, delay: 0, options: .curveEaseInOut, animations: {
+        UIView.animate(withDuration: 0.3, delay: 0, options: .curveEaseInOut) {
             self.applyChromeVisibilityAlpha(alpha)
-        })
+        }
     }
 
     @objc func editTapped() {
@@ -55,11 +53,14 @@ extension GalleryViewerViewController {
         let asset = assets[currentIndex]
         animateFavoriteButtonTap()
         mediaActionService.toggleFavorite(asset: asset) { [weak self] result in
-            guard let self = self else { return }
+            guard let self else { return }
             switch result {
             case .success(let updatedAsset):
                 self.assets[self.currentIndex] = updatedAsset
+                self.updateVisibleCellIfNeeded(with: updatedAsset)
                 self.updateTitleAndFavorite()
+                self.thumbnailStripView.assets = self.assets
+                self.thumbnailStripView.syncSelection(self.currentIndex, animated: false)
             case .failure(let error):
                 let msg = error.localizedDescription.isEmpty ? "无法更新收藏状态" : error.localizedDescription
                 self.presentAlert(title: "操作失败", message: msg)
@@ -67,13 +68,19 @@ extension GalleryViewerViewController {
         }
     }
 
+    private func updateVisibleCellIfNeeded(with asset: PHAsset) {
+        guard let cell = currentMediaCell else { return }
+        cell.configure(with: asset, at: currentIndex)
+        cell.isPageActive = true
+    }
+
     private func animateFavoriteButtonTap() {
         UIView.animate(withDuration: 0.2, delay: 0, options: .curveEaseInOut, animations: {
             self.favoriteButton.transform = CGAffineTransform(scaleX: 1.2, y: 1.2)
         }, completion: { _ in
-            UIView.animate(withDuration: 0.2, delay: 0, options: .curveEaseInOut, animations: {
+            UIView.animate(withDuration: 0.2, delay: 0, options: .curveEaseInOut) {
                 self.favoriteButton.transform = .identity
-            })
+            }
         })
     }
 
@@ -83,9 +90,9 @@ extension GalleryViewerViewController {
         let alert = UIAlertController(title: "删除媒体", message: "确定要删除这个媒体文件吗？", preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "取消", style: .cancel))
         alert.addAction(UIAlertAction(title: "删除", style: .destructive) { [weak self] _ in
-            guard let self = self else { return }
+            guard let self else { return }
             PHPhotoLibrary.requestAuthorization { [weak self] status in
-                guard let self = self else { return }
+                guard let self else { return }
                 if status == .authorized {
                     self.performDelete(asset: asset)
                 } else {
@@ -109,20 +116,10 @@ extension GalleryViewerViewController {
                     self.dismiss(animated: true)
                     return
                 }
-                if let currentPage = self.currentPage {
-                    UIView.animate(withDuration: 0.3, delay: 0, options: .curveEaseIn, animations: {
-                        currentPage.view.alpha = 0
-                        currentPage.view.transform = CGAffineTransform(scaleX: 0.8, y: 0.8)
-                    }, completion: { [weak self] _ in
-                        guard let self else { return }
-                        self.applyStateAfterDelete(newAssets)
-                    })
-                } else {
-                    self.applyStateAfterDelete(newAssets)
-                }
+                self.applyStateAfterDelete(newAssets)
             case .failure(let error):
-                let errorMessage = error.localizedDescription.isEmpty ? "无法删除媒体文件" : error.localizedDescription
-                self.presentAlert(title: "删除失败", message: errorMessage)
+                let message = error.localizedDescription.isEmpty ? "无法删除媒体文件" : error.localizedDescription
+                self.presentAlert(title: "删除失败", message: message)
             }
         }
     }
@@ -147,12 +144,15 @@ extension GalleryViewerViewController {
     private func applyStateAfterDelete(_ newAssets: [PHAsset]) {
         currentIndex = min(currentIndex, newAssets.count - 1)
         assets = newAssets
+        collectionView.reloadData()
         thumbnailStripView.assets = newAssets
-        if let page = pageForIndex(currentIndex) {
-            pageViewController.setViewControllers([page], direction: .forward, animated: false)
-        }
-        updateTitleAndFavorite()
         thumbnailStripView.syncSelection(currentIndex, animated: false)
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.scrollToIndex(self.currentIndex, animated: false)
+            self.updateTitleAndFavorite()
+            self.updateActivePageState()
+        }
     }
 
     func updateTitleAndFavorite() {
@@ -165,22 +165,25 @@ extension GalleryViewerViewController {
 
         let heartName = asset.isFavorite ? "heart.fill" : "heart"
         var favConfig = favoriteButton.configuration ?? UIButton.Configuration.borderless()
-        let m = GalleryViewerChromeMetrics.self
-        let sym = UIImage.SymbolConfiguration(pointSize: m.capsuleInnerIconPointSize, weight: m.capsuleIconWeight)
-        favConfig.image = UIImage(systemName: heartName, withConfiguration: sym)
+        let metrics = GalleryViewerChromeMetrics.self
+        let symbol = UIImage.SymbolConfiguration(pointSize: metrics.capsuleInnerIconPointSize, weight: metrics.capsuleIconWeight)
+        favConfig.image = UIImage(systemName: heartName, withConfiguration: symbol)
         favConfig.baseForegroundColor = .white
         favoriteButton.configuration = favConfig
 
         pageIndicator.text = "\(currentIndex + 1)/\(assets.count)"
     }
 
-    /// 顶栏：自定义 topBar 或包在 NavigationController 时的系统导航栏
     func applyChromeVisibilityAlpha(_ alpha: CGFloat) {
         topBar.alpha = alpha
         bottomChromeContainer.alpha = alpha
         thumbnailStripView.alpha = alpha
         pageIndicator.alpha = alpha
         navigationController?.navigationBar.alpha = alpha
+        let shouldShowInlineControls = alpha > 0.001
+        for case let cell as PhotoCellBase in collectionView.visibleCells {
+            cell.setInlineControlsVisible(shouldShowInlineControls, animated: false)
+        }
     }
 
     func presentAlert(title: String, message: String) {
@@ -190,33 +193,25 @@ extension GalleryViewerViewController {
     }
 }
 
-// MARK: - 下滑关闭
-
 extension GalleryViewerViewController {
     @objc func handleDismissPan(_ gesture: UIPanGestureRecognizer) {
         let translation = gesture.translation(in: view)
         let velocity = gesture.velocity(in: view)
         switch gesture.state {
         case .began:
-            dismissStartY = pageViewController.view.frame.origin.y
             isDismissing = false
         case .changed:
-            let ty = translation.y
-            let tx = translation.x
-            let maxDistance: CGFloat = 300
-            let progress = min(1.0, abs(ty) / maxDistance)
+            guard let dismissTargetView = currentDismissTransformView else { return }
+            let progress = min(1.0, abs(translation.y) / 300)
             let scale = 1.0 - (progress * 0.3)
             let backgroundAlpha = 1.0 - (progress * 0.95)
-            pageViewController.view.transform = CGAffineTransform(translationX: tx, y: ty).scaledBy(x: scale, y: scale)
+            dismissTargetView.transform = CGAffineTransform(translationX: translation.x, y: translation.y).scaledBy(x: scale, y: scale)
             view.backgroundColor = UIColor.black.withAlphaComponent(backgroundAlpha)
             let chromeAlpha = isChromeHidden ? 0 : (1.0 - progress)
             applyChromeVisibilityAlpha(chromeAlpha)
         case .ended, .cancelled:
-            let ty = translation.y
-            let tx = translation.x
-            let distanceThreshold: CGFloat = 120
-            let velocityThreshold: CGFloat = 800
-            let shouldDismiss = ty > distanceThreshold || velocity.y > velocityThreshold
+            guard let dismissTargetView = currentDismissTransformView else { return }
+            let shouldDismiss = translation.y > 120 || velocity.y > 800
             if shouldDismiss {
                 isDismissing = true
                 UIView.animate(
@@ -224,7 +219,7 @@ extension GalleryViewerViewController {
                     delay: 0,
                     options: [.curveEaseOut, .beginFromCurrentState],
                     animations: {
-                        self.pageViewController.view.transform = CGAffineTransform(translationX: tx, y: self.view.bounds.height)
+                        dismissTargetView.transform = CGAffineTransform(translationX: translation.x, y: self.view.bounds.height)
                             .scaledBy(x: 0.3, y: 0.3)
                         self.view.backgroundColor = .clear
                         self.applyChromeVisibilityAlpha(0)
@@ -241,12 +236,11 @@ extension GalleryViewerViewController {
                     initialSpringVelocity: 0,
                     options: [.curveEaseOut, .allowUserInteraction],
                     animations: {
-                        self.pageViewController.view.transform = .identity
+                        dismissTargetView.transform = .identity
                         self.view.backgroundColor = .black
                         let chromeAlpha: CGFloat = self.isChromeHidden ? 0 : 1
                         self.applyChromeVisibilityAlpha(chromeAlpha)
-                    },
-                    completion: nil
+                    }
                 )
             }
         default:
@@ -255,17 +249,14 @@ extension GalleryViewerViewController {
     }
 }
 
-// MARK: - UIGestureRecognizerDelegate
-
 extension GalleryViewerViewController: UIGestureRecognizerDelegate {
     func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
         if gestureRecognizer === dismissPan {
             guard !isDismissing else { return false }
-            let vel = dismissPan.velocity(in: view)
-            guard abs(vel.y) > abs(vel.x) else { return false }
-            guard vel.y > 0 else { return false }
-            if let page = pageViewController.viewControllers?.first as? PhotoPageViewController {
-                if page.scrollViewZoomScale > 1 {
+            let velocity = dismissPan.velocity(in: view)
+            guard abs(velocity.y) > abs(velocity.x), velocity.y > 0 else { return false }
+            if let cell = currentMediaCell {
+                if cell.scrollViewZoomScale > 1 || cell.isPlaybackControlsInteracting {
                     return false
                 }
             }
@@ -275,52 +266,17 @@ extension GalleryViewerViewController: UIGestureRecognizerDelegate {
     }
 
     func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
-        // 外层 toggleTap 不应抢占视频控件/按钮/slider 的点击，
-        // 否则在播放、暂停、拖动进度时会误触发 chrome 隐藏。
         var current: UIView? = touch.view
-        while let v = current {
-            if v is UIControl {
+        while let view = current {
+            if view is UIControl {
                 return false
             }
-            current = v.superview
+            current = view.superview
         }
         return true
     }
 
-}
-
-// MARK: - UIPageViewController
-
-extension GalleryViewerViewController: UIPageViewControllerDataSource, UIPageViewControllerDelegate {
-    func pageViewController(_ pageViewController: UIPageViewController, viewControllerBefore viewController: UIViewController) -> UIViewController? {
-        guard let page = viewController as? PhotoPageViewController else { return nil }
-        return pageForIndex(page.index - 1)
-    }
-
-    func pageViewController(_ pageViewController: UIPageViewController, viewControllerAfter viewController: UIViewController) -> UIViewController? {
-        guard let page = viewController as? PhotoPageViewController else { return nil }
-        return pageForIndex(page.index + 1)
-    }
-
-    func pageViewController(_ pageViewController: UIPageViewController, didFinishAnimating finished: Bool, previousViewControllers: [UIViewController], transitionCompleted completed: Bool) {
-        guard let page = currentPage else {
-            finishThumbnailDrivenPagingIfNeeded()
-            return
-        }
-        guard completed else {
-            finishThumbnailDrivenPagingIfNeeded()
-            return
-        }
-        currentIndex = page.index
-        updateTitleAndFavorite()
-        if isPagingDrivenByThumbnailStrip {
-            finishThumbnailDrivenPagingIfNeeded()
-            return
-        }
-        thumbnailStripView.syncSelection(currentIndex, animated: true)
-    }
-
-    private func finishThumbnailDrivenPagingIfNeeded() {
+    func finishThumbnailDrivenPagingIfNeeded() {
         if isPagingDrivenByThumbnailStrip {
             isPagingDrivenByThumbnailStrip = false
         }

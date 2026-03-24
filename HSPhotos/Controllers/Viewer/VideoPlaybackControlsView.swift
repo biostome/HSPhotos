@@ -146,38 +146,38 @@ final class VideoPlaybackControlsView: UIView {
 
     private func configureProgressSliderAppearance() {
         // 细圆角轨道 + 填充（拇指尽量不明显）
-        let trackHeight: CGFloat = 4
-        let baseWidth: CGFloat = 120
-
-        let maxColor = UIColor.white.withAlphaComponent(0.35)
-        let minColor = UIColor.white.withAlphaComponent(0.75)
-
-        func makeRoundedTrack(color: UIColor) -> UIImage {
-            let size = CGSize(width: baseWidth, height: trackHeight)
-            let renderer = UIGraphicsImageRenderer(size: size)
-            return renderer.image { ctx in
-                let rect = CGRect(origin: .zero, size: size)
-                let path = UIBezierPath(roundedRect: rect, cornerRadius: trackHeight / 2)
-                ctx.cgContext.setFillColor(color.cgColor)
-                path.fill()
-            }.resizableImage(
-                withCapInsets: UIEdgeInsets(top: 0, left: baseWidth / 2, bottom: 0, right: baseWidth / 2),
-                resizingMode: .stretch
-            )
-        }
-
-        let thumbImg = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1)).image { ctx in
-            ctx.cgContext.clear(CGRect(x: 0, y: 0, width: 1, height: 1))
-        }
-
-        let maxImg = makeRoundedTrack(color: maxColor)
-        let minImg = makeRoundedTrack(color: minColor)
-
-        progressSlider.setMaximumTrackImage(maxImg, for: .normal)
-        progressSlider.setMinimumTrackImage(minImg, for: .normal)
-        progressSlider.setThumbImage(thumbImg, for: .normal)
-        progressSlider.setThumbImage(thumbImg, for: .highlighted)
-        progressSlider.setThumbImage(thumbImg, for: .selected)
+//        let trackHeight: CGFloat = 4
+//        let baseWidth: CGFloat = 120
+//
+//        let maxColor = UIColor.white.withAlphaComponent(0.35)
+//        let minColor = UIColor.white.withAlphaComponent(0.75)
+//
+//        func makeRoundedTrack(color: UIColor) -> UIImage {
+//            let size = CGSize(width: baseWidth, height: trackHeight)
+//            let renderer = UIGraphicsImageRenderer(size: size)
+//            return renderer.image { ctx in
+//                let rect = CGRect(origin: .zero, size: size)
+//                let path = UIBezierPath(roundedRect: rect, cornerRadius: trackHeight / 2)
+//                ctx.cgContext.setFillColor(color.cgColor)
+//                path.fill()
+//            }.resizableImage(
+//                withCapInsets: UIEdgeInsets(top: 0, left: baseWidth / 2, bottom: 0, right: baseWidth / 2),
+//                resizingMode: .stretch
+//            )
+//        }
+//
+//        let thumbImg = UIGraphicsImageRenderer(size: CGSize(width: 1, height: 1)).image { ctx in
+//            ctx.cgContext.clear(CGRect(x: 0, y: 0, width: 1, height: 1))
+//        }
+//
+//        let maxImg = makeRoundedTrack(color: maxColor)
+//        let minImg = makeRoundedTrack(color: minColor)
+//
+//        progressSlider.setMaximumTrackImage(maxImg, for: .normal)
+//        progressSlider.setMinimumTrackImage(minImg, for: .normal)
+//        progressSlider.setThumbImage(thumbImg, for: .normal)
+//        progressSlider.setThumbImage(thumbImg, for: .highlighted)
+//        progressSlider.setThumbImage(thumbImg, for: .selected)
+        progressSlider.thumbTintColor = UIColor.white.withAlphaComponent(0.5);
     }
 }
-

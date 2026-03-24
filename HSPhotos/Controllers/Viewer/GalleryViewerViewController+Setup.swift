@@ -7,6 +7,16 @@ import UIKit
 import Photos
 
 extension GalleryViewerViewController {
+    func setupCollectionView() {
+        view.addSubview(collectionView)
+        NSLayoutConstraint.activate([
+            collectionView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            collectionView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            collectionView.topAnchor.constraint(equalTo: view.topAnchor),
+            collectionView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
+        ])
+    }
+
     func setupPageIndicator() {
         pageIndicator.textColor = .white
         pageIndicator.font = .systemFont(ofSize: 14, weight: .medium)
@@ -19,7 +29,7 @@ extension GalleryViewerViewController {
 
         NSLayoutConstraint.activate([
             pageIndicator.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            pageIndicator.bottomAnchor.constraint( equalTo: view.bottomAnchor, constant: 4),
+            pageIndicator.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: 4),
             pageIndicator.heightAnchor.constraint(equalToConstant: 24)
         ])
     }
@@ -39,7 +49,6 @@ extension GalleryViewerViewController {
         thumbnailStripView.onSelect = { [weak self] idx in
             guard let self else { return }
             guard idx >= 0, idx < self.assets.count, idx != self.currentIndex else { return }
-            // 缩略条已在 didSelect 里 syncSelection；避免分页结束后再滚一次
             self.navigateToIndexFromThumbnailStrip(idx, animated: true)
         }
         thumbnailStripView.onCenteredIndexChanged = { [weak self] idx in
@@ -48,54 +57,19 @@ extension GalleryViewerViewController {
             self.navigateToIndexFromThumbnailStrip(idx, animated: false)
         }
         thumbnailStripView.syncSelection(currentIndex, animated: false)
-
-        // 保持分页容器贴满屏底：单页内的图片布局使用其自身 bounds 做 aspectFit，
-        // 底部留空会造成视觉“中心偏移”。
-        // 触摸冲突后续再通过手势取消策略/滚动内容 inset 微调处理。
-        pageViewBottomConstraint.isActive = false
-        pageViewBottomConstraint = pageViewController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        pageViewBottomConstraint.isActive = true
-    }
-
-    func setupPageViewController() {
-        pageViewController.dataSource = self
-        pageViewController.delegate = self
-        addChild(pageViewController)
-        view.addSubview(pageViewController.view)
-        pageViewController.view.translatesAutoresizingMaskIntoConstraints = false
-        pageViewController.view.backgroundColor = .clear
-
-        pageViewBottomConstraint = pageViewController.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
-        NSLayoutConstraint.activate([
-            pageViewController.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            pageViewController.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            pageViewController.view.topAnchor.constraint(equalTo: view.topAnchor),
-            pageViewBottomConstraint
-        ])
-
-        pageViewController.didMove(toParent: self)
-
-        if let first = pageForIndex(currentIndex) {
-            pageViewController.setViewControllers([first], direction: .forward, animated: false)
-        }
-    }
-
-    func pageForIndex(_ index: Int) -> PhotoPageViewController? {
-        guard index >= 0, index < assets.count else { return nil }
-        let page = PhotoPageViewController(asset: assets[index])
-        page.index = index
-        return page
     }
 
     private func navigateToIndexFromThumbnailStrip(_ targetIndex: Int, animated: Bool) {
-        let previousIndex = currentIndex
         isPagingDrivenByThumbnailStrip = true
-        guard let page = pageForIndex(targetIndex) else {
-            isPagingDrivenByThumbnailStrip = false
-            return
+        currentIndex = targetIndex
+        updateTitleAndFavorite()
+        scrollToIndex(targetIndex, animated: animated)
+        if !animated {
+            DispatchQueue.main.async { [weak self] in
+                self?.updateActivePageState()
+                self?.finishThumbnailDrivenPagingIfNeeded()
+            }
         }
-        let dir: UIPageViewController.NavigationDirection = targetIndex > previousIndex ? .forward : .reverse
-        pageViewController.setViewControllers([page], direction: dir, animated: animated)
     }
 
     func setupTopBar() {
@@ -203,18 +177,17 @@ extension GalleryViewerViewController {
         bottomChromeContainer.addSubview(rightSpacer)
         bottomChromeContainer.addSubview(deleteButton)
 
-        let m = GalleryViewerChromeMetrics.self
+        let metrics = GalleryViewerChromeMetrics.self
         NSLayoutConstraint.activate([
-            bottomChromeContainer.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: m.horizontalInset),
-            bottomChromeContainer.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -m.horizontalInset),
-            bottomChromeContainer.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -m.bottomInset),
-            // 必须给出正高度：否则 Auto Layout 可把容器压成 0pt，按钮虽画出在容器外，但父视图 pointInside 失败，整行无法 hitTest。
-            bottomChromeContainer.heightAnchor.constraint(equalToConstant: m.sideControlSide),
+            bottomChromeContainer.leadingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.leadingAnchor, constant: metrics.horizontalInset),
+            bottomChromeContainer.trailingAnchor.constraint(equalTo: view.safeAreaLayoutGuide.trailingAnchor, constant: -metrics.horizontalInset),
+            bottomChromeContainer.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -metrics.bottomInset),
+            bottomChromeContainer.heightAnchor.constraint(equalToConstant: metrics.sideControlSide),
 
             shareButton.leadingAnchor.constraint(equalTo: bottomChromeContainer.leadingAnchor),
             shareButton.centerYAnchor.constraint(equalTo: bottomChromeContainer.centerYAnchor),
-            shareButton.widthAnchor.constraint(equalToConstant: m.sideControlSide),
-            shareButton.heightAnchor.constraint(equalToConstant: m.sideControlSide),
+            shareButton.widthAnchor.constraint(equalToConstant: metrics.sideControlSide),
+            shareButton.heightAnchor.constraint(equalToConstant: metrics.sideControlSide),
 
             leftSpacer.leadingAnchor.constraint(equalTo: shareButton.trailingAnchor),
             leftSpacer.topAnchor.constraint(equalTo: bottomChromeContainer.topAnchor),
@@ -222,7 +195,7 @@ extension GalleryViewerViewController {
 
             centerCapsule.leadingAnchor.constraint(equalTo: leftSpacer.trailingAnchor),
             centerCapsule.centerYAnchor.constraint(equalTo: bottomChromeContainer.centerYAnchor),
-            centerCapsule.heightAnchor.constraint(equalToConstant: m.sideControlSide),
+            centerCapsule.heightAnchor.constraint(equalToConstant: metrics.sideControlSide),
 
             rightSpacer.leadingAnchor.constraint(equalTo: centerCapsule.trailingAnchor),
             rightSpacer.topAnchor.constraint(equalTo: bottomChromeContainer.topAnchor),
@@ -231,36 +204,104 @@ extension GalleryViewerViewController {
             deleteButton.leadingAnchor.constraint(equalTo: rightSpacer.trailingAnchor),
             deleteButton.trailingAnchor.constraint(equalTo: bottomChromeContainer.trailingAnchor),
             deleteButton.centerYAnchor.constraint(equalTo: bottomChromeContainer.centerYAnchor),
-            deleteButton.widthAnchor.constraint(equalToConstant: m.sideControlSide),
-            deleteButton.heightAnchor.constraint(equalToConstant: m.sideControlSide),
+            deleteButton.widthAnchor.constraint(equalToConstant: metrics.sideControlSide),
+            deleteButton.heightAnchor.constraint(equalToConstant: metrics.sideControlSide),
 
             leftSpacer.widthAnchor.constraint(equalTo: rightSpacer.widthAnchor),
 
-            capsuleStack.leadingAnchor.constraint(equalTo: centerCapsule.contentView.leadingAnchor, constant: m.capsulePaddingH),
-            capsuleStack.trailingAnchor.constraint(equalTo: centerCapsule.contentView.trailingAnchor, constant: -m.capsulePaddingH),
+            capsuleStack.leadingAnchor.constraint(equalTo: centerCapsule.contentView.leadingAnchor, constant: metrics.capsulePaddingH),
+            capsuleStack.trailingAnchor.constraint(equalTo: centerCapsule.contentView.trailingAnchor, constant: -metrics.capsulePaddingH),
             capsuleStack.topAnchor.constraint(equalTo: centerCapsule.contentView.topAnchor),
             capsuleStack.bottomAnchor.constraint(equalTo: centerCapsule.contentView.bottomAnchor)
         ])
     }
 
     func configureLiquidGlassToolButton(_ button: UIButton, systemName: String) {
-        let m = GalleryViewerChromeMetrics.self
+        let metrics = GalleryViewerChromeMetrics.self
         var config = UIButton.Configuration.glass()
-        let sym = UIImage.SymbolConfiguration(pointSize: m.sideGlassIconPointSize, weight: .medium)
-        config.image = UIImage(systemName: systemName, withConfiguration: sym)
+        let symbol = UIImage.SymbolConfiguration(pointSize: metrics.sideGlassIconPointSize, weight: .medium)
+        config.image = UIImage(systemName: systemName, withConfiguration: symbol)
         config.baseForegroundColor = .white
         config.cornerStyle = .capsule
-        let inset = (m.sideControlSide - m.sideGlassIconPointSize) / 2
+        let inset = (metrics.sideControlSide - metrics.sideGlassIconPointSize) / 2
         config.contentInsets = NSDirectionalEdgeInsets(top: inset, leading: inset, bottom: inset, trailing: inset)
         button.configuration = config
     }
 
     func configureCapsuleInnerIconButton(_ button: UIButton, systemName: String) {
-        let m = GalleryViewerChromeMetrics.self
+        let metrics = GalleryViewerChromeMetrics.self
         var config = UIButton.Configuration.borderless()
-        let sym = UIImage.SymbolConfiguration(pointSize: m.capsuleInnerIconPointSize, weight: m.capsuleIconWeight)
-        config.image = UIImage(systemName: systemName, withConfiguration: sym)
+        let symbol = UIImage.SymbolConfiguration(pointSize: metrics.capsuleInnerIconPointSize, weight: metrics.capsuleIconWeight)
+        config.image = UIImage(systemName: systemName, withConfiguration: symbol)
         config.baseForegroundColor = .white
         button.configuration = config
+    }
+}
+
+extension GalleryViewerViewController: UICollectionViewDataSource, UICollectionViewDelegate {
+    func collectionView(_ collectionView: UICollectionView, numberOfItemsInSection section: Int) -> Int {
+        assets.count
+    }
+
+    func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
+        let asset = assets[indexPath.item]
+        guard let cellType = mediaCellTypes.first(where: { $0.supports(asset) }) else {
+            fatalError("Unsupported asset media type: \(asset.mediaType.rawValue)")
+        }
+        let cell = cellType.dequeue(from: collectionView, for: indexPath)
+        cell.preferredPlaceholderImage = indexPath.item == initialPlaceholderIndex ? initialPlaceholderImage : nil
+        cell.configure(with: asset, at: indexPath.item)
+        cell.onSingleTap = { [weak self] in
+            self?.toggleChrome()
+        }
+        cell.isPageActive = indexPath.item == currentIndex
+        cell.setInlineControlsVisible(!isChromeHidden, animated: false)
+        return cell
+    }
+
+    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        guard scrollView === collectionView else { return }
+        syncCurrentIndexWithVisiblePage()
+    }
+
+    func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
+        guard scrollView === collectionView else { return }
+        syncCurrentIndexWithVisiblePage()
+    }
+
+    func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        guard scrollView === collectionView else { return }
+        updateVisiblePageActivationDuringScroll()
+    }
+
+    private func updateVisiblePageActivationDuringScroll() {
+        let targetIndex = centeredIndex()
+        for case let cell as PhotoCellBase in collectionView.visibleCells {
+            if let indexPath = collectionView.indexPath(for: cell) {
+                cell.isPageActive = indexPath.item == targetIndex
+            }
+        }
+    }
+
+    private func syncCurrentIndexWithVisiblePage() {
+        let index = centeredIndex()
+        guard index >= 0, index < assets.count else {
+            finishThumbnailDrivenPagingIfNeeded()
+            return
+        }
+        currentIndex = index
+        updateTitleAndFavorite()
+        updateActivePageState()
+        if isPagingDrivenByThumbnailStrip {
+            finishThumbnailDrivenPagingIfNeeded()
+        } else {
+            thumbnailStripView.syncSelection(currentIndex, animated: true)
+        }
+    }
+
+    private func centeredIndex() -> Int {
+        guard collectionView.bounds.width > 0 else { return currentIndex }
+        let rawIndex = Int(round(collectionView.contentOffset.x / collectionView.bounds.width))
+        return min(max(0, rawIndex), max(0, assets.count - 1))
     }
 }
