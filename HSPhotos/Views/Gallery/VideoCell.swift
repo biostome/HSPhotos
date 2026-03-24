@@ -18,9 +18,13 @@ final class VideoCell: PhotoCellBase, GalleryViewerMediaCell {
 
     override var isPlaybackControlsInteracting: Bool { isScrubbingProgress }
 
-    override func setupBaseViews() {
-        super.setupBaseViews()
+    override init(frame: CGRect) {
+        super.init(frame: frame)
         setupVideoControls()
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
     }
 
     private func setupVideoControls() {

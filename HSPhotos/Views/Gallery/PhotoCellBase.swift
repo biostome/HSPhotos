@@ -312,6 +312,7 @@ class PhotoCellBase: UICollectionViewCell {
     }
 
     func resetForNewAssetConfiguration() {
+        assetRequestToken = UUID()
         cancelPendingRequests()
         cleanupPlayer()
         videoThumbnailHideWorkItem?.cancel()
@@ -376,10 +377,13 @@ class PhotoCellBase: UICollectionViewCell {
 
     override func prepareForReuse() {
         super.prepareForReuse()
+        assetRequestToken = UUID()
         cancelPendingRequests()
         cleanupPlayer()
         onSingleTap = nil
         preferredPlaceholderImage = nil
+        asset = nil
+        index = 0
         imageView.image = nil
         imageView.contentMode = .scaleAspectFit
         playerContainerView.isHidden = true

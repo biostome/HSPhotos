@@ -78,7 +78,7 @@ final class GalleryViewerViewController: UIViewController {
         sourceFrame: CGRect = .zero,
         sourceImage: UIImage? = nil,
         mediaActionService: GalleryViewerMediaActionHandling = GalleryViewerMediaActionService(),
-        mediaCellTypes: [any GalleryViewerMediaCell.Type] = [ImageCell.self, VideoCell.self]
+        mediaCellTypes: [any GalleryViewerMediaCell.Type] = [LivePhotoCell.self, ImageCell.self, VideoCell.self]
     ) {
         self.assets = assets
         self.mediaActionService = mediaActionService
@@ -106,7 +106,7 @@ final class GalleryViewerViewController: UIViewController {
         sourceFrame: CGRect = .zero,
         sourceImage: UIImage? = nil,
         mediaActionService: GalleryViewerMediaActionHandling = GalleryViewerMediaActionService(),
-        mediaCellTypes: [any GalleryViewerMediaCell.Type] = [ImageCell.self, VideoCell.self]
+        mediaCellTypes: [any GalleryViewerMediaCell.Type] = [LivePhotoCell.self, ImageCell.self, VideoCell.self]
     ) -> UINavigationController {
         let viewer = GalleryViewerViewController(
             assets: assets,
