@@ -799,7 +799,7 @@ class BasePhotoViewController: UIViewController {
     
     internal func createSortMenu() -> UIMenu {
         let creationDateAction = UIAction(
-            title: "按照拍摄时间排序",
+            title: "按最旧的排最前排序",
             image: UIImage(systemName: "camera"),
             state: sortPreference == .creationDate ? .on : .off
         ) { [unowned self] _ in
@@ -807,7 +807,7 @@ class BasePhotoViewController: UIViewController {
         }
         
         let modificationDateAction = UIAction(
-            title: "按照最近加入时间排序",
+            title: "按最新的排最前排序",
             image: UIImage(systemName: "clock"),
             state: sortPreference == .recentDate ? .on : .off
         ) { [weak self] _ in
@@ -815,7 +815,7 @@ class BasePhotoViewController: UIViewController {
         }
         
         let customAction = UIAction(
-            title: "按照自定义排序",
+            title: "按自定义排序",
             image: UIImage(systemName: "hand.draw"),
             state: sortPreference == .custom ? .on : .off
         ) { [weak self] _ in

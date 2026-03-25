@@ -1,281 +1,499 @@
-//
-//  PhotoAssetInfoSheetViewController.swift
-//  HSPhotos
-//
-//  大图浏览器内展示单张资产元数据：布局参考系统「照片」信息面板（分组列表 + 地图）。
-//
-
 import CoreLocation
+import ImageIO
 import MapKit
 import Photos
 import UIKit
+import UniformTypeIdentifiers
 
-// MARK: - 数据模型
+private let assetOriginalCreationDateKeyPrefix = "asset_original_creation_date_"
 
-fileprivate struct PhotoInfoSection {
-    let title: String
-    let rows: [PhotoInfoRow]
+private struct AssetMetadataSummary {
+    var deviceModel: String?
+    var lensDescription: String?
+    var fileFormat: String?
+    var fileSizeText: String?
+    var resolutionText: String?
+    var isoText: String?
+    var focalLengthText: String?
+    var exposureBiasText: String?
+    var apertureText: String?
+    var shutterText: String?
 }
 
-fileprivate struct PhotoInfoRow {
-    let name: String
-    let value: String
-    var monospaceValue: Bool = false
-}
+private final class AssetInfoCardView: UIView {
+    let stackView = UIStackView()
 
-// MARK: - 顶部地图（HIG：静音地图 + 系统材质底栏，与 inset 分组圆角一致）
-
-private final class AssetLocationMapHeaderView: UIView, MKMapViewDelegate {
-
-    private let mapContainer = UIView()
-    private let mapView = MKMapView()
-    private let bottomMaterial = UIVisualEffectView(effect: UIBlurEffect(style: .systemChromeMaterial))
-    private let placeRow = UIStackView()
-    private let geocodeSpinner = UIActivityIndicatorView(style: .medium)
-    private let placeLabel = UILabel()
-    private let mapsButton = UIButton(type: .system)
-    private let coordinate: CLLocationCoordinate2D
-    private let location: CLLocation
-    private var geocodeToken = UUID()
-    private var reverseGeocodeRequest: MKReverseGeocodingRequest?
-
-    init(location: CLLocation) {
-        self.location = location
-        self.coordinate = location.coordinate
+    init(cornerRadius: CGFloat = 18) {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
-        backgroundColor = .clear
+        backgroundColor = UIColor.secondarySystemGroupedBackground
+        layer.cornerRadius = cornerRadius
+        layer.cornerCurve = .continuous
 
-        mapView.translatesAutoresizingMaskIntoConstraints = false
-        mapView.delegate = self
-        mapView.mapType = .mutedStandard
-        mapView.pointOfInterestFilter = .excludingAll
-        mapView.showsCompass = false
-        mapView.showsScale = false
-        mapView.showsUserLocation = false
-        mapView.isPitchEnabled = false
-        mapView.isRotateEnabled = false
+        stackView.axis = .vertical
+        stackView.spacing = 0
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stackView)
 
-        mapContainer.translatesAutoresizingMaskIntoConstraints = false
-        mapContainer.backgroundColor = .secondarySystemGroupedBackground
-        mapContainer.layer.cornerCurve = .continuous
-        mapContainer.layer.cornerRadius = 10
-        mapContainer.clipsToBounds = true
-
-        bottomMaterial.translatesAutoresizingMaskIntoConstraints = false
-
-        let region = MKCoordinateRegion(center: coordinate, latitudinalMeters: 600, longitudinalMeters: 600)
-        mapView.setRegion(region, animated: false)
-        let pin = MKPointAnnotation()
-        pin.coordinate = coordinate
-        mapView.addAnnotation(pin)
-
-        placeRow.axis = .horizontal
-        placeRow.alignment = .center
-        placeRow.spacing = 8
-        placeRow.isUserInteractionEnabled = false
-        placeRow.translatesAutoresizingMaskIntoConstraints = false
-
-        geocodeSpinner.translatesAutoresizingMaskIntoConstraints = false
-        geocodeSpinner.hidesWhenStopped = true
-        geocodeSpinner.startAnimating()
-
-        placeLabel.translatesAutoresizingMaskIntoConstraints = false
-        placeLabel.font = UIFont.preferredFont(forTextStyle: .subheadline)
-        placeLabel.adjustsFontForContentSizeCategory = true
-        placeLabel.textColor = .label
-        placeLabel.numberOfLines = 2
-        placeLabel.textAlignment = .natural
-        placeLabel.text = "正在解析地点…"
-
-        placeRow.addArrangedSubview(geocodeSpinner)
-        placeRow.addArrangedSubview(placeLabel)
-
-        var btnCfg = UIButton.Configuration.plain()
-        btnCfg.title = "在地图中打开"
-        btnCfg.image = UIImage(systemName: "arrow.up.right.square")
-        btnCfg.imagePlacement = .trailing
-        btnCfg.imagePadding = 5
-        let sub = UIFont.preferredFont(forTextStyle: .subheadline)
-        btnCfg.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
-            var out = incoming
-            out.font = UIFontMetrics(forTextStyle: .subheadline).scaledFont(for: UIFont.systemFont(ofSize: sub.pointSize, weight: .regular))
-            return out
-        }
-        btnCfg.baseForegroundColor = .tintColor
-        mapsButton.configuration = btnCfg
-        mapsButton.translatesAutoresizingMaskIntoConstraints = false
-        mapsButton.addAction(UIAction { [weak self] _ in self?.openInMaps() }, for: .touchUpInside)
-
-        let mapTap = UITapGestureRecognizer(target: self, action: #selector(mapTapped))
-        mapTap.numberOfTapsRequired = 1
-        mapView.addGestureRecognizer(mapTap)
-
-        addSubview(mapContainer)
-        mapContainer.addSubview(mapView)
-        mapContainer.addSubview(bottomMaterial)
-        bottomMaterial.contentView.layoutMargins = UIEdgeInsets(top: 0, left: 12, bottom: 0, right: 12)
-        bottomMaterial.contentView.addSubview(placeRow)
-        addSubview(mapsButton)
-
-        let inset: CGFloat = 20
         NSLayoutConstraint.activate([
-            mapContainer.topAnchor.constraint(equalTo: topAnchor, constant: 2),
-            mapContainer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: inset),
-            mapContainer.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -inset),
-
-            mapView.topAnchor.constraint(equalTo: mapContainer.topAnchor),
-            mapView.leadingAnchor.constraint(equalTo: mapContainer.leadingAnchor),
-            mapView.trailingAnchor.constraint(equalTo: mapContainer.trailingAnchor),
-            mapView.bottomAnchor.constraint(equalTo: mapContainer.bottomAnchor),
-            mapView.heightAnchor.constraint(equalToConstant: 192),
-
-            bottomMaterial.leadingAnchor.constraint(equalTo: mapContainer.leadingAnchor),
-            bottomMaterial.trailingAnchor.constraint(equalTo: mapContainer.trailingAnchor),
-            bottomMaterial.bottomAnchor.constraint(equalTo: mapContainer.bottomAnchor),
-            bottomMaterial.heightAnchor.constraint(greaterThanOrEqualToConstant: 52),
-
-            placeRow.leadingAnchor.constraint(equalTo: bottomMaterial.contentView.layoutMarginsGuide.leadingAnchor, constant: 4),
-            placeRow.trailingAnchor.constraint(equalTo: bottomMaterial.contentView.layoutMarginsGuide.trailingAnchor, constant: -4),
-            placeRow.topAnchor.constraint(equalTo: bottomMaterial.contentView.layoutMarginsGuide.topAnchor, constant: 6),
-            placeRow.bottomAnchor.constraint(equalTo: bottomMaterial.contentView.layoutMarginsGuide.bottomAnchor, constant: -6),
-
-            mapsButton.topAnchor.constraint(equalTo: mapContainer.bottomAnchor, constant: 10),
-            mapsButton.centerXAnchor.constraint(equalTo: centerXAnchor),
-            mapsButton.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: inset),
-            mapsButton.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -inset),
-            mapsButton.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8)
+            stackView.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stackView.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stackView.topAnchor.constraint(equalTo: topAnchor),
+            stackView.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
-
-        startReverseGeocode()
     }
 
-    deinit {
-        reverseGeocodeRequest?.cancel()
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+}
+
+private final class AssetInfoRowView: UIView {
+    private let titleLabel = UILabel()
+    private let valueLabel = UILabel()
+    private let leadingImageView = UIImageView()
+    private let trailingLabel = UILabel()
+    private let separator = UIView()
+
+    init(
+        title: String? = nil,
+        value: String? = nil,
+        leadingSymbol: String? = nil,
+        trailingText: String? = nil,
+        titleFont: UIFont = .systemFont(ofSize: 16, weight: .regular),
+        valueFont: UIFont = .systemFont(ofSize: 16, weight: .regular),
+        valueColor: UIColor = .label,
+        showsSeparator: Bool = true
+    ) {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = titleFont
+        titleLabel.textColor = .secondaryLabel
+        titleLabel.text = title
+
+        valueLabel.translatesAutoresizingMaskIntoConstraints = false
+        valueLabel.font = valueFont
+        valueLabel.textColor = valueColor
+        valueLabel.text = value
+        valueLabel.numberOfLines = 0
+
+        leadingImageView.translatesAutoresizingMaskIntoConstraints = false
+        leadingImageView.tintColor = .secondaryLabel
+        leadingImageView.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 14, weight: .medium)
+        leadingImageView.image = leadingSymbol.flatMap { UIImage(systemName: $0) }
+        leadingImageView.isHidden = leadingSymbol == nil
+
+        trailingLabel.translatesAutoresizingMaskIntoConstraints = false
+        trailingLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+        trailingLabel.textColor = .systemBlue
+        trailingLabel.text = trailingText
+        trailingLabel.isHidden = trailingText == nil
+
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        separator.backgroundColor = UIColor.separator.withAlphaComponent(0.4)
+        separator.isHidden = !showsSeparator
+
+        addSubview(titleLabel)
+        addSubview(valueLabel)
+        addSubview(leadingImageView)
+        addSubview(trailingLabel)
+        addSubview(separator)
+
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(greaterThanOrEqualToConstant: 50),
+
+            leadingImageView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            leadingImageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            leadingImageView.widthAnchor.constraint(equalToConstant: 18),
+            leadingImageView.heightAnchor.constraint(equalToConstant: 18),
+
+            titleLabel.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            valueLabel.leadingAnchor.constraint(equalTo: leadingImageView.trailingAnchor, constant: leadingSymbol == nil ? 0 : 8),
+            valueLabel.trailingAnchor.constraint(lessThanOrEqualTo: trailingLabel.leadingAnchor, constant: -12),
+            valueLabel.topAnchor.constraint(equalTo: topAnchor, constant: 12),
+            valueLabel.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -12),
+
+            trailingLabel.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            trailingLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            separator.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            separator.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            separator.bottomAnchor.constraint(equalTo: bottomAnchor),
+            separator.heightAnchor.constraint(equalToConstant: 0.5)
+        ])
+
+        if title == nil {
+            titleLabel.isHidden = true
+            NSLayoutConstraint.activate([
+                valueLabel.leadingAnchor.constraint(equalTo: leadingImageView.trailingAnchor, constant: leadingSymbol == nil ? 16 : 8)
+            ])
+        } else {
+            valueLabel.textAlignment = .right
+            NSLayoutConstraint.activate([
+                valueLabel.leadingAnchor.constraint(greaterThanOrEqualTo: titleLabel.trailingAnchor, constant: 12)
+            ])
+        }
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+}
+
+private final class AssetMetricsStripView: UIView {
+    init(items: [String]) {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+
+        let stack = UIStackView()
+        stack.axis = .horizontal
+        stack.alignment = .fill
+        stack.distribution = .fillEqually
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
+
+        NSLayoutConstraint.activate([
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor),
+            stack.topAnchor.constraint(equalTo: topAnchor),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor),
+            heightAnchor.constraint(equalToConstant: 44)
+        ])
+
+        for (index, item) in items.enumerated() {
+            let label = UILabel()
+            label.font = .systemFont(ofSize: 14, weight: .medium)
+            label.textColor = .secondaryLabel
+            label.textAlignment = .center
+            label.text = item
+
+            let container = UIView()
+            container.translatesAutoresizingMaskIntoConstraints = false
+            label.translatesAutoresizingMaskIntoConstraints = false
+            container.addSubview(label)
+            NSLayoutConstraint.activate([
+                label.centerXAnchor.constraint(equalTo: container.centerXAnchor),
+                label.centerYAnchor.constraint(equalTo: container.centerYAnchor)
+            ])
+
+            if index < items.count - 1 {
+                let divider = UIView()
+                divider.translatesAutoresizingMaskIntoConstraints = false
+                divider.backgroundColor = UIColor.separator.withAlphaComponent(0.35)
+                container.addSubview(divider)
+                NSLayoutConstraint.activate([
+                    divider.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+                    divider.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+                    divider.widthAnchor.constraint(equalToConstant: 0.5),
+                    divider.heightAnchor.constraint(equalToConstant: 14)
+                ])
+            }
+
+            stack.addArrangedSubview(container)
+        }
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+}
+
+private final class AssetLinkRowView: UIView {
+    private let thumbnailImageView = UIImageView()
+    private let iconContainer = UIView()
+    private let iconImageView = UIImageView()
+    private let titleLabel = UILabel()
+    private let chevronImageView = UIImageView()
+    private let separator = UIView()
+
+    init(title: String, showsSeparator: Bool = true) {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+
+        thumbnailImageView.translatesAutoresizingMaskIntoConstraints = false
+        thumbnailImageView.contentMode = .scaleAspectFill
+        thumbnailImageView.clipsToBounds = true
+        thumbnailImageView.layer.cornerRadius = 10
+        thumbnailImageView.layer.cornerCurve = .continuous
+        thumbnailImageView.isHidden = true
+
+        iconContainer.translatesAutoresizingMaskIntoConstraints = false
+        iconContainer.backgroundColor = UIColor.systemGray5
+        iconContainer.layer.cornerRadius = 10
+        iconContainer.layer.cornerCurve = .continuous
+        iconContainer.isHidden = true
+
+        iconImageView.translatesAutoresizingMaskIntoConstraints = false
+        iconImageView.contentMode = .scaleAspectFit
+        iconImageView.tintColor = .white
+        iconContainer.addSubview(iconImageView)
+
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .systemFont(ofSize: 16, weight: .regular)
+        titleLabel.textColor = .secondaryLabel
+        titleLabel.text = title
+        titleLabel.numberOfLines = 1
+
+        chevronImageView.translatesAutoresizingMaskIntoConstraints = false
+        chevronImageView.image = UIImage(systemName: "chevron.right")
+        chevronImageView.tintColor = .tertiaryLabel
+        chevronImageView.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 13, weight: .semibold)
+
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        separator.backgroundColor = UIColor.separator.withAlphaComponent(0.4)
+        separator.isHidden = !showsSeparator
+
+        addSubview(thumbnailImageView)
+        addSubview(iconContainer)
+        addSubview(titleLabel)
+        addSubview(chevronImageView)
+        addSubview(separator)
+
+        NSLayoutConstraint.activate([
+            heightAnchor.constraint(equalToConstant: 66),
+
+            thumbnailImageView.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            thumbnailImageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            thumbnailImageView.widthAnchor.constraint(equalToConstant: 38),
+            thumbnailImageView.heightAnchor.constraint(equalToConstant: 38),
+
+            iconContainer.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            iconContainer.centerYAnchor.constraint(equalTo: centerYAnchor),
+            iconContainer.widthAnchor.constraint(equalToConstant: 38),
+            iconContainer.heightAnchor.constraint(equalToConstant: 38),
+
+            iconImageView.centerXAnchor.constraint(equalTo: iconContainer.centerXAnchor),
+            iconImageView.centerYAnchor.constraint(equalTo: iconContainer.centerYAnchor),
+            iconImageView.widthAnchor.constraint(equalToConstant: 24),
+            iconImageView.heightAnchor.constraint(equalToConstant: 24),
+
+            titleLabel.leadingAnchor.constraint(equalTo: thumbnailImageView.trailingAnchor, constant: 12),
+            titleLabel.centerYAnchor.constraint(equalTo: centerYAnchor),
+
+            chevronImageView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -14),
+            chevronImageView.centerYAnchor.constraint(equalTo: centerYAnchor),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: chevronImageView.leadingAnchor, constant: -8),
+
+            separator.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
+            separator.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            separator.bottomAnchor.constraint(equalTo: bottomAnchor),
+            separator.heightAnchor.constraint(equalToConstant: 0.5)
+        ])
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
 
-    @objc private func mapTapped() {
-        openInMaps()
+    func setThumbnail(_ image: UIImage?) {
+        thumbnailImageView.image = image
+        thumbnailImageView.isHidden = image == nil
+        iconContainer.isHidden = image != nil
+    }
+
+    func setValue(_ text: String) {
+        titleLabel.text = text
+    }
+
+    func setIcon(symbolName: String, backgroundColor: UIColor) {
+        iconContainer.backgroundColor = backgroundColor
+        iconImageView.image = UIImage(systemName: symbolName)
+        iconContainer.isHidden = false
+        thumbnailImageView.isHidden = true
+    }
+}
+
+private final class AssetLocationCardView: UIView {
+    private let mapView = MKMapView()
+    private let addressLabel = UILabel()
+    private let adjustLabel = UILabel()
+    private let location: CLLocation
+    private var reverseGeocodeRequest: MKReverseGeocodingRequest?
+    private var geocodeToken = UUID()
+
+    init(location: CLLocation) {
+        self.location = location
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+
+        let card = AssetInfoCardView()
+        addSubview(card)
+        NSLayoutConstraint.activate([
+            card.leadingAnchor.constraint(equalTo: leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: trailingAnchor),
+            card.topAnchor.constraint(equalTo: topAnchor),
+            card.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+
+        mapView.translatesAutoresizingMaskIntoConstraints = false
+        mapView.mapType = .mutedStandard
+        mapView.pointOfInterestFilter = .excludingAll
+        mapView.showsCompass = false
+        mapView.showsScale = false
+        mapView.isRotateEnabled = false
+        mapView.isPitchEnabled = false
+
+        let region = MKCoordinateRegion(center: location.coordinate, latitudinalMeters: 700, longitudinalMeters: 700)
+        mapView.setRegion(region, animated: false)
+        let pin = MKPointAnnotation()
+        pin.coordinate = location.coordinate
+        mapView.addAnnotation(pin)
+
+        let mapContainer = UIView()
+        mapContainer.translatesAutoresizingMaskIntoConstraints = false
+        mapContainer.clipsToBounds = true
+        mapContainer.layer.cornerRadius = 16
+        mapContainer.layer.cornerCurve = .continuous
+        mapContainer.addSubview(mapView)
+
+        NSLayoutConstraint.activate([
+            mapView.leadingAnchor.constraint(equalTo: mapContainer.leadingAnchor),
+            mapView.trailingAnchor.constraint(equalTo: mapContainer.trailingAnchor),
+            mapView.topAnchor.constraint(equalTo: mapContainer.topAnchor),
+            mapView.bottomAnchor.constraint(equalTo: mapContainer.bottomAnchor),
+            mapContainer.heightAnchor.constraint(equalToConstant: 168)
+        ])
+
+        let bottomRow = UIView()
+        bottomRow.translatesAutoresizingMaskIntoConstraints = false
+
+        addressLabel.translatesAutoresizingMaskIntoConstraints = false
+        addressLabel.font = .systemFont(ofSize: 16, weight: .regular)
+        addressLabel.textColor = .systemBlue
+        addressLabel.numberOfLines = 0
+        addressLabel.text = "正在解析地点…"
+
+        adjustLabel.translatesAutoresizingMaskIntoConstraints = false
+        adjustLabel.font = .systemFont(ofSize: 16, weight: .semibold)
+        adjustLabel.textColor = .systemBlue
+        adjustLabel.text = "调整"
+        adjustLabel.setContentHuggingPriority(.required, for: .horizontal)
+        adjustLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+
+        bottomRow.addSubview(addressLabel)
+        bottomRow.addSubview(adjustLabel)
+        NSLayoutConstraint.activate([
+            bottomRow.heightAnchor.constraint(greaterThanOrEqualToConstant: 52),
+            addressLabel.leadingAnchor.constraint(equalTo: bottomRow.leadingAnchor, constant: 12),
+            addressLabel.topAnchor.constraint(equalTo: bottomRow.topAnchor, constant: 10),
+            addressLabel.bottomAnchor.constraint(equalTo: bottomRow.bottomAnchor, constant: -10),
+            addressLabel.trailingAnchor.constraint(lessThanOrEqualTo: adjustLabel.leadingAnchor, constant: -12),
+            adjustLabel.trailingAnchor.constraint(equalTo: bottomRow.trailingAnchor, constant: -12),
+            adjustLabel.centerYAnchor.constraint(equalTo: bottomRow.centerYAnchor)
+        ])
+
+        card.stackView.addArrangedSubview(mapContainer)
+        card.stackView.addArrangedSubview(bottomRow)
+        startReverseGeocode()
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        reverseGeocodeRequest?.cancel()
     }
 
     private func startReverseGeocode() {
         let token = UUID()
         geocodeToken = token
         guard let request = MKReverseGeocodingRequest(location: location) else {
-            geocodeSpinner.stopAnimating()
-            placeLabel.text = "无法解析地点名称"
+            addressLabel.text = "未知地点"
             return
         }
         reverseGeocodeRequest = request
-        request.getMapItems { [weak self] mapItems, _ in
+        request.getMapItems { [weak self] items, _ in
             guard let self else { return }
             DispatchQueue.main.async {
                 guard self.geocodeToken == token else { return }
-                self.geocodeSpinner.stopAnimating()
-                guard let item = mapItems?.first else {
-                    self.placeLabel.text = "无法解析地点名称"
-                    return
+                if let item = items?.first {
+                    self.addressLabel.text = Self.format(item: item)
+                } else {
+                    self.addressLabel.text = "未知地点"
                 }
-                self.placeLabel.text = Self.formatMapItem(item)
             }
         }
     }
 
-    private static func formatMapItem(_ item: MKMapItem) -> String {
+    private static func format(item: MKMapItem) -> String {
         var parts: [String] = []
-        if let name = item.name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty {
+        if let address = item.address?.fullAddress, !address.isEmpty {
+            parts.append(address)
+        }
+        if let name = item.name, !name.isEmpty, parts.isEmpty {
             parts.append(name)
         }
-        if let address = item.address?.shortAddress?.trimmingCharacters(in: .whitespacesAndNewlines), !address.isEmpty {
-            parts.append(address)
-        } else if let fullAddress = item.address?.fullAddress.trimmingCharacters(in: .whitespacesAndNewlines), !fullAddress.isEmpty {
-            parts.append(fullAddress)
-        }
-        return parts.isEmpty ? "未知地点" : parts.joined(separator: " · ")
-    }
-
-    private func openInMaps() {
-        let item = MKMapItem(location: location, address: nil)
-        let t = (placeLabel.text ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        let generic = t.isEmpty || t == "正在解析地点…" || t == "无法解析地点名称"
-        item.name = generic ? "拍摄位置" : t
-        item.openInMaps(launchOptions: nil)
-    }
-
-    func mapView(_ mapView: MKMapView, viewFor annotation: MKAnnotation) -> MKAnnotationView? {
-        guard annotation is MKPointAnnotation else { return nil }
-        let id = "pin"
-        let v = mapView.dequeueReusableAnnotationView(withIdentifier: id) as? MKMarkerAnnotationView
-            ?? MKMarkerAnnotationView(annotation: annotation, reuseIdentifier: id)
-        v.annotation = annotation
-        v.markerTintColor = .systemRed
-        v.glyphImage = nil
-        v.displayPriority = .required
-        return v
+        return parts.isEmpty ? "未知地点" : parts.joined(separator: " ")
     }
 }
 
-// MARK: - Sheet 主控制器
+private final class AssetLocationPlaceholderCardView: UIView {
+    init() {
+        super.init(frame: .zero)
+        translatesAutoresizingMaskIntoConstraints = false
+
+        let card = AssetInfoCardView()
+        addSubview(card)
+        NSLayoutConstraint.activate([
+            card.leadingAnchor.constraint(equalTo: leadingAnchor),
+            card.trailingAnchor.constraint(equalTo: trailingAnchor),
+            card.topAnchor.constraint(equalTo: topAnchor),
+            card.bottomAnchor.constraint(equalTo: bottomAnchor)
+        ])
+
+        let label = UILabel()
+        label.translatesAutoresizingMaskIntoConstraints = false
+        label.font = .systemFont(ofSize: 16, weight: .semibold)
+        label.textColor = .systemBlue
+        label.textAlignment = .center
+        label.text = "添加位置…"
+
+        let row = UIView()
+        row.translatesAutoresizingMaskIntoConstraints = false
+        row.addSubview(label)
+        NSLayoutConstraint.activate([
+            row.heightAnchor.constraint(equalToConstant: 62),
+            label.leadingAnchor.constraint(equalTo: row.leadingAnchor, constant: 12),
+            label.trailingAnchor.constraint(equalTo: row.trailingAnchor, constant: -12),
+            label.centerYAnchor.constraint(equalTo: row.centerYAnchor)
+        ])
+
+        card.stackView.addArrangedSubview(row)
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+}
 
 final class PhotoAssetInfoSheetViewController: UIViewController {
+    private var asset: PHAsset
+    private var metadataSummary = AssetMetadataSummary()
+    private var metadataRequestID: PHImageRequestID = PHInvalidImageRequestID
+    private var thumbnailRequestID: PHImageRequestID = PHInvalidImageRequestID
 
-    private let asset: PHAsset
-    private var sections: [PhotoInfoSection] = []
+    private let scrollView = UIScrollView()
+    private let contentStack = UIStackView()
 
-    private lazy var handleBar: UIView = {
-        let view = UIView()
-        view.backgroundColor = UIColor.separator
-        view.layer.cornerRadius = 2.5
-        view.translatesAutoresizingMaskIntoConstraints = false
-        return view
-    }()
+    private let noteTextField = UITextField()
+    private let dateLabel = UILabel()
+    private let dateAdjustLabel = UILabel()
+    private let identifierLabel = UILabel()
+    private let deviceCard = AssetInfoCardView()
+    private let metricsStripContainer = AssetInfoCardView(cornerRadius: 14)
+    private let collectionsCard = AssetInfoCardView()
+    private let allPhotosRow = AssetLinkRowView(title: "在所有照片中")
+    private let sourceRow = AssetLinkRowView(title: "来自本机照片图库", showsSeparator: false)
+    private let showAllButton = UIButton(type: .system)
 
-    private lazy var titleLabel: UILabel = {
-        let label = UILabel()
-        let ref = UIFont.preferredFont(forTextStyle: .title3)
-        label.font = UIFontMetrics(forTextStyle: .title3).scaledFont(for: UIFont.systemFont(ofSize: ref.pointSize, weight: .semibold))
-        label.adjustsFontForContentSizeCategory = true
-        label.translatesAutoresizingMaskIntoConstraints = false
-        return label
-    }()
-
-    private lazy var doneButton: UIButton = {
-        let button = UIButton(type: .system)
-        var cfg = UIButton.Configuration.plain()
-        cfg.title = "完成"
-        let ref = UIFont.preferredFont(forTextStyle: .body)
-        cfg.titleTextAttributesTransformer = UIConfigurationTextAttributesTransformer { incoming in
-            var out = incoming
-            out.font = UIFontMetrics(forTextStyle: .body).scaledFont(for: UIFont.systemFont(ofSize: ref.pointSize, weight: .semibold))
-            return out
-        }
-        button.configuration = cfg
-        button.addTarget(self, action: #selector(didTapDone), for: .touchUpInside)
-        button.translatesAutoresizingMaskIntoConstraints = false
-        return button
-    }()
-
-    private lazy var tableView: UITableView = {
-        let tv = UITableView(frame: .zero, style: .insetGrouped)
-        tv.dataSource = self
-        tv.delegate = self
-        tv.backgroundColor = .clear
-        tv.keyboardDismissMode = .onDrag
-        tv.sectionFooterHeight = 0.01
-        tv.estimatedRowHeight = 44
-        tv.estimatedSectionHeaderHeight = 28
-        tv.rowHeight = UITableView.automaticDimension
-        if #available(iOS 15.0, *) {
-            tv.sectionHeaderTopPadding = 6
-        }
-        tv.translatesAutoresizingMaskIntoConstraints = false
-        tv.register(UITableViewCell.self, forCellReuseIdentifier: "kv")
-        return tv
-    }()
+    private var hasCameraMetadata: Bool {
+        metadataSummary.deviceModel != nil || metadataSummary.lensDescription != nil
+    }
 
     init(asset: PHAsset) {
         self.asset = asset
@@ -288,325 +506,798 @@ final class PhotoAssetInfoSheetViewController: UIViewController {
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .systemGroupedBackground
-        view.directionalLayoutMargins = NSDirectionalEdgeInsets(top: 0, leading: 20, bottom: 0, trailing: 20)
-        titleLabel.text = Self.sheetTitle(for: asset)
-        sections = Self.buildInfoSections(for: asset)
-        setupUI()
-        applyTableHeaderIfNeeded()
+        view.backgroundColor = UIColor.systemGroupedBackground
+        setupLayout()
+        populateStaticContent()
+        loadMetadata()
+        let adjustTap = UITapGestureRecognizer(target: self, action: #selector(didTapAdjustDate))
+        dateAdjustLabel.isUserInteractionEnabled = true
+        dateAdjustLabel.addGestureRecognizer(adjustTap)
     }
 
-    override func viewDidLayoutSubviews() {
-        super.viewDidLayoutSubviews()
-        sizeTableHeaderToFit()
+    deinit {
+        if metadataRequestID != PHInvalidImageRequestID {
+            PHImageManager.default().cancelImageRequest(metadataRequestID)
+        }
+        if thumbnailRequestID != PHInvalidImageRequestID {
+            PHImageManager.default().cancelImageRequest(thumbnailRequestID)
+        }
+    }
+
+    private func setupLayout() {
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        contentStack.translatesAutoresizingMaskIntoConstraints = false
+        contentStack.axis = .vertical
+        contentStack.spacing = 14
+
+        view.addSubview(scrollView)
+        scrollView.addSubview(contentStack)
+
+        NSLayoutConstraint.activate([
+            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            scrollView.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 12),
+            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+
+            contentStack.leadingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.leadingAnchor, constant: 16),
+            contentStack.trailingAnchor.constraint(equalTo: scrollView.contentLayoutGuide.trailingAnchor, constant: -16),
+            contentStack.topAnchor.constraint(equalTo: scrollView.contentLayoutGuide.topAnchor, constant: 4),
+            contentStack.bottomAnchor.constraint(equalTo: scrollView.contentLayoutGuide.bottomAnchor, constant: -18),
+            contentStack.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor, constant: -32)
+        ])
+
+        noteTextField.translatesAutoresizingMaskIntoConstraints = false
+        noteTextField.font = .systemFont(ofSize: 16, weight: .regular)
+        noteTextField.textColor = .label
+        noteTextField.attributedPlaceholder = NSAttributedString(
+            string: "添加说明",
+            attributes: [.foregroundColor: UIColor.tertiaryLabel]
+        )
+        noteTextField.borderStyle = .none
+        noteTextField.clearButtonMode = .whileEditing
+        contentStack.addArrangedSubview(noteTextField)
+        noteTextField.heightAnchor.constraint(equalToConstant: 32).isActive = true
+
+        let headerRow = UIView()
+        headerRow.translatesAutoresizingMaskIntoConstraints = false
+        dateLabel.translatesAutoresizingMaskIntoConstraints = false
+        dateLabel.font = .systemFont(ofSize: 21, weight: .semibold)
+        dateLabel.textColor = .label
+        dateLabel.numberOfLines = 1
+
+        dateAdjustLabel.translatesAutoresizingMaskIntoConstraints = false
+        dateAdjustLabel.font = .systemFont(ofSize: 16, weight: .semibold)
+        dateAdjustLabel.textColor = .systemBlue
+        dateAdjustLabel.text = "调整"
+
+        headerRow.addSubview(dateLabel)
+        headerRow.addSubview(dateAdjustLabel)
+        NSLayoutConstraint.activate([
+            headerRow.heightAnchor.constraint(greaterThanOrEqualToConstant: 28),
+            dateLabel.leadingAnchor.constraint(equalTo: headerRow.leadingAnchor),
+            dateLabel.topAnchor.constraint(equalTo: headerRow.topAnchor),
+            dateLabel.bottomAnchor.constraint(equalTo: headerRow.bottomAnchor),
+            dateLabel.trailingAnchor.constraint(lessThanOrEqualTo: dateAdjustLabel.leadingAnchor, constant: -12),
+            dateAdjustLabel.trailingAnchor.constraint(equalTo: headerRow.trailingAnchor),
+            dateAdjustLabel.centerYAnchor.constraint(equalTo: dateLabel.centerYAnchor)
+        ])
+        contentStack.addArrangedSubview(headerRow)
+
+        let idRow = UIView()
+        idRow.translatesAutoresizingMaskIntoConstraints = false
+        let cloudIcon = UIImageView(image: UIImage(systemName: "icloud"))
+        cloudIcon.translatesAutoresizingMaskIntoConstraints = false
+        cloudIcon.tintColor = .secondaryLabel
+        cloudIcon.preferredSymbolConfiguration = UIImage.SymbolConfiguration(pointSize: 15, weight: .regular)
+
+        identifierLabel.translatesAutoresizingMaskIntoConstraints = false
+        identifierLabel.font = .systemFont(ofSize: 14, weight: .medium)
+        identifierLabel.textColor = .secondaryLabel
+
+        idRow.addSubview(cloudIcon)
+        idRow.addSubview(identifierLabel)
+        NSLayoutConstraint.activate([
+            idRow.heightAnchor.constraint(equalToConstant: 22),
+            cloudIcon.leadingAnchor.constraint(equalTo: idRow.leadingAnchor, constant: 2),
+            cloudIcon.centerYAnchor.constraint(equalTo: idRow.centerYAnchor),
+            cloudIcon.widthAnchor.constraint(equalToConstant: 16),
+            cloudIcon.heightAnchor.constraint(equalToConstant: 16),
+            identifierLabel.leadingAnchor.constraint(equalTo: cloudIcon.trailingAnchor, constant: 8),
+            identifierLabel.trailingAnchor.constraint(equalTo: idRow.trailingAnchor),
+            identifierLabel.centerYAnchor.constraint(equalTo: idRow.centerYAnchor)
+        ])
+        contentStack.addArrangedSubview(idRow)
+
+        contentStack.addArrangedSubview(deviceCard)
+        contentStack.addArrangedSubview(metricsStripContainer)
+
+        if let location = asset.location {
+            contentStack.addArrangedSubview(AssetLocationCardView(location: location))
+        } else {
+            contentStack.addArrangedSubview(AssetLocationPlaceholderCardView())
+        }
+
+        contentStack.addArrangedSubview(collectionsCard)
+
+        var config = UIButton.Configuration.filled()
+        config.title = "在所有照片中显示"
+        config.baseBackgroundColor = UIColor.secondarySystemGroupedBackground
+        config.baseForegroundColor = .systemBlue
+        config.cornerStyle = .large
+        config.contentInsets = NSDirectionalEdgeInsets(top: 14, leading: 20, bottom: 14, trailing: 20)
+        showAllButton.configuration = config
+        showAllButton.translatesAutoresizingMaskIntoConstraints = false
+        contentStack.addArrangedSubview(showAllButton)
+    }
+
+    private func populateStaticContent() {
+        dateLabel.text = Self.formattedDateText(for: asset)
+        identifierLabel.text = Self.primaryResourceFilename(for: asset)
+        rebuildDeviceCard()
+        rebuildMetricsStrip()
+        rebuildCollectionsCard()
+        loadThumbnailRows()
+    }
+
+    @objc
+    private func didTapAdjustDate() {
+        let controller = AssetDateAdjustmentViewController(asset: asset)
+        controller.onAssetDateUpdated = { [weak self] updatedAsset in
+            guard let self else { return }
+            self.asset = updatedAsset
+            self.populateStaticContent()
+        }
+        if let sheet = controller.sheetPresentationController {
+            sheet.detents = [.medium(), .large()]
+            sheet.prefersGrabberVisible = true
+            sheet.preferredCornerRadius = 28
+        }
+        present(controller, animated: true)
+    }
+
+    private func loadMetadata() {
+        guard asset.mediaType == .image else { return }
+        let options = PHImageRequestOptions()
+        options.isNetworkAccessAllowed = true
+        options.deliveryMode = .highQualityFormat
+        options.version = .current
+        metadataRequestID = PHImageManager.default().requestImageDataAndOrientation(for: asset, options: options) { [weak self] data, dataUTI, _, info in
+            guard let self else { return }
+            let degraded = info?[PHImageResultIsDegradedKey] as? Bool ?? false
+            guard !degraded, let data else { return }
+            let summary = Self.extractMetadataSummary(data: data, utiString: dataUTI, asset: self.asset)
+            DispatchQueue.main.async {
+                self.metadataSummary = summary
+                self.rebuildDeviceCard()
+                self.rebuildMetricsStrip()
+            }
+        }
+    }
+
+    private func rebuildDeviceCard() {
+        deviceCard.stackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
+
+        let titleRow = UIView()
+        titleRow.translatesAutoresizingMaskIntoConstraints = false
+        let title = UILabel()
+        title.translatesAutoresizingMaskIntoConstraints = false
+        title.font = .systemFont(ofSize: 16, weight: .semibold)
+        title.textColor = .label
+        title.text = hasCameraMetadata ? (metadataSummary.deviceModel ?? "Apple iPhone") : "无相机信息"
+        title.numberOfLines = 0
+
+        let formatBadge = UILabel()
+        formatBadge.translatesAutoresizingMaskIntoConstraints = false
+        formatBadge.font = .systemFont(ofSize: 12, weight: .semibold)
+        formatBadge.textColor = .white
+        formatBadge.backgroundColor = UIColor.systemGray3
+        formatBadge.layer.cornerRadius = 6
+        formatBadge.clipsToBounds = true
+        formatBadge.textAlignment = .center
+        formatBadge.text = " \(resolvedFormatBadgeText()) "
+
+        let iconName = resolvedFormatIndicatorSymbolName()
+        let icon = UIImageView(image: UIImage(systemName: iconName))
+        icon.translatesAutoresizingMaskIntoConstraints = false
+        icon.tintColor = .secondaryLabel
+
+        titleRow.addSubview(title)
+        titleRow.addSubview(formatBadge)
+        titleRow.addSubview(icon)
+        NSLayoutConstraint.activate([
+            title.leadingAnchor.constraint(equalTo: titleRow.leadingAnchor, constant: 12),
+            title.topAnchor.constraint(equalTo: titleRow.topAnchor, constant: 10),
+            title.bottomAnchor.constraint(equalTo: titleRow.bottomAnchor, constant: -10),
+            formatBadge.trailingAnchor.constraint(equalTo: icon.leadingAnchor, constant: -8),
+            formatBadge.centerYAnchor.constraint(equalTo: titleRow.centerYAnchor),
+            icon.trailingAnchor.constraint(equalTo: titleRow.trailingAnchor, constant: -12),
+            icon.centerYAnchor.constraint(equalTo: titleRow.centerYAnchor),
+            title.trailingAnchor.constraint(lessThanOrEqualTo: formatBadge.leadingAnchor, constant: -8)
+        ])
+        deviceCard.stackView.addArrangedSubview(titleRow)
+
+        deviceCard.stackView.addArrangedSubview(AssetInfoRowView(
+            title: nil,
+            value: hasCameraMetadata ? (metadataSummary.lensDescription ?? "主摄像头") : "无镜头信息",
+            trailingText: nil,
+            titleFont: .systemFont(ofSize: 16, weight: .regular),
+            valueFont: .systemFont(ofSize: 16, weight: .regular),
+            valueColor: .secondaryLabel
+        ))
+
+        let summaryText = [metadataSummary.resolutionText, metadataSummary.fileSizeText]
+            .compactMap { $0 }
+            .joined(separator: " • ")
+        deviceCard.stackView.addArrangedSubview(AssetInfoRowView(
+            title: nil,
+            value: summaryText.isEmpty ? "\(asset.pixelWidth) × \(asset.pixelHeight)" : summaryText,
+            trailingText: nil,
+            titleFont: .systemFont(ofSize: 16, weight: .regular),
+            valueFont: .systemFont(ofSize: 16, weight: .regular),
+            valueColor: .secondaryLabel,
+            showsSeparator: false
+        ))
+    }
+
+    private func rebuildMetricsStrip() {
+        metricsStripContainer.stackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let items: [String]
+        let placeholderItems: [String]
+        if asset.mediaType == .video {
+            items = [
+                metadataSummary.isoText,
+                PhotoAssetInfoSheetViewController.formatDuration(seconds: Int(round(asset.duration)))
+            ].compactMap { value in
+                guard let value, !value.isEmpty else { return nil }
+                return value
+            }
+            placeholderItems = ["-", "-"]
+        } else {
+            items = [
+                metadataSummary.isoText,
+                metadataSummary.focalLengthText,
+                metadataSummary.exposureBiasText,
+                metadataSummary.apertureText,
+                metadataSummary.shutterText
+            ].compactMap { value in
+                guard let value, !value.isEmpty else { return nil }
+                return value
+            }
+            placeholderItems = ["-", "-", "-", "-", "-"]
+        }
+
+        metricsStripContainer.isHidden = false
+        let displayItems = items.isEmpty ? placeholderItems : items
+        metricsStripContainer.stackView.addArrangedSubview(AssetMetricsStripView(items: displayItems))
+    }
+
+    private func rebuildCollectionsCard() {
+        collectionsCard.stackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        let rows = Self.collectionMembershipRows(for: asset)
+        allPhotosRow.setThumbnail(nil)
+        allPhotosRow.setIcon(symbolName: "photo", backgroundColor: .systemGray5)
+        sourceRow.setIcon(symbolName: "photo.fill", backgroundColor: UIColor(red: 0.88, green: 0.19, blue: 0.27, alpha: 1))
+        if let first = rows.first {
+            allPhotosRow.setValue(first)
+        }
+        if rows.count > 1 {
+            sourceRow.setValue(rows[1])
+        }
+        collectionsCard.stackView.addArrangedSubview(allPhotosRow)
+        collectionsCard.stackView.addArrangedSubview(sourceRow)
+    }
+
+    private func loadThumbnailRows() {
+        let options = PHImageRequestOptions()
+        options.deliveryMode = .highQualityFormat
+        options.resizeMode = .fast
+        options.isNetworkAccessAllowed = true
+        let size = CGSize(width: 120, height: 120)
+        thumbnailRequestID = PHImageManager.default().requestImage(for: asset, targetSize: size, contentMode: .aspectFill, options: options) { [weak self] image, info in
+            guard let self else { return }
+            let degraded = info?[PHImageResultIsDegradedKey] as? Bool ?? false
+            guard let image else { return }
+            DispatchQueue.main.async {
+                self.allPhotosRow.setThumbnail(image)
+                if !degraded {
+                    self.thumbnailRequestID = PHInvalidImageRequestID
+                }
+            }
+        }
+    }
+
+    private static func formattedDateText(for asset: PHAsset) -> String {
+        let date = asset.creationDate ?? asset.modificationDate ?? Date()
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "yyyy年M月d日 EEEE HH:mm"
+        return formatter.string(from: date)
+    }
+
+    private static func primaryResourceFilename(for asset: PHAsset) -> String {
+        PHAssetResource.assetResources(for: asset).first?.originalFilename ?? asset.localIdentifier
+    }
+
+    private static func collectionMembershipRows(for asset: PHAsset) -> [String] {
+        let fetch = PHAssetCollection.fetchAssetCollectionsContaining(asset, with: .album, options: nil)
+        var rows: [String] = []
+        fetch.enumerateObjects { collection, _, stop in
+            if let title = collection.localizedTitle, !title.isEmpty {
+                rows.append("包含在\(title)中")
+            }
+            if rows.count >= 2 {
+                stop.pointee = true
+            }
+        }
+        if rows.isEmpty {
+            rows = ["包含在所有照片中", "来自本机照片图库"]
+        } else if rows.count == 1 {
+            rows.append("来自本机照片图库")
+        }
+        return rows
+    }
+
+    private func resolvedFormatBadgeText() -> String {
+        if asset.playbackStyle == .livePhoto || asset.mediaSubtypes.contains(.photoLive) {
+            return "LIVE"
+        }
+
+        let contentType = asset.contentType
+        if let mapped = Self.badgeLabel(for: contentType) {
+            return mapped
+        }
+
+        let resources = PHAssetResource.assetResources(for: asset)
+        for resource in resources {
+            if let mapped = Self.badgeLabel(forUTIString: resource.uniformTypeIdentifier) {
+                return mapped
+            }
+        }
+
+        if let fileFormat = metadataSummary.fileFormat, !fileFormat.isEmpty {
+            return fileFormat
+        }
+        if asset.mediaType == .video {
+            return "H.264"
+        }
+        return "HEIF"
+    }
+
+    private func resolvedFormatIndicatorSymbolName() -> String {
+        if asset.playbackStyle == .livePhoto || asset.mediaSubtypes.contains(.photoLive) {
+            return "livephoto"
+        }
+        if asset.mediaType == .video {
+            return "video"
+        }
+
+        let label = resolvedFormatBadgeText()
+        switch label {
+        case "GIF":
+            return "sparkles.tv"
+        case "RAW":
+            return "r.square"
+        case "PNG", "JPEG", "HEIF":
+            return "photo"
+        default:
+            return "photo"
+        }
+    }
+
+    private static func formatDuration(seconds: Int) -> String {
+        String(format: "%02d:%02d", seconds / 60, seconds % 60)
+    }
+
+    private static func badgeLabel(for type: UTType) -> String? {
+        if type.conforms(to: .heic) || type.conforms(to: .heif) {
+            return "HEIF"
+        }
+        if type.conforms(to: .jpeg) {
+            return "JPEG"
+        }
+        if type.conforms(to: .png) {
+            return "PNG"
+        }
+        if type.conforms(to: .gif) {
+            return "GIF"
+        }
+        if type.conforms(to: .rawImage) {
+            return "RAW"
+        }
+        if type.conforms(to: .mpeg4Movie) {
+            return "MP4"
+        }
+        if type.conforms(to: .quickTimeMovie) {
+            return "MOV"
+        }
+        if type.conforms(to: .movie) {
+            return "VIDEO"
+        }
+        return nil
+    }
+
+    private static func badgeLabel(forUTIString utiString: String) -> String? {
+        guard let type = UTType(utiString) else { return nil }
+        return badgeLabel(for: type)
+    }
+
+    private static func extractMetadataSummary(data: Data, utiString: String?, asset: PHAsset) -> AssetMetadataSummary {
+        var summary = AssetMetadataSummary()
+        if let utiString {
+            summary.fileFormat = UTType(utiString)?.preferredFilenameExtension?.uppercased() ?? utiString.uppercased()
+        }
+        summary.fileSizeText = ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file)
+        let megapixels = Double(asset.pixelWidth * asset.pixelHeight) / 1_000_000.0
+        summary.resolutionText = "\(String(format: "%.0f", megapixels)) MP • \(asset.pixelWidth) x \(asset.pixelHeight)"
+
+        guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+              let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any] else {
+            return summary
+        }
+
+        let tiff = properties[kCGImagePropertyTIFFDictionary] as? [CFString: Any]
+        let exif = properties[kCGImagePropertyExifDictionary] as? [CFString: Any]
+
+        let trimmedModel = (tiff?[kCGImagePropertyTIFFModel] as? String)?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        if let trimmedModel, !trimmedModel.isEmpty {
+            summary.deviceModel = trimmedModel
+        }
+
+        let lensModel = exif?[kCGImagePropertyExifLensModel] as? String
+        let focalLength35 = exif?[kCGImagePropertyExifFocalLenIn35mmFilm] as? Double
+        let fNumber = exif?[kCGImagePropertyExifFNumber] as? Double
+        if let lensModel, !lensModel.isEmpty {
+            summary.lensDescription = lensModel
+        } else if let focalLength35, let fNumber {
+            summary.lensDescription = "主摄像头 — \(Int(round(focalLength35))) mm ƒ\(Self.formattedNumber(fNumber))"
+        }
+
+        if let isoArray = exif?[kCGImagePropertyExifISOSpeedRatings] as? [NSNumber], let iso = isoArray.first {
+            summary.isoText = "ISO \(iso.intValue)"
+        }
+        if let focalLength35 {
+            summary.focalLengthText = "\(Int(round(focalLength35))) mm"
+        }
+        if let exposureBias = exif?[kCGImagePropertyExifExposureBiasValue] as? Double {
+            let bias = exposureBias == floor(exposureBias) ? String(Int(exposureBias)) : String(format: "%.1f", exposureBias)
+            summary.exposureBiasText = "\(bias) ev"
+        }
+        if let fNumber {
+            summary.apertureText = "ƒ\(Self.formattedNumber(fNumber))"
+        }
+        if let exposureTime = exif?[kCGImagePropertyExifExposureTime] as? Double {
+            summary.shutterText = Self.formattedShutter(exposureTime)
+        }
+        if asset.mediaType == .video {
+            summary.isoText = "30 FPS"
+        }
+
+        return summary
+    }
+
+    private static func formattedNumber(_ value: Double) -> String {
+        if value == floor(value) {
+            return String(Int(value))
+        }
+        return String(format: "%.1f", value)
+    }
+
+    private static func formattedShutter(_ value: Double) -> String {
+        guard value > 0 else { return "—" }
+        if value >= 1 {
+            return String(format: "%.1fs", value)
+        }
+        let reciprocal = Int(round(1.0 / value))
+        return "1/\(reciprocal)s"
+    }
+}
+
+private final class AssetDateAdjustmentViewController: UIViewController {
+    var onAssetDateUpdated: ((PHAsset) -> Void)?
+
+    private let asset: PHAsset
+    private let originalCreationDate: Date?
+    private let currentlyDisplayedDate: Date
+
+    private let titleLabel = UILabel()
+    private let closeButton = UIButton(type: .system)
+    private let actionButton = UIButton(type: .system)
+    private let originalValueLabel = UILabel()
+    private let adjustedValueLabel = UILabel()
+    private let monthLabel = UILabel()
+    private let timeZoneValueLabel = UILabel()
+    private let timeValueButton = UIButton(type: .system)
+    private let calendarDatePicker = UIDatePicker()
+    private let timePicker = UIDatePicker()
+
+    private var selectedDate: Date {
+        didSet { refreshUI() }
+    }
+
+    private var storedOriginalDate: Date? {
+        guard let timestamp = UserDefaults.standard.object(forKey: storageKey) as? TimeInterval else { return nil }
+        return Date(timeIntervalSince1970: timestamp)
+    }
+
+    private var hasStoredAdjustment: Bool { storedOriginalDate != nil }
+
+    private var storageKey: String { "\(assetOriginalCreationDateKeyPrefix)\(asset.localIdentifier)" }
+
+    init(asset: PHAsset) {
+        self.asset = asset
+        self.originalCreationDate = asset.creationDate
+        self.currentlyDisplayedDate = asset.creationDate ?? Date()
+        self.selectedDate = asset.creationDate ?? Date()
+        super.init(nibName: nil, bundle: nil)
+        modalPresentationStyle = .pageSheet
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidLoad() {
+        super.viewDidLoad()
+        view.backgroundColor = UIColor.systemGroupedBackground
+        setupUI()
+        refreshUI()
     }
 
     private func setupUI() {
-        view.addSubview(handleBar)
-        view.addSubview(titleLabel)
-        view.addSubview(doneButton)
-        view.addSubview(tableView)
+        let topBar = UIView()
+        topBar.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(topBar)
+
+        closeButton.translatesAutoresizingMaskIntoConstraints = false
+        closeButton.setImage(UIImage(systemName: "xmark"), for: .normal)
+        closeButton.tintColor = .label
+        closeButton.backgroundColor = UIColor.secondarySystemGroupedBackground
+        closeButton.layer.cornerRadius = 18
+        closeButton.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
+
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = .systemFont(ofSize: 18, weight: .semibold)
+        titleLabel.textColor = .label
+        titleLabel.text = "调整日期与时间"
+
+        actionButton.translatesAutoresizingMaskIntoConstraints = false
+        actionButton.titleLabel?.font = .systemFont(ofSize: 17, weight: .semibold)
+        actionButton.addTarget(self, action: #selector(actionTapped), for: .touchUpInside)
+
+        topBar.addSubview(closeButton)
+        topBar.addSubview(titleLabel)
+        topBar.addSubview(actionButton)
+
+        let summaryCard = AssetInfoCardView()
+        let originalRow = AssetInfoRowView(title: "原片时间", value: nil)
+        let adjustedRow = AssetInfoRowView(title: "调整后", value: nil, showsSeparator: false)
+        originalValueLabel.text = formattedDateTime(currentlyDisplayedDate)
+        adjustedValueLabel.text = formattedDateTime(selectedDate)
+
+        (originalRow.subviews.compactMap { $0 as? UILabel }.last)?.text = formattedDateTime(currentlyDisplayedDate)
+        (adjustedRow.subviews.compactMap { $0 as? UILabel }.last)?.text = formattedDateTime(selectedDate)
+        summaryCard.stackView.addArrangedSubview(originalRow)
+        summaryCard.stackView.addArrangedSubview(adjustedRow)
+
+        let pickerCard = AssetInfoCardView(cornerRadius: 24)
+        let monthRow = UIView()
+        monthRow.translatesAutoresizingMaskIntoConstraints = false
+        monthLabel.translatesAutoresizingMaskIntoConstraints = false
+        monthLabel.font = .systemFont(ofSize: 15, weight: .semibold)
+        monthLabel.textColor = .label
+
+        let leftChevron = UIImageView(image: UIImage(systemName: "chevron.left"))
+        let rightChevron = UIImageView(image: UIImage(systemName: "chevron.right"))
+        [leftChevron, rightChevron].forEach {
+            $0.translatesAutoresizingMaskIntoConstraints = false
+            $0.tintColor = .systemBlue
+        }
+        monthRow.addSubview(monthLabel)
+        monthRow.addSubview(leftChevron)
+        monthRow.addSubview(rightChevron)
+        NSLayoutConstraint.activate([
+            monthRow.heightAnchor.constraint(equalToConstant: 34),
+            monthLabel.leadingAnchor.constraint(equalTo: monthRow.leadingAnchor, constant: 16),
+            monthLabel.centerYAnchor.constraint(equalTo: monthRow.centerYAnchor),
+            rightChevron.trailingAnchor.constraint(equalTo: monthRow.trailingAnchor, constant: -16),
+            rightChevron.centerYAnchor.constraint(equalTo: monthRow.centerYAnchor),
+            leftChevron.trailingAnchor.constraint(equalTo: rightChevron.leadingAnchor, constant: -18),
+            leftChevron.centerYAnchor.constraint(equalTo: monthRow.centerYAnchor)
+        ])
+
+        calendarDatePicker.translatesAutoresizingMaskIntoConstraints = false
+        calendarDatePicker.datePickerMode = .date
+        calendarDatePicker.preferredDatePickerStyle = .inline
+        calendarDatePicker.locale = Locale(identifier: "zh_CN")
+        calendarDatePicker.date = selectedDate
+        calendarDatePicker.addTarget(self, action: #selector(datePickerChanged), for: .valueChanged)
+
+        let timeRow = AssetInfoRowView(title: "时间", value: nil, showsSeparator: true)
+        timeValueButton.translatesAutoresizingMaskIntoConstraints = false
+        timeValueButton.titleLabel?.font = .systemFont(ofSize: 16, weight: .medium)
+        timeValueButton.setTitleColor(.label, for: .normal)
+        timeValueButton.backgroundColor = UIColor.tertiarySystemGroupedBackground
+        timeValueButton.layer.cornerRadius = 16
+        timeValueButton.contentEdgeInsets = UIEdgeInsets(top: 8, left: 14, bottom: 8, right: 14)
+        timeValueButton.isUserInteractionEnabled = false
+        timeRow.addSubview(timeValueButton)
+        NSLayoutConstraint.activate([
+            timeValueButton.trailingAnchor.constraint(equalTo: timeRow.trailingAnchor, constant: -12),
+            timeValueButton.centerYAnchor.constraint(equalTo: timeRow.centerYAnchor)
+        ])
+
+        let timeZoneRow = AssetInfoRowView(title: "时区", value: nil, showsSeparator: false)
+        timeZoneValueLabel.translatesAutoresizingMaskIntoConstraints = false
+        timeZoneValueLabel.font = .systemFont(ofSize: 16, weight: .regular)
+        timeZoneValueLabel.textColor = .secondaryLabel
+        timeZoneValueLabel.text = Self.currentTimeZoneDisplayName()
+        timeZoneRow.addSubview(timeZoneValueLabel)
+        let tzChevron = UIImageView(image: UIImage(systemName: "chevron.right"))
+        tzChevron.translatesAutoresizingMaskIntoConstraints = false
+        tzChevron.tintColor = .tertiaryLabel
+        timeZoneRow.addSubview(tzChevron)
+        NSLayoutConstraint.activate([
+            tzChevron.trailingAnchor.constraint(equalTo: timeZoneRow.trailingAnchor, constant: -14),
+            tzChevron.centerYAnchor.constraint(equalTo: timeZoneRow.centerYAnchor),
+            timeZoneValueLabel.trailingAnchor.constraint(equalTo: tzChevron.leadingAnchor, constant: -6),
+            timeZoneValueLabel.centerYAnchor.constraint(equalTo: timeZoneRow.centerYAnchor)
+        ])
+
+        pickerCard.stackView.addArrangedSubview(monthRow)
+        pickerCard.stackView.addArrangedSubview(calendarDatePicker)
+        pickerCard.stackView.addArrangedSubview(timeRow)
+        pickerCard.stackView.addArrangedSubview(timeZoneRow)
+
+        let stack = UIStackView(arrangedSubviews: [summaryCard, pickerCard])
+        stack.axis = .vertical
+        stack.spacing = 18
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(stack)
+
+        timePicker.datePickerMode = .time
+        timePicker.preferredDatePickerStyle = .wheels
+        timePicker.locale = Locale(identifier: "zh_CN")
+        timePicker.date = selectedDate
+        timePicker.addTarget(self, action: #selector(timePickerChanged), for: .valueChanged)
+        timePicker.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(timePicker)
 
         NSLayoutConstraint.activate([
-            handleBar.topAnchor.constraint(equalTo: view.topAnchor, constant: 8),
-            handleBar.centerXAnchor.constraint(equalTo: view.centerXAnchor),
-            handleBar.widthAnchor.constraint(equalToConstant: 36),
-            handleBar.heightAnchor.constraint(equalToConstant: 5),
+            closeButton.leadingAnchor.constraint(equalTo: topBar.leadingAnchor, constant: 16),
+            closeButton.centerYAnchor.constraint(equalTo: topBar.centerYAnchor),
+            closeButton.widthAnchor.constraint(equalToConstant: 36),
+            closeButton.heightAnchor.constraint(equalToConstant: 36),
 
-            titleLabel.topAnchor.constraint(equalTo: handleBar.bottomAnchor, constant: 10),
-            titleLabel.leadingAnchor.constraint(equalTo: view.layoutMarginsGuide.leadingAnchor),
+            titleLabel.centerXAnchor.constraint(equalTo: topBar.centerXAnchor),
+            titleLabel.centerYAnchor.constraint(equalTo: topBar.centerYAnchor),
 
-            doneButton.centerYAnchor.constraint(equalTo: titleLabel.centerYAnchor),
-            doneButton.trailingAnchor.constraint(equalTo: view.layoutMarginsGuide.trailingAnchor),
+            actionButton.trailingAnchor.constraint(equalTo: topBar.trailingAnchor, constant: -16),
+            actionButton.centerYAnchor.constraint(equalTo: topBar.centerYAnchor),
 
-            tableView.topAnchor.constraint(equalTo: titleLabel.bottomAnchor, constant: 4),
-            tableView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            tableView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            tableView.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor)
+            topBar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
+            topBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            topBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            topBar.heightAnchor.constraint(equalToConstant: 44),
+
+            stack.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 18),
+            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+
+            timePicker.leadingAnchor.constraint(equalTo: stack.leadingAnchor),
+            timePicker.trailingAnchor.constraint(equalTo: stack.trailingAnchor),
+            timePicker.topAnchor.constraint(equalTo: stack.bottomAnchor, constant: 8),
+            timePicker.bottomAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16)
         ])
     }
 
-    private func applyTableHeaderIfNeeded() {
-        guard let loc = asset.location else {
-            tableView.tableHeaderView = nil
-            return
-        }
-        let header = AssetLocationMapHeaderView(location: loc)
-        header.frame = CGRect(x: 0, y: 0, width: view.bounds.width, height: 1)
-        tableView.tableHeaderView = header
-    }
-
-    private func sizeTableHeaderToFit() {
-        guard let header = tableView.tableHeaderView else { return }
-        let width = tableView.bounds.width
-        guard width > 0 else { return }
-        let target = header.systemLayoutSizeFitting(
-            CGSize(width: width, height: UIView.layoutFittingCompressedSize.height),
-            withHorizontalFittingPriority: .required,
-            verticalFittingPriority: .fittingSizeLevel
-        )
-        if abs(header.frame.height - target.height) > 0.5 || header.frame.width != width {
-            header.frame = CGRect(x: 0, y: 0, width: width, height: target.height)
-            tableView.tableHeaderView = header
+    private func refreshUI() {
+        monthLabel.text = formattedMonth(selectedDate)
+        timeValueButton.setTitle(formattedTime(selectedDate), for: .normal)
+        let isDirty = selectedDate != currentlyDisplayedDate
+        if hasStoredAdjustment {
+            actionButton.setTitle(isDirty ? "调整" : "复原", for: .normal)
+            actionButton.setTitleColor(isDirty ? .systemBlue : .systemRed, for: .normal)
+        } else {
+            actionButton.setTitle("调整", for: .normal)
+            actionButton.setTitleColor(.systemBlue, for: .normal)
         }
     }
 
-    @objc private func didTapDone() {
+    @objc private func datePickerChanged() {
+        selectedDate = mergedDate(datePart: calendarDatePicker.date, timePart: timePicker.date)
+    }
+
+    @objc private func timePickerChanged() {
+        selectedDate = mergedDate(datePart: calendarDatePicker.date, timePart: timePicker.date)
+    }
+
+    @objc private func closeTapped() {
         dismiss(animated: true)
     }
 
-    // MARK: - 标题与数据构建
-
-    static func sheetTitle(for asset: PHAsset) -> String {
-        switch asset.mediaType {
-        case .video: return "视频信息"
-        case .audio: return "音频信息"
-        case .image: return "照片信息"
-        case .unknown: fallthrough
-        @unknown default: return "媒体信息"
-        }
-    }
-
-    /// 供列表展示的分组数据（位置详情与地图分离：地图在 tableHeaderView）。
-    fileprivate static func buildInfoSections(for asset: PHAsset) -> [PhotoInfoSection] {
-        let df = DateFormatter()
-        df.locale = Locale(identifier: "zh_CN")
-        df.dateStyle = .medium
-        df.timeStyle = .short
-
-        var result: [PhotoInfoSection] = []
-
-        if let loc = asset.location {
-            var locRows: [PhotoInfoRow] = [
-                PhotoInfoRow(name: "纬度", value: String(format: "%.6f°", loc.coordinate.latitude)),
-                PhotoInfoRow(name: "经度", value: String(format: "%.6f°", loc.coordinate.longitude))
-            ]
-            if loc.altitude != 0 || loc.verticalAccuracy >= 0 {
-                locRows.append(PhotoInfoRow(name: "海拔", value: String(format: "%.1f m", loc.altitude)))
-            }
-            if loc.horizontalAccuracy >= 0 {
-                locRows.append(PhotoInfoRow(name: "水平精度", value: String(format: "±%.0f m", loc.horizontalAccuracy)))
-            }
-            if loc.verticalAccuracy >= 0 {
-                locRows.append(PhotoInfoRow(name: "垂直精度", value: String(format: "±%.0f m", loc.verticalAccuracy)))
-            }
-            locRows.append(PhotoInfoRow(name: "定位时间", value: df.string(from: loc.timestamp)))
-            result.append(PhotoInfoSection(title: "位置", rows: locRows))
+    @objc private func actionTapped() {
+        if hasStoredAdjustment && selectedDate == currentlyDisplayedDate {
+            restoreOriginalDate()
         } else {
-            result.append(PhotoInfoSection(title: "位置", rows: [
-                PhotoInfoRow(name: "GPS", value: "无嵌入位置信息")
-            ]))
+            applyAdjustedDate(selectedDate)
         }
+    }
 
-        result.append(PhotoInfoSection(title: "标识", rows: [
-            PhotoInfoRow(name: "本地标识符", value: asset.localIdentifier, monospaceValue: true)
-        ]))
-
-        let subtypes = mediaSubtypeLabels(asset.mediaSubtypes)
-        let subtypeText = subtypes.isEmpty ? "无" : subtypes.joined(separator: "、")
-
-        result.append(PhotoInfoSection(title: "媒体", rows: [
-            PhotoInfoRow(name: "类型", value: mediaTypeLabel(asset.mediaType)),
-            PhotoInfoRow(name: "播放样式", value: playbackStyleLabel(asset.playbackStyle)),
-            PhotoInfoRow(name: "来源", value: sourceTypeLabel(asset.sourceType)),
-            PhotoInfoRow(name: "子类型", value: subtypeText)
-        ]))
-
-        let mp = Double(asset.pixelWidth * asset.pixelHeight) / 1_000_000.0
-        var dimRows: [PhotoInfoRow] = [
-            PhotoInfoRow(name: "像素尺寸", value: "\(asset.pixelWidth) × \(asset.pixelHeight)"),
-            PhotoInfoRow(name: "分辨率", value: String(format: "约 %.2f MP", mp))
-        ]
-        if asset.mediaType == .video || asset.mediaType == .audio {
-            let sec = max(0, Int(round(asset.duration)))
-            dimRows.append(PhotoInfoRow(
-                name: "时长",
-                value: "\(formatDuration(seconds: sec))（\(String(format: "%.3f", asset.duration)) 秒）"
-            ))
-        }
-        result.append(PhotoInfoSection(title: "尺寸与时间轴", rows: dimRows))
-
-        let created = asset.creationDate.map { df.string(from: $0) } ?? "无"
-        let modified = asset.modificationDate.map { df.string(from: $0) } ?? "无"
-        result.append(PhotoInfoSection(title: "时间", rows: [
-            PhotoInfoRow(name: "拍摄 / 创建", value: created),
-            PhotoInfoRow(name: "修改", value: modified)
-        ]))
-
-        if asset.burstIdentifier != nil || asset.representsBurst || !asset.burstSelectionTypes.isEmpty {
-            var burstRows: [PhotoInfoRow] = []
-            if let id = asset.burstIdentifier {
-                burstRows.append(PhotoInfoRow(name: "连拍标识", value: id, monospaceValue: true))
+    private func applyAdjustedDate(_ date: Date) {
+        let originalDate = storedOriginalDate ?? asset.creationDate
+        PHPhotoLibrary.shared().performChanges({
+            let request = PHAssetChangeRequest(for: self.asset)
+            request.creationDate = date
+        }, completionHandler: { success, _ in
+            guard success else { return }
+            if let originalDate {
+                UserDefaults.standard.set(originalDate.timeIntervalSince1970, forKey: self.storageKey)
             }
-            burstRows.append(PhotoInfoRow(name: "代表连拍集", value: asset.representsBurst ? "是" : "否"))
-            let sel = burstSelectionLabels(asset.burstSelectionTypes)
-            burstRows.append(PhotoInfoRow(name: "连拍选中", value: sel.isEmpty ? "无" : sel.joined(separator: "、")))
-            result.append(PhotoInfoSection(title: "连拍", rows: burstRows))
-        }
-
-        var edits: [String] = []
-        if asset.canPerform(.delete) { edits.append("可删除") }
-        if asset.canPerform(.content) { edits.append("可内容编辑") }
-        result.append(PhotoInfoSection(title: "图库状态", rows: [
-            PhotoInfoRow(name: "收藏", value: asset.isFavorite ? "是" : "否"),
-            PhotoInfoRow(name: "隐藏", value: asset.isHidden ? "是" : "否"),
-            PhotoInfoRow(name: "含编辑 / 调整", value: asset.hasAdjustments ? "是" : "否"),
-            PhotoInfoRow(name: "编辑能力", value: edits.isEmpty ? "无或未授权" : edits.joined(separator: "、"))
-        ]))
-
-        let resources = PHAssetResource.assetResources(for: asset)
-        if resources.isEmpty {
-            result.append(PhotoInfoSection(title: "底层资源", rows: [
-                PhotoInfoRow(name: "资源", value: "无 PHAssetResource 条目")
-            ]))
-        } else {
-            var resRows: [PhotoInfoRow] = [
-                PhotoInfoRow(name: "文件数", value: "\(resources.count)")
-            ]
-            for (i, r) in resources.enumerated() {
-                let name = r.originalFilename.isEmpty ? "（无文件名）" : r.originalFilename
-                let uti = r.uniformTypeIdentifier.isEmpty ? "—" : r.uniformTypeIdentifier
-                resRows.append(PhotoInfoRow(
-                    name: "资源 \(i + 1)",
-                    value: "\(resourceTypeLabel(r.type))\n\(name)\n\(uti)",
-                    monospaceValue: false
-                ))
+            DispatchQueue.main.async {
+                self.finishWithUpdatedAsset()
             }
-            result.append(PhotoInfoSection(title: "底层资源", rows: resRows))
+        })
+    }
+
+    private func restoreOriginalDate() {
+        guard let originalDate = storedOriginalDate else { return }
+        PHPhotoLibrary.shared().performChanges({
+            let request = PHAssetChangeRequest(for: self.asset)
+            request.creationDate = originalDate
+        }, completionHandler: { success, _ in
+            guard success else { return }
+            UserDefaults.standard.removeObject(forKey: self.storageKey)
+            DispatchQueue.main.async {
+                self.finishWithUpdatedAsset()
+            }
+        })
+    }
+
+    private func finishWithUpdatedAsset() {
+        let result = PHAsset.fetchAssets(withLocalIdentifiers: [asset.localIdentifier], options: nil)
+        if let updatedAsset = result.firstObject {
+            onAssetDateUpdated?(updatedAsset)
         }
-
-        return result
+        dismiss(animated: true)
     }
 
-    // MARK: - 格式化辅助
-
-    private static func formatDuration(seconds: Int) -> String {
-        String(format: "%d:%02d", seconds / 60, seconds % 60)
+    private func mergedDate(datePart: Date, timePart: Date) -> Date {
+        let calendar = Calendar.current
+        let dateComponents = calendar.dateComponents([.year, .month, .day], from: datePart)
+        let timeComponents = calendar.dateComponents([.hour, .minute, .second], from: timePart)
+        return calendar.date(from: DateComponents(
+            year: dateComponents.year,
+            month: dateComponents.month,
+            day: dateComponents.day,
+            hour: timeComponents.hour,
+            minute: timeComponents.minute,
+            second: timeComponents.second
+        )) ?? datePart
     }
 
-    private static func mediaTypeLabel(_ t: PHAssetMediaType) -> String {
-        switch t {
-        case .image: return "图像"
-        case .video: return "视频"
-        case .audio: return "音频"
-        case .unknown: return "未知"
-        @unknown default: return "其他 (\(t.rawValue))"
-        }
+    private func formattedDateTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "yyyy年M月d日 HH:mm:ss"
+        return formatter.string(from: date)
     }
 
-    private static func sourceTypeLabel(_ t: PHAssetSourceType) -> String {
-        switch t {
-        case .typeUserLibrary: return "本机相册"
-        case .typeCloudShared: return "共享相簿"
-        case .typeiTunesSynced: return "通过 iTunes / 访达同步"
-        default: return "其他来源 (\(t.rawValue))"
-        }
+    private func formattedMonth(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "yyyy年M月"
+        return formatter.string(from: date)
     }
 
-    private static func playbackStyleLabel(_ s: PHAsset.PlaybackStyle) -> String {
-        switch s {
-        case .unsupported: return "不支持 / 未知"
-        case .image: return "静态图像"
-        case .imageAnimated: return "动图（如 GIF）"
-        case .livePhoto: return "实况照片"
-        case .video: return "视频"
-        case .videoLooping: return "循环视频"
-        default: return "其他 (\(s.rawValue))"
-        }
+    private func formattedTime(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.dateFormat = "HH:mm"
+        return formatter.string(from: date)
     }
 
-    private static func mediaSubtypeLabels(_ sub: PHAssetMediaSubtype) -> [String] {
-        let pairs: [(PHAssetMediaSubtype, String)] = [
-            (.photoHDR, "HDR"),
-            (.photoPanorama, "全景"),
-            (.photoDepthEffect, "人像 / 景深"),
-            (.photoScreenshot, "截屏"),
-            (.photoLive, "实况照片"),
-            (.videoHighFrameRate, "高帧率视频"),
-            (.videoStreamed, "流媒体视频"),
-            (.videoTimelapse, "延时摄影"),
-            (.videoCinematic, "电影效果")
-        ]
-        return pairs.filter { sub.contains($0.0) }.map(\.1)
-    }
-
-    private static func burstSelectionLabels(_ t: PHAssetBurstSelectionType) -> [String] {
-        let pairs: [(PHAssetBurstSelectionType, String)] = [
-            (.autoPick, "系统自动挑选"),
-            (.userPick, "用户挑选")
-        ]
-        return pairs.filter { t.contains($0.0) }.map(\.1)
-    }
-
-    private static func resourceTypeLabel(_ type: PHAssetResourceType) -> String {
-        switch type {
-        case .photo: return "照片"
-        case .video: return "视频"
-        case .pairedVideo: return "配对视频（实况）"
-        case .fullSizePhoto: return "全尺寸照片"
-        case .fullSizeVideo: return "全尺寸视频"
-        case .adjustmentData: return "调整数据"
-        case .alternatePhoto: return "备用照片"
-        case .fullSizePairedVideo: return "全尺寸配对视频"
-        case .adjustmentBasePhoto: return "调整基准照片"
-        case .adjustmentBaseVideo: return "调整基准视频"
-        case .adjustmentBasePairedVideo: return "调整基准配对视频"
-        case .photoProxy: return "照片代理"
-        default: return "资源类型 (\(type.rawValue))"
-        }
-    }
-
-}
-
-// MARK: - UITableView
-
-extension PhotoAssetInfoSheetViewController: UITableViewDataSource, UITableViewDelegate {
-
-    func numberOfSections(in tableView: UITableView) -> Int {
-        sections.count
-    }
-
-    func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
-        sections[section].rows.count
-    }
-
-    func tableView(_ tableView: UITableView, titleForHeaderInSection section: Int) -> String? {
-        sections[section].title
-    }
-
-    func tableView(_ tableView: UITableView, willDisplayHeaderView view: UIView, forSection section: Int) {
-        guard let header = view as? UITableViewHeaderFooterView else { return }
-        header.textLabel?.font = .preferredFont(forTextStyle: .footnote)
-        header.textLabel?.textColor = .secondaryLabel
-        header.textLabel?.text = sections[section].title
-    }
-
-    func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
-        let cell = tableView.dequeueReusableCell(withIdentifier: "kv", for: indexPath)
-        cell.selectionStyle = .none
-        cell.backgroundColor = .secondarySystemGroupedBackground
-
-        let row = sections[indexPath.section].rows[indexPath.row]
-        var config = UIListContentConfiguration.valueCell()
-        config.text = row.name
-        let sub = UIFont.preferredFont(forTextStyle: .subheadline)
-        config.textProperties.font = UIFontMetrics(forTextStyle: .subheadline).scaledFont(for: UIFont.systemFont(ofSize: sub.pointSize, weight: .regular))
-        config.textProperties.color = .secondaryLabel
-        config.secondaryText = row.value
-        config.secondaryTextProperties.numberOfLines = 0
-        let body = UIFont.preferredFont(forTextStyle: .body)
-        if row.monospaceValue {
-            config.secondaryTextProperties.font = UIFontMetrics(forTextStyle: .body).scaledFont(for: UIFont.monospacedSystemFont(ofSize: body.pointSize - 1, weight: .regular))
-        } else {
-            config.secondaryTextProperties.font = UIFontMetrics(forTextStyle: .body).scaledFont(for: UIFont.systemFont(ofSize: body.pointSize, weight: .regular))
-        }
-        config.secondaryTextProperties.color = .label
-        config.secondaryTextProperties.alignment = .natural
-        // 短值用系统「设置」式左右排列；长文 / 多行 / 等宽标识符纵向堆叠，避免挤压。
-        let longValue = row.value.count > 36
-        let stacked = row.value.contains("\n") || row.monospaceValue || longValue
-        config.prefersSideBySideTextAndSecondaryText = !stacked
-        cell.contentConfiguration = config
-        return cell
+    private static func currentTimeZoneDisplayName() -> String {
+        TimeZone.current.identifier == "Asia/Shanghai" ? "北京" : TimeZone.current.localizedName(for: .standard, locale: Locale(identifier: "zh_CN")) ?? TimeZone.current.identifier
     }
 }

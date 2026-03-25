@@ -43,7 +43,7 @@ class PhotoGridViewController: BasePhotoViewController {
     private lazy var sortButton: UIButton = {
         // iOS 26 新增的 Glass 样式
         var config = UIButton.Configuration.glass()
-        config.image = UIImage(systemName: "arrow.up.arrow.down")
+        config.image = UIImage(systemName: "line.3.horizontal.decrease")
         config.baseForegroundColor = UIColor.systemBlue
         config.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10)
         
@@ -91,7 +91,7 @@ class PhotoGridViewController: BasePhotoViewController {
     
     override func createSortMenu() -> UIMenu {
         let creationDateAction = UIAction(
-            title: "按照拍摄时间排序",
+            title: "按最旧的排最前排序",
             image: UIImage(systemName: "camera"),
             state: sortPreference == .creationDate ? .on : .off
         ) { [unowned self] _ in
@@ -100,7 +100,7 @@ class PhotoGridViewController: BasePhotoViewController {
         }
         
         let modificationDateAction = UIAction(
-            title: "按照最近加入时间排序",
+            title: "按最新的排最前排序",
             image: UIImage(systemName: "clock"),
             state: sortPreference == .recentDate ? .on : .off
         ) { [weak self] _ in
@@ -109,7 +109,7 @@ class PhotoGridViewController: BasePhotoViewController {
         }
         
         let customAction = UIAction(
-            title: "按照自定义排序",
+            title: "按自定义排序",
             image: UIImage(systemName: "hand.draw"),
             state: sortPreference == .custom ? .on : .off
         ) { [weak self] _ in

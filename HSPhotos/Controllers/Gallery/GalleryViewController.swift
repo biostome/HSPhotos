@@ -21,7 +21,7 @@ class GalleryViewController: BasePhotoViewController {
     }()
     
     internal lazy var sortBarButton: UIBarButtonItem = {
-        let button = UIBarButtonItem(image: UIImage(systemName: "arrow.up.arrow.down"), style: .plain, target: nil, action: nil)
+        let button = UIBarButtonItem(image: UIImage(systemName: "line.3.horizontal.decrease"), style: .plain, target: nil, action: nil)
         button.menu = createSortMenu()
         return button
     }()
