@@ -7,6 +7,33 @@ final class AssetLocationAdjustmentViewController: UIViewController {
     
     private let asset: PHAsset
     private let originalLocation: CLLocation?
+    
+    private var storedOriginalCoordinate: CLLocationCoordinate2D? {
+        let latKey = "asset_original_loc_lat_\(asset.localIdentifier)"
+        let lonKey = "asset_original_loc_lon_\(asset.localIdentifier)"
+        guard let lat = UserDefaults.standard.object(forKey: latKey) as? Double,
+              let lon = UserDefaults.standard.object(forKey: lonKey) as? Double else {
+            return nil
+        }
+        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+    }
+    
+    private func saveOriginalCoordinateIfNeeded() {
+        if storedOriginalCoordinate == nil, let loc = originalLocation {
+            let latKey = "asset_original_loc_lat_\(asset.localIdentifier)"
+            let lonKey = "asset_original_loc_lon_\(asset.localIdentifier)"
+            UserDefaults.standard.set(loc.coordinate.latitude, forKey: latKey)
+            UserDefaults.standard.set(loc.coordinate.longitude, forKey: lonKey)
+        }
+    }
+    
+    private func clearStoredOriginalCoordinate() {
+        let latKey = "asset_original_loc_lat_\(asset.localIdentifier)"
+        let lonKey = "asset_original_loc_lon_\(asset.localIdentifier)"
+        UserDefaults.standard.removeObject(forKey: latKey)
+        UserDefaults.standard.removeObject(forKey: lonKey)
+    }
+    
     private var selectedCoordinate: CLLocationCoordinate2D? {
         didSet {
             updateActionButton()
@@ -204,9 +231,17 @@ final class AssetLocationAdjustmentViewController: UIViewController {
             actionButton.setTitleColor(.systemBlue, for: .normal)
             actionButton.isHidden = false
         } else {
-            actionButton.setTitle("移除", for: .normal)
-            actionButton.setTitleColor(.systemRed, for: .normal)
-            actionButton.isHidden = false
+            if storedOriginalCoordinate != nil {
+                actionButton.setTitle("复原", for: .normal)
+                actionButton.setTitleColor(.systemRed, for: .normal)
+                actionButton.isHidden = false
+            } else if originalLocation != nil {
+                actionButton.setTitle("移除", for: .normal)
+                actionButton.setTitleColor(.systemRed, for: .normal)
+                actionButton.isHidden = false
+            } else {
+                actionButton.isHidden = true
+            }
         }
     }
     
@@ -215,11 +250,38 @@ final class AssetLocationAdjustmentViewController: UIViewController {
     }
     
     @objc private func actionTapped() {
-        if actionButton.title(for: .normal) == "移除" {
+        let title = actionButton.title(for: .normal)
+        
+        if title == "完成" {
+            if let coordinate = selectedCoordinate {
+                saveOriginalCoordinateIfNeeded()
+                let loc = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
+                applyLocation(loc)
+            }
+        } else if title == "移除" {
+            saveOriginalCoordinateIfNeeded()
             applyLocation(nil)
-        } else if let coordinate = selectedCoordinate {
-            let loc = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
-            applyLocation(loc)
+        } else if title == "复原" {
+            let sheet = UIAlertController(title: "复原或移除位置", message: "你想恢复这张照片最初的位置，还是彻底移除位置？", preferredStyle: .actionSheet)
+            
+            sheet.addAction(UIAlertAction(title: "恢复原照片位置", style: .default, handler: { [weak self] _ in
+                guard let self = self, let orig = self.storedOriginalCoordinate else { return }
+                self.clearStoredOriginalCoordinate()
+                let loc = CLLocation(latitude: orig.latitude, longitude: orig.longitude)
+                self.applyLocation(loc)
+            }))
+            
+            sheet.addAction(UIAlertAction(title: "彻底移除位置", style: .destructive, handler: { [weak self] _ in
+                self?.applyLocation(nil)
+            }))
+            
+            sheet.addAction(UIAlertAction(title: "取消", style: .cancel))
+            
+            if let popover = sheet.popoverPresentationController {
+                popover.sourceView = actionButton
+                popover.sourceRect = actionButton.bounds
+            }
+            present(sheet, animated: true)
         }
     }
     

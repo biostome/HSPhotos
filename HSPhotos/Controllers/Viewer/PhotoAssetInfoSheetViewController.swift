@@ -661,11 +661,6 @@ final class PhotoAssetInfoSheetViewController: UIViewController {
             self.asset = updatedAsset
             self.populateStaticContent()
         }
-        if let sheet = adjustmentController.sheetPresentationController {
-            sheet.detents = [.medium(), .large()]
-            sheet.prefersGrabberVisible = true
-            sheet.preferredCornerRadius = 28
-        }
         present(adjustmentController, animated: true)
     }
 
