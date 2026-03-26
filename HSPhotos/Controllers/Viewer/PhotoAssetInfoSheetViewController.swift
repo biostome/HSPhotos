@@ -314,6 +314,7 @@ private final class AssetLocationCardView: UIView {
     private let location: CLLocation
     private var reverseGeocodeRequest: MKReverseGeocodingRequest?
     private var geocodeToken = UUID()
+    var onAdjustTapped: (() -> Void)?
 
     init(location: CLLocation) {
         self.location = location
@@ -373,6 +374,8 @@ private final class AssetLocationCardView: UIView {
         adjustLabel.text = "调整"
         adjustLabel.setContentHuggingPriority(.required, for: .horizontal)
         adjustLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        adjustLabel.isUserInteractionEnabled = true
+        adjustLabel.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleAdjustTap)))
 
         bottomRow.addSubview(addressLabel)
         bottomRow.addSubview(adjustLabel)
@@ -430,9 +433,15 @@ private final class AssetLocationCardView: UIView {
         }
         return parts.isEmpty ? "未知地点" : parts.joined(separator: " ")
     }
+    
+    @objc private func handleAdjustTap() {
+        onAdjustTapped?()
+    }
 }
 
 private final class AssetLocationPlaceholderCardView: UIView {
+    var onAddLocationTapped: (() -> Void)?
+
     init() {
         super.init(frame: .zero)
         translatesAutoresizingMaskIntoConstraints = false
@@ -455,6 +464,8 @@ private final class AssetLocationPlaceholderCardView: UIView {
 
         let row = UIView()
         row.translatesAutoresizingMaskIntoConstraints = false
+        row.isUserInteractionEnabled = true
+        row.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleAddLocationTap)))
         row.addSubview(label)
         NSLayoutConstraint.activate([
             row.heightAnchor.constraint(equalToConstant: 62),
@@ -468,6 +479,10 @@ private final class AssetLocationPlaceholderCardView: UIView {
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    @objc private func handleAddLocationTap() {
+        onAddLocationTapped?()
     }
 }
 
@@ -486,6 +501,7 @@ final class PhotoAssetInfoSheetViewController: UIViewController {
     private let identifierLabel = UILabel()
     private let deviceCard = AssetInfoCardView()
     private let metricsStripContainer = AssetInfoCardView(cornerRadius: 14)
+    private let locationCardContainer = UIStackView()
     private let collectionsCard = AssetInfoCardView()
     private let allPhotosRow = AssetLinkRowView(title: "在所有照片中")
     private let sourceRow = AssetLinkRowView(title: "来自本机照片图库", showsSeparator: false)
@@ -610,11 +626,9 @@ final class PhotoAssetInfoSheetViewController: UIViewController {
         contentStack.addArrangedSubview(deviceCard)
         contentStack.addArrangedSubview(metricsStripContainer)
 
-        if let location = asset.location {
-            contentStack.addArrangedSubview(AssetLocationCardView(location: location))
-        } else {
-            contentStack.addArrangedSubview(AssetLocationPlaceholderCardView())
-        }
+        locationCardContainer.axis = .vertical
+        locationCardContainer.translatesAutoresizingMaskIntoConstraints = false
+        contentStack.addArrangedSubview(locationCardContainer)
 
         contentStack.addArrangedSubview(collectionsCard)
 
@@ -634,6 +648,7 @@ final class PhotoAssetInfoSheetViewController: UIViewController {
         identifierLabel.text = Self.primaryResourceFilename(for: asset)
         rebuildDeviceCard()
         rebuildMetricsStrip()
+        rebuildLocationCard()
         rebuildCollectionsCard()
         loadThumbnailRows()
     }
@@ -652,6 +667,35 @@ final class PhotoAssetInfoSheetViewController: UIViewController {
             sheet.preferredCornerRadius = 28
         }
         present(adjustmentController, animated: true)
+    }
+
+    @objc
+    private func didTapAdjustLocation() {
+        let locationController = AssetLocationAdjustmentViewController(asset: asset)
+        locationController.onAssetLocationUpdated = { [weak self] updatedAsset in
+            guard let self else { return }
+            self.asset = updatedAsset
+            self.populateStaticContent()
+        }
+        present(locationController, animated: true)
+    }
+
+    private func rebuildLocationCard() {
+        locationCardContainer.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        
+        if let location = asset.location {
+            let card = AssetLocationCardView(location: location)
+            card.onAdjustTapped = { [weak self] in
+                self?.didTapAdjustLocation()
+            }
+            locationCardContainer.addArrangedSubview(card)
+        } else {
+            let card = AssetLocationPlaceholderCardView()
+            card.onAddLocationTapped = { [weak self] in
+                self?.didTapAdjustLocation()
+            }
+            locationCardContainer.addArrangedSubview(card)
+        }
     }
 
     private func loadMetadata() {
