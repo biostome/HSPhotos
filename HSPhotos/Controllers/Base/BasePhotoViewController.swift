@@ -873,16 +873,63 @@ class BasePhotoViewController: UIViewController {
     }
 
     internal func createHierarchyMenu(attributes: UIMenuElement.Attributes) -> UIMenu {
-        let setLevel1 = UIAction(title: "批量设为主级", image: UIImage(systemName: "list.number"), attributes: attributes) { [weak self] _ in
-            self?.onBatchSetLevel(1)
+        let selected = orderedSelectedAssets()
+        guard !selected.isEmpty else { return UIMenu(title: "层级", children: []) }
+        
+        let firstAsset = selected[0]
+        let prevLv = getPreviousLevel(for: firstAsset)
+        let anyInHierarchy = selected.contains { PhotoNumberingService.shared.level(for: $0, in: collection) > 0 }
+        
+        // 升级选项：存在不仅是主级(Level 1)的已编号项
+        let anyCanUp = selected.contains { PhotoNumberingService.shared.level(for: $0, in: collection) > 1 }
+        
+        var children: [UIMenuElement] = []
+        
+        // 1. 设置主级 (Root)
+        let setMain = UIAction(title: "批量设为主级", image: UIImage(systemName: "list.number"), attributes: attributes) { [weak self] _ in
+            self?.onBatchSetLevel(to: 1)
         }
-        let setLevel2 = UIAction(title: "批量设为子级", image: UIImage(systemName: "list.bullet.indent"), attributes: attributes) { [weak self] _ in
-            self?.onBatchSetLevel(2)
+        children.append(setMain)
+        
+        // 2. 提升/下降 (缩进平移)
+        if anyCanUp {
+            let promote = UIAction(title: "批量提升层级", image: UIImage(systemName: "arrow.left"), attributes: attributes) { [weak self] _ in
+                self?.onBatchPromoteLevel()
+            }
+            children.append(promote)
         }
-        let clear = UIAction(title: "批量取消编号", image: UIImage(systemName: "xmark.circle"), attributes: attributes) { [weak self] _ in
-            self?.onBatchClearLevel()
+        
+        // 下降条件：第一个选中的节点深度不能超过上方参考节点 + 1
+        let firstLv = PhotoNumberingService.shared.level(for: firstAsset, in: collection)
+        if firstLv < prevLv + 1 {
+            let demote = UIAction(title: "批量下降层级", image: UIImage(systemName: "arrow.right"), attributes: attributes) { [weak self] _ in
+                self?.onBatchDemoteLevel()
+            }
+            children.append(demote)
         }
-        return UIMenu(title: "层级", children: [setLevel1, setLevel2, clear])
+        
+        // 3. 上下文相关：设为同级/子级
+        if prevLv > 0 {
+            let setSame = UIAction(title: "批量设为同级", image: UIImage(systemName: "arrow.right.to.line"), attributes: attributes) { [weak self] _ in
+                self?.onBatchSetLevel(to: prevLv)
+            }
+            children.append(setSame)
+            
+            let setSub = UIAction(title: "批量设为子级", image: UIImage(systemName: "list.bullet.indent"), attributes: attributes) { [weak self] _ in
+                self?.onBatchSetLevel(to: prevLv + 1)
+            }
+            children.append(setSub)
+        }
+        
+        // 4. 清除
+        if anyInHierarchy {
+            let clearAction = UIAction(title: "批量取消编号", image: UIImage(systemName: "xmark.circle"), attributes: attributes.union(.destructive)) { [weak self] _ in
+                self?.onBatchClearLevel()
+            }
+            children.append(clearAction)
+        }
+        
+        return UIMenu(title: "层级操作", children: children)
     }
     
     internal func updateOperationMenu() {
@@ -925,24 +972,127 @@ class BasePhotoViewController: UIViewController {
         present(vc, animated: true)
     }
 
-    internal func onBatchSetLevel(_ level: Int) {
-        let orderedSelected = orderedSelectedAssets()
-        guard !orderedSelected.isEmpty else { return }
-        for asset in orderedSelected {
+    private func onBatchSetLevel(to level: Int) {
+        let items = orderedSelectedAssets()
+        for asset in items {
             PhotoNumberingService.shared.setLevel(level, for: asset, in: collection)
         }
         gridView.refreshParagraphDisplay()
         updateOperationMenu()
     }
 
-    internal func onBatchClearLevel() {
+    private func getPreviousLevel(for asset: PHAsset) -> Int {
+        if let idx = assets.firstIndex(of: asset), idx > 0 {
+            return PhotoNumberingService.shared.level(for: assets[idx - 1], in: collection)
+        }
+        return 0
+    }
+
+    /// 批量升级：N→N-1（N=1⇄0 切换，N>1 则升级，0→1 开始）
+    internal func onBatchPromoteLevel() {
         let orderedSelected = orderedSelectedAssets()
+        var processedIDs = Set<String>()
         guard !orderedSelected.isEmpty else { return }
+
         for asset in orderedSelected {
-            PhotoNumberingService.shared.clearLevel(for: asset, in: collection)
+            if processedIDs.contains(asset.localIdentifier) { continue }
+            
+            let current = PhotoNumberingService.shared.level(for: asset, in: collection)
+            if current == 0 {
+                // 无层级 → 1（设为主级）
+                PhotoNumberingService.shared.setLevel(1, for: asset, in: collection)
+                processedIDs.insert(asset.localIdentifier)
+            } else if current == 1 {
+                // 1 → 0（主级退出），连带其所有后续子节点一并清除
+                clearLevelCascading(asset: asset, processedIDs: &processedIDs)
+            } else {
+                // N → N-1，级联带动后续子节点平移
+                shiftLevelCascading(asset: asset, delta: -1, processedIDs: &processedIDs)
+            }
         }
         gridView.refreshParagraphDisplay()
         updateOperationMenu()
+    }
+
+    /// 批量降级：N→N+1（智能进入或加深，具有完整性保护）
+    internal func onBatchDemoteLevel() {
+        let orderedSelected = orderedSelectedAssets()
+        var processedIDs = Set<String>()
+        guard !orderedSelected.isEmpty else { return }
+
+        for asset in orderedSelected {
+            if processedIDs.contains(asset.localIdentifier) { continue }
+            
+            let current = PhotoNumberingService.shared.level(for: asset, in: collection)
+            if current == 0 {
+                // 如果当前没有层级，则进入层级。
+                // 约束：如果上方已存在编号照片，则设为其次一级；否则强制作为主级(1)开始。
+                let prev = getPreviousLevel(for: asset)
+                let entryLevel = (prev > 0) ? (prev + 1) : 1
+                PhotoNumberingService.shared.setLevel(entryLevel, for: asset, in: collection)
+                processedIDs.insert(asset.localIdentifier)
+            } else {
+                // 已有级别：尝试降级。级联带动后续子节点平移。
+                shiftLevelCascading(asset: asset, delta: 1, processedIDs: &processedIDs)
+            }
+        }
+        gridView.refreshParagraphDisplay()
+        updateOperationMenu()
+    }
+
+    /// 级联平移级别：平移当前节点，并连带平移后续子节点
+    private func shiftLevelCascading(asset: PHAsset, delta: Int, processedIDs: inout Set<String>) {
+        let oldLevel = PhotoNumberingService.shared.level(for: asset, in: collection)
+        guard oldLevel > 0 else { return }
+        
+        let newLevel = max(1, oldLevel + delta)
+        PhotoNumberingService.shared.setLevel(newLevel, for: asset, in: collection)
+        processedIDs.insert(asset.localIdentifier)
+        
+        guard let idx = assets.firstIndex(of: asset) else { return }
+        for i in (idx + 1)..<assets.count {
+            let next = assets[i]
+            let nextLevel = PhotoNumberingService.shared.level(for: next, in: collection)
+            
+            // 遇到无层级、同层或更浅层级时，表示已经跳出了当前子树，终止
+            if nextLevel == 0 || nextLevel <= oldLevel { break }
+            
+            let targetNextLevel = max(1, nextLevel + delta)
+            PhotoNumberingService.shared.setLevel(targetNextLevel, for: next, in: collection)
+            
+            // 标记为已处理
+            processedIDs.insert(next.localIdentifier)
+        }
+    }
+
+    /// 批量取消级别
+    internal func onBatchClearLevel() {
+        let orderedSelected = orderedSelectedAssets()
+        var processedIDs = Set<String>()
+        guard !orderedSelected.isEmpty else { return }
+        for asset in orderedSelected {
+            if processedIDs.contains(asset.localIdentifier) { continue }
+            clearLevelCascading(asset: asset, processedIDs: &processedIDs)
+        }
+        gridView.refreshParagraphDisplay()
+        updateOperationMenu()
+    }
+
+    /// 清除指定资产的层级，并连带清除其后续所有更深的子节点
+    private func clearLevelCascading(asset: PHAsset, processedIDs: inout Set<String>) {
+        let myLevel = PhotoNumberingService.shared.level(for: asset, in: collection)
+        PhotoNumberingService.shared.clearLevel(for: asset, in: collection)
+        processedIDs.insert(asset.localIdentifier)
+        
+        guard myLevel > 0, let idx = assets.firstIndex(of: asset) else { return }
+        
+        for i in (idx + 1)..<assets.count {
+            let child = assets[i]
+            let childLevel = PhotoNumberingService.shared.level(for: child, in: collection)
+            if childLevel == 0 || childLevel <= myLevel { break }
+            PhotoNumberingService.shared.clearLevel(for: child, in: collection)
+            processedIDs.insert(child.localIdentifier)
+        }
     }
 
     internal func orderedSelectedAssets() -> [PHAsset] {

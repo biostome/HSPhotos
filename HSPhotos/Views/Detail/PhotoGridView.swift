@@ -1144,32 +1144,97 @@ extension PhotoGridView {
                 anchorGroup.append(setAnchorAction)
             }
             
-            // 层级相关操作（仅自定义排序且支持层级时可用）
+            // 情况 2 & 3: 层级操作 (由于层级必须连续且有根，这里根据上下文提供智能选项)
             if sortPreference == .custom, supportsHierarchyNumbering, let collection = currentCollection {
-                let setLevel1Action = UIAction(title: "设为主级", image: UIImage(systemName: "list.number")) { [weak self] _ in
-                    guard let self = self else { return }
-                    self.numberingService.setLevel(1, for: asset, in: collection)
-                    self.refreshParagraphDisplay()
+                let currLv = numberingService.level(for: asset, in: collection)
+                
+                // 向上递归查找最近的一个层级节点作为参考点 (prevLevel)
+                var prevLv = 0
+                if let idx = visibleAssets.firstIndex(of: asset), idx > 0 {
+                    for i in (0..<idx).reversed() {
+                        let lv = numberingService.level(for: visibleAssets[i], in: collection)
+                        if lv > 0 {
+                            prevLv = lv
+                            break
+                        }
+                    }
                 }
-                hierarchyGroup.append(setLevel1Action)
 
-                let setLevel2Action = UIAction(title: "设为子级", image: UIImage(systemName: "list.bullet.indent")) { [weak self] _ in
-                    guard let self = self else { return }
-                    self.numberingService.setLevel(2, for: asset, in: collection)
-                    self.refreshParagraphDisplay()
-                }
-                hierarchyGroup.append(setLevel2Action)
-
-                // 仅已设置层级的照片显示「取消编号」
-                if numberingService.level(for: asset, in: collection) != 0 {
-                    let clearLevelAction = UIAction(title: "取消编号", image: UIImage(systemName: "xmark.circle")) { [weak self] _ in
+                if currLv == 0 {
+                    // --- 情况 1 & 2: 节点尚未进入层级系统 ---
+                    // 规则: 总是提供“设为主级”作为根入口
+                    let setMain = UIAction(title: "设为主级", image: UIImage(systemName: "list.number")) { [weak self] _ in
                         guard let self = self else { return }
-                        self.numberingService.clearLevel(for: asset, in: collection)
+                        self.numberingService.setLevel(1, for: asset, in: collection)
                         self.refreshParagraphDisplay()
                     }
-                    hierarchyGroup.append(clearLevelAction)
+                    hierarchyGroup.append(setMain)
+                    
+                    if prevLv > 0 {
+                        // 规则: 如果上方有层级，则一并提供“设为同级”与“设为子级”选项
+                        let setSame = UIAction(title: "设为同级", image: UIImage(systemName: "arrow.right.to.line")) { [weak self] _ in
+                            guard let self = self else { return }
+                            self.numberingService.setLevel(prevLv, for: asset, in: collection)
+                            self.refreshParagraphDisplay()
+                        }
+                        let setSub = UIAction(title: "设为子级", image: UIImage(systemName: "list.bullet.indent")) { [weak self] _ in
+                            guard let self = self else { return }
+                            self.numberingService.setLevel(prevLv + 1, for: asset, in: collection)
+                            self.refreshParagraphDisplay()
+                        }
+                        hierarchyGroup.append(setSame)
+                        hierarchyGroup.append(setSub)
+                    }
+                } else {
+                    // --- 情况 3: 节点已在层级系统中，并列提供调整选项 ---
+                    
+                    // 1. 提升层级 (只有大于 1 级时可提升，符合“已经是主项则隐藏设为主项”的逻辑)
+                    if currLv > 1 {
+                        let promote = UIAction(title: "提升层级", image: UIImage(systemName: "arrow.left")) { [weak self] _ in
+                            guard let self = self else { return }
+                            self.numberingService.setLevel(currLv - 1, for: asset, in: collection)
+                            self.refreshParagraphDisplay()
+                        }
+                        hierarchyGroup.append(promote)
+                    }
+                    
+                    // 2. 下降层级 (层级连续性约束：当前深度不能超过 prev + 1)
+                    if currLv < prevLv + 1 {
+                        let demote = UIAction(title: "下降层级", image: UIImage(systemName: "arrow.right")) { [weak self] _ in
+                            guard let self = self else { return }
+                            self.numberingService.setLevel(currLv + 1, for: asset, in: collection)
+                            self.refreshParagraphDisplay()
+                        }
+                        hierarchyGroup.append(demote)
+                    }
+                    
+                    // 3. 设为同级 (如果当前深度与参考节点不同，则允许对齐)
+                    if currLv != prevLv && prevLv > 0 {
+                        let setSame = UIAction(title: "设为同级", image: UIImage(systemName: "arrow.right.to.line")) { [weak self] _ in
+                            guard let self = self else { return }
+                            self.numberingService.setLevel(prevLv, for: asset, in: collection)
+                            self.refreshParagraphDisplay()
+                        }
+                        hierarchyGroup.append(setSame)
+                    }
+                    
+                    // 选项：取消编号 (级联执行，清理下属子树)
+                    let clearAction = UIAction(title: "取消编号", image: UIImage(systemName: "xmark.circle"), attributes: .destructive) { [weak self] _ in
+                        guard let self = self, let idx = self.visibleAssets.firstIndex(of: asset) else { return }
+                        self.numberingService.clearLevel(for: asset, in: collection)
+                        // 级联清除下属子节点
+                        for i in (idx + 1)..<self.visibleAssets.count {
+                            let next = self.visibleAssets[i]
+                            let nextLv = self.numberingService.level(for: next, in: collection)
+                            if nextLv == 0 || nextLv <= currLv { break }
+                            self.numberingService.clearLevel(for: next, in: collection)
+                        }
+                        self.refreshParagraphDisplay()
+                    }
+                    hierarchyGroup.append(clearAction)
                 }
 
+                // 节点折叠/展开操作
                 if hasHierarchyDescendants || isCurrentHierarchyCollapsed {
                     let collapseAction = UIAction(
                         title: isCurrentHierarchyCollapsed ? "展开" : "折叠",
@@ -1181,7 +1246,6 @@ extension PhotoGridView {
                     }
                     hierarchyGroup.append(collapseAction)
                 }
-
             }
 
             // 其他操作：添加标签 → 粘贴到此后方 → 删除（危险操作放最后）

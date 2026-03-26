@@ -2,7 +2,7 @@
 //  PhotoNumberingService.swift
 //  HSPhotos
 //
-//  照片多级编号系统（类似 Word 多级列表）
+//  照片多级编号系统（类似 Word 多级列表，支持无限级嵌套）
 //  编号由 (顺序, 层级) 纯函数计算，不可手动输入
 //  运行时仅使用内存缓存，UserDefaults 仅在进入/离开视图及变更时读写
 //
@@ -10,7 +10,7 @@
 import Foundation
 import Photos
 
-/// 照片编号服务：存储 level(1/2)、折叠状态，按顺序计算编号
+/// 照片编号服务：存储 level(1,2,3,...)、折叠状态，按顺序计算编号（无限层级）
 final class PhotoNumberingService {
     static let shared = PhotoNumberingService()
     private init() {}
@@ -52,23 +52,23 @@ final class PhotoNumberingService {
 
     // MARK: - 运行时只读（纯内存）
 
-    /// 获取照片层级：1=一级, 2=二级, 0=未分级
+    /// 获取照片层级（1 = 最顶层，2,3,... 依次深入，0 = 无层级）
     func level(for asset: PHAsset, in collection: PHAssetCollection) -> Int {
         levelsCache[cacheKey(collection)]?[asset.localIdentifier] ?? 0
     }
 
-    /// 是否折叠（仅对 level=1 有效）
+    /// 是否折叠
     func isCollapsed(_ asset: PHAsset, in collection: PHAssetCollection) -> Bool {
         collapsedCache[cacheKey(collection)]?[asset.localIdentifier] ?? false
     }
 
     // MARK: - 运行时写操作（更新内存后保存）
 
-    /// 设置层级：1 或 2，0 表示清理
+    /// 设置层级（level >= 1），0 表示清除层级
     func setLevel(_ level: Int, for asset: PHAsset, in collection: PHAssetCollection) {
         let key = cacheKey(collection)
         var dict = levelsCache[key] ?? [:]
-        if level == 0 {
+        if level <= 0 {
             dict.removeValue(forKey: asset.localIdentifier)
         } else {
             dict[asset.localIdentifier] = level
@@ -91,34 +91,46 @@ final class PhotoNumberingService {
         saveForCollection(collection)
     }
 
-    // MARK: - 编号计算（纯内存，O(n)）
+    // MARK: - 编号计算（栈式算法，支持无限级，O(n)）
 
-    /// 根据顺序与层级计算编号（仅用内存缓存）
+    /// 根据顺序与层级计算编号，返回 assetID -> "1.2.3" 格式的字典
     func computeNumbers(
         for orderedAssets: [PHAsset],
         in collection: PHAssetCollection
     ) -> [String: String] {
         let levels = levelsCache[cacheKey(collection)] ?? [:]
         var result: [String: String] = [:]
-        var mainNum = 0
-        var subNum = 0
+        // counters[i] 表示第 i 层当前的计数（从下标 1 开始有效，故初始化一个 [0] 占位）
+        var counters: [Int] = [0]
+        var lastLevel = 0
 
         for asset in orderedAssets {
             let id = asset.localIdentifier
             let lv = levels[id] ?? 0
+            guard lv > 0 else { continue }
 
-            if lv == 1 {
-                mainNum += 1
-                subNum = 0
-                result[id] = "\(mainNum)"
-            } else if lv == 2 {
-                if mainNum == 0 {
-                    mainNum = 1
-                    subNum = 0
-                }
-                subNum += 1
-                result[id] = "\(mainNum).\(subNum)"
+            // 1. 结构完整性规范：层级深度不能超过前一个资产的深度 + 1 (确保有主级才有子级，且无断档)
+            let correctedLv = min(lv, lastLevel + 1)
+
+            // 2. 确保 counters 数组足够长
+            while counters.count <= correctedLv {
+                counters.append(0)
             }
+
+            // 3. 重置更深层的计数器：遇到更高层级时，其下的子层级全部归零
+            if correctedLv <= lastLevel {
+                for i in (correctedLv + 1)..<counters.count {
+                    counters[i] = 0
+                }
+            }
+
+            // 4. 当前层级计数并记录
+            counters[correctedLv] += 1
+            lastLevel = correctedLv
+
+            // 5. 生成字符串 (1.1.1)
+            let parts = (1...correctedLv).map { String(counters[$0]) }
+            result[id] = parts.joined(separator: ".")
         }
         return result
     }
@@ -128,30 +140,8 @@ final class PhotoNumberingService {
         for orderedAssets: [PHAsset],
         in collection: PHAssetCollection
     ) -> (numbers: [String: String], collapsed: [String: Bool]) {
-        let key = cacheKey(collection)
-        let levels = levelsCache[key] ?? [:]
-        let collapsed = collapsedCache[key] ?? [:]
-        var numbers: [String: String] = [:]
-        var mainNum = 0
-        var subNum = 0
-
-        for asset in orderedAssets {
-            let id = asset.localIdentifier
-            let lv = levels[id] ?? 0
-
-            if lv == 1 {
-                mainNum += 1
-                subNum = 0
-                numbers[id] = "\(mainNum)"
-            } else if lv == 2 {
-                if mainNum == 0 {
-                    mainNum = 1
-                    subNum = 0
-                }
-                subNum += 1
-                numbers[id] = "\(mainNum).\(subNum)"
-            }
-        }
+        let numbers = computeNumbers(for: orderedAssets, in: collection)
+        let collapsed = collapsedCache[cacheKey(collection)] ?? [:]
         return (numbers, collapsed)
     }
 
@@ -164,28 +154,32 @@ final class PhotoNumberingService {
         computeNumbers(for: orderedAssets, in: collection)[asset.localIdentifier]
     }
 
-    // MARK: - 可见性与折叠（仅用内存）
+    // MARK: - 可见性与折叠（栈式算法，支持无限级）
 
-    /// level=1 是否有后续 level=2
+    /// 某个层级节点是否有比自己更深的子节点
     func hasDescendants(
         _ asset: PHAsset,
         in orderedAssets: [PHAsset],
         collection: PHAssetCollection
     ) -> Bool {
         let levels = levelsCache[cacheKey(collection)] ?? [:]
-        guard levels[asset.localIdentifier] == 1 else { return false }
+        let myLevel = levels[asset.localIdentifier] ?? 0
+        guard myLevel > 0 else { return false }
         guard let idx = orderedAssets.firstIndex(where: { $0.localIdentifier == asset.localIdentifier }) else {
             return false
         }
         for i in (idx + 1)..<orderedAssets.count {
             let lv = levels[orderedAssets[i].localIdentifier] ?? 0
-            if lv == 1 { return false }
-            if lv == 2 { return true }
+            if lv == 0 { return false }          // 无层级照片，终止
+            if lv <= myLevel { return false }    // 遇到同层或更高层，终止
+            if lv > myLevel { return true }      // 找到更深的子节点
         }
         return false
     }
 
-    /// 根据折叠状态返回可见照片（仅用内存）
+    /// 根据折叠状态返回可见照片
+    /// 算法：用 collapsingLevel 追踪当前折叠的最高层级，
+    /// 遇到 level <= collapsingLevel 或 level=0 时退出隐藏区域。
     func visibleAssets(
         from orderedAssets: [PHAsset],
         in collection: PHAssetCollection
@@ -194,19 +188,28 @@ final class PhotoNumberingService {
         let levels = levelsCache[key] ?? [:]
         let collapsed = collapsedCache[key] ?? [:]
         var visible: [PHAsset] = []
-        var isHiding = false
+        // 当前折叠根节点的层级（nil = 不在隐藏区域）
+        var collapsingLevel: Int? = nil
 
         for asset in orderedAssets {
             let id = asset.localIdentifier
             let lv = levels[id] ?? 0
 
-            if lv == 1 {
-                isHiding = collapsed[id] ?? false
+            if lv == 0 {
+                // 无层级照片：始终可见，退出任何折叠上下文
+                collapsingLevel = nil
                 visible.append(asset)
-            } else if isHiding {
+            } else if let hiding = collapsingLevel, lv > hiding {
+                // 在折叠区域内且比折叠根更深：隐藏
                 continue
             } else {
+                // 可见的层级节点（或者比折叠根同层/更浅，退出折叠）
+                collapsingLevel = nil
                 visible.append(asset)
+                // 如果这个节点本身被折叠，开始隐藏更深的节点
+                if collapsed[id] == true {
+                    collapsingLevel = lv
+                }
             }
         }
         return visible
