@@ -278,8 +278,8 @@ private final class AssetLinkRowView: UIView {
             chevronImageView.centerYAnchor.constraint(equalTo: centerYAnchor),
             titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: chevronImageView.leadingAnchor, constant: -8),
 
-            separator.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 12),
-            separator.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
+            separator.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            separator.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
             separator.bottomAnchor.constraint(equalTo: bottomAnchor),
             separator.heightAnchor.constraint(equalToConstant: 0.5)
         ])
@@ -510,9 +510,6 @@ final class PhotoAssetInfoSheetViewController: UIViewController {
         setupLayout()
         populateStaticContent()
         loadMetadata()
-        let adjustTap = UITapGestureRecognizer(target: self, action: #selector(didTapAdjustDate))
-        dateAdjustLabel.isUserInteractionEnabled = true
-        dateAdjustLabel.addGestureRecognizer(adjustTap)
     }
 
     deinit {
@@ -569,6 +566,8 @@ final class PhotoAssetInfoSheetViewController: UIViewController {
         dateAdjustLabel.font = .systemFont(ofSize: 16, weight: .semibold)
         dateAdjustLabel.textColor = .systemBlue
         dateAdjustLabel.text = "调整"
+        dateAdjustLabel.isUserInteractionEnabled = true
+        dateAdjustLabel.addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(didTapAdjustDate)))
 
         headerRow.addSubview(dateLabel)
         headerRow.addSubview(dateAdjustLabel)
@@ -641,18 +640,18 @@ final class PhotoAssetInfoSheetViewController: UIViewController {
 
     @objc
     private func didTapAdjustDate() {
-        let controller = AssetDateAdjustmentViewController(asset: asset)
-        controller.onAssetDateUpdated = { [weak self] updatedAsset in
+        let adjustmentController = AssetDateAdjustmentViewController(asset: asset)
+        adjustmentController.onAssetDateUpdated = { [weak self] updatedAsset in
             guard let self else { return }
             self.asset = updatedAsset
             self.populateStaticContent()
         }
-        if let sheet = controller.sheetPresentationController {
+        if let sheet = adjustmentController.sheetPresentationController {
             sheet.detents = [.medium(), .large()]
             sheet.prefersGrabberVisible = true
             sheet.preferredCornerRadius = 28
         }
-        present(controller, animated: true)
+        present(adjustmentController, animated: true)
     }
 
     private func loadMetadata() {
@@ -807,9 +806,10 @@ final class PhotoAssetInfoSheetViewController: UIViewController {
     }
 
     private static func formattedDateText(for asset: PHAsset) -> String {
+        // 使用 creationDate（当通过系统或我们自己的修改页面调整了时间后，creationDate 内就是调整后的新时间）
         let date = asset.creationDate ?? asset.modificationDate ?? Date()
         let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
+        formatter.locale = Locale.current
         formatter.dateFormat = "yyyy年M月d日 EEEE HH:mm"
         return formatter.string(from: date)
     }
@@ -993,311 +993,20 @@ final class PhotoAssetInfoSheetViewController: UIViewController {
     }
 }
 
-private final class AssetDateAdjustmentViewController: UIViewController {
-    var onAssetDateUpdated: ((PHAsset) -> Void)?
+// MARK: - Preview
 
-    private let asset: PHAsset
-    private let originalCreationDate: Date?
-    private let currentlyDisplayedDate: Date
+#if DEBUG
+#Preview {
+    let placeholderAsset = PHAsset()
+    return PhotoAssetInfoSheetViewController(asset: placeholderAsset)
+}
+#endif
 
-    private let titleLabel = UILabel()
-    private let closeButton = UIButton(type: .system)
-    private let actionButton = UIButton(type: .system)
-    private let originalValueLabel = UILabel()
-    private let adjustedValueLabel = UILabel()
-    private let monthLabel = UILabel()
-    private let timeZoneValueLabel = UILabel()
-    private let timeValueButton = UIButton(type: .system)
-    private let calendarDatePicker = UIDatePicker()
-    private let timePicker = UIDatePicker()
-
-    private var selectedDate: Date {
-        didSet { refreshUI() }
-    }
-
-    private var storedOriginalDate: Date? {
-        guard let timestamp = UserDefaults.standard.object(forKey: storageKey) as? TimeInterval else { return nil }
-        return Date(timeIntervalSince1970: timestamp)
-    }
-
-    private var hasStoredAdjustment: Bool { storedOriginalDate != nil }
-
-    private var storageKey: String { "\(assetOriginalCreationDateKeyPrefix)\(asset.localIdentifier)" }
-
-    init(asset: PHAsset) {
-        self.asset = asset
-        self.originalCreationDate = asset.creationDate
-        self.currentlyDisplayedDate = asset.creationDate ?? Date()
-        self.selectedDate = asset.creationDate ?? Date()
-        super.init(nibName: nil, bundle: nil)
-        modalPresentationStyle = .pageSheet
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func viewDidLoad() {
-        super.viewDidLoad()
-        view.backgroundColor = UIColor.systemGroupedBackground
-        setupUI()
-        refreshUI()
-    }
-
-    private func setupUI() {
-        let topBar = UIView()
-        topBar.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(topBar)
-
-        closeButton.translatesAutoresizingMaskIntoConstraints = false
-        closeButton.setImage(UIImage(systemName: "xmark"), for: .normal)
-        closeButton.tintColor = .label
-        closeButton.backgroundColor = UIColor.secondarySystemGroupedBackground
-        closeButton.layer.cornerRadius = 18
-        closeButton.addTarget(self, action: #selector(closeTapped), for: .touchUpInside)
-
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-        titleLabel.font = .systemFont(ofSize: 18, weight: .semibold)
-        titleLabel.textColor = .label
-        titleLabel.text = "调整日期与时间"
-
-        actionButton.translatesAutoresizingMaskIntoConstraints = false
-        actionButton.titleLabel?.font = .systemFont(ofSize: 17, weight: .semibold)
-        actionButton.addTarget(self, action: #selector(actionTapped), for: .touchUpInside)
-
-        topBar.addSubview(closeButton)
-        topBar.addSubview(titleLabel)
-        topBar.addSubview(actionButton)
-
-        let summaryCard = AssetInfoCardView()
-        let originalRow = AssetInfoRowView(title: "原片时间", value: nil)
-        let adjustedRow = AssetInfoRowView(title: "调整后", value: nil, showsSeparator: false)
-        originalValueLabel.text = formattedDateTime(currentlyDisplayedDate)
-        adjustedValueLabel.text = formattedDateTime(selectedDate)
-
-        (originalRow.subviews.compactMap { $0 as? UILabel }.last)?.text = formattedDateTime(currentlyDisplayedDate)
-        (adjustedRow.subviews.compactMap { $0 as? UILabel }.last)?.text = formattedDateTime(selectedDate)
-        summaryCard.stackView.addArrangedSubview(originalRow)
-        summaryCard.stackView.addArrangedSubview(adjustedRow)
-
-        let pickerCard = AssetInfoCardView(cornerRadius: 24)
-        let monthRow = UIView()
-        monthRow.translatesAutoresizingMaskIntoConstraints = false
-        monthLabel.translatesAutoresizingMaskIntoConstraints = false
-        monthLabel.font = .systemFont(ofSize: 15, weight: .semibold)
-        monthLabel.textColor = .label
-
-        let leftChevron = UIImageView(image: UIImage(systemName: "chevron.left"))
-        let rightChevron = UIImageView(image: UIImage(systemName: "chevron.right"))
-        [leftChevron, rightChevron].forEach {
-            $0.translatesAutoresizingMaskIntoConstraints = false
-            $0.tintColor = .systemBlue
-        }
-        monthRow.addSubview(monthLabel)
-        monthRow.addSubview(leftChevron)
-        monthRow.addSubview(rightChevron)
-        NSLayoutConstraint.activate([
-            monthRow.heightAnchor.constraint(equalToConstant: 34),
-            monthLabel.leadingAnchor.constraint(equalTo: monthRow.leadingAnchor, constant: 16),
-            monthLabel.centerYAnchor.constraint(equalTo: monthRow.centerYAnchor),
-            rightChevron.trailingAnchor.constraint(equalTo: monthRow.trailingAnchor, constant: -16),
-            rightChevron.centerYAnchor.constraint(equalTo: monthRow.centerYAnchor),
-            leftChevron.trailingAnchor.constraint(equalTo: rightChevron.leadingAnchor, constant: -18),
-            leftChevron.centerYAnchor.constraint(equalTo: monthRow.centerYAnchor)
-        ])
-
-        calendarDatePicker.translatesAutoresizingMaskIntoConstraints = false
-        calendarDatePicker.datePickerMode = .date
-        calendarDatePicker.preferredDatePickerStyle = .inline
-        calendarDatePicker.locale = Locale(identifier: "zh_CN")
-        calendarDatePicker.date = selectedDate
-        calendarDatePicker.addTarget(self, action: #selector(datePickerChanged), for: .valueChanged)
-
-        let timeRow = AssetInfoRowView(title: "时间", value: nil, showsSeparator: true)
-        timeValueButton.translatesAutoresizingMaskIntoConstraints = false
-        timeValueButton.titleLabel?.font = .systemFont(ofSize: 16, weight: .medium)
-        timeValueButton.setTitleColor(.label, for: .normal)
-        timeValueButton.backgroundColor = UIColor.tertiarySystemGroupedBackground
-        timeValueButton.layer.cornerRadius = 16
-        timeValueButton.contentEdgeInsets = UIEdgeInsets(top: 8, left: 14, bottom: 8, right: 14)
-        timeValueButton.isUserInteractionEnabled = false
-        timeRow.addSubview(timeValueButton)
-        NSLayoutConstraint.activate([
-            timeValueButton.trailingAnchor.constraint(equalTo: timeRow.trailingAnchor, constant: -12),
-            timeValueButton.centerYAnchor.constraint(equalTo: timeRow.centerYAnchor)
-        ])
-
-        let timeZoneRow = AssetInfoRowView(title: "时区", value: nil, showsSeparator: false)
-        timeZoneValueLabel.translatesAutoresizingMaskIntoConstraints = false
-        timeZoneValueLabel.font = .systemFont(ofSize: 16, weight: .regular)
-        timeZoneValueLabel.textColor = .secondaryLabel
-        timeZoneValueLabel.text = Self.currentTimeZoneDisplayName()
-        timeZoneRow.addSubview(timeZoneValueLabel)
-        let tzChevron = UIImageView(image: UIImage(systemName: "chevron.right"))
-        tzChevron.translatesAutoresizingMaskIntoConstraints = false
-        tzChevron.tintColor = .tertiaryLabel
-        timeZoneRow.addSubview(tzChevron)
-        NSLayoutConstraint.activate([
-            tzChevron.trailingAnchor.constraint(equalTo: timeZoneRow.trailingAnchor, constant: -14),
-            tzChevron.centerYAnchor.constraint(equalTo: timeZoneRow.centerYAnchor),
-            timeZoneValueLabel.trailingAnchor.constraint(equalTo: tzChevron.leadingAnchor, constant: -6),
-            timeZoneValueLabel.centerYAnchor.constraint(equalTo: timeZoneRow.centerYAnchor)
-        ])
-
-        pickerCard.stackView.addArrangedSubview(monthRow)
-        pickerCard.stackView.addArrangedSubview(calendarDatePicker)
-        pickerCard.stackView.addArrangedSubview(timeRow)
-        pickerCard.stackView.addArrangedSubview(timeZoneRow)
-
-        let stack = UIStackView(arrangedSubviews: [summaryCard, pickerCard])
-        stack.axis = .vertical
-        stack.spacing = 18
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(stack)
-
-        timePicker.datePickerMode = .time
-        timePicker.preferredDatePickerStyle = .wheels
-        timePicker.locale = Locale(identifier: "zh_CN")
-        timePicker.date = selectedDate
-        timePicker.addTarget(self, action: #selector(timePickerChanged), for: .valueChanged)
-        timePicker.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(timePicker)
-
-        NSLayoutConstraint.activate([
-            closeButton.leadingAnchor.constraint(equalTo: topBar.leadingAnchor, constant: 16),
-            closeButton.centerYAnchor.constraint(equalTo: topBar.centerYAnchor),
-            closeButton.widthAnchor.constraint(equalToConstant: 36),
-            closeButton.heightAnchor.constraint(equalToConstant: 36),
-
-            titleLabel.centerXAnchor.constraint(equalTo: topBar.centerXAnchor),
-            titleLabel.centerYAnchor.constraint(equalTo: topBar.centerYAnchor),
-
-            actionButton.trailingAnchor.constraint(equalTo: topBar.trailingAnchor, constant: -16),
-            actionButton.centerYAnchor.constraint(equalTo: topBar.centerYAnchor),
-
-            topBar.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8),
-            topBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
-            topBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
-            topBar.heightAnchor.constraint(equalToConstant: 44),
-
-            stack.topAnchor.constraint(equalTo: topBar.bottomAnchor, constant: 18),
-            stack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            stack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-
-            timePicker.leadingAnchor.constraint(equalTo: stack.leadingAnchor),
-            timePicker.trailingAnchor.constraint(equalTo: stack.trailingAnchor),
-            timePicker.topAnchor.constraint(equalTo: stack.bottomAnchor, constant: 8),
-            timePicker.bottomAnchor.constraint(lessThanOrEqualTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -16)
-        ])
-    }
-
-    private func refreshUI() {
-        monthLabel.text = formattedMonth(selectedDate)
-        timeValueButton.setTitle(formattedTime(selectedDate), for: .normal)
-        let isDirty = selectedDate != currentlyDisplayedDate
-        if hasStoredAdjustment {
-            actionButton.setTitle(isDirty ? "调整" : "复原", for: .normal)
-            actionButton.setTitleColor(isDirty ? .systemBlue : .systemRed, for: .normal)
-        } else {
-            actionButton.setTitle("调整", for: .normal)
-            actionButton.setTitleColor(.systemBlue, for: .normal)
-        }
-    }
-
-    @objc private func datePickerChanged() {
-        selectedDate = mergedDate(datePart: calendarDatePicker.date, timePart: timePicker.date)
-    }
-
-    @objc private func timePickerChanged() {
-        selectedDate = mergedDate(datePart: calendarDatePicker.date, timePart: timePicker.date)
-    }
-
-    @objc private func closeTapped() {
-        dismiss(animated: true)
-    }
-
-    @objc private func actionTapped() {
-        if hasStoredAdjustment && selectedDate == currentlyDisplayedDate {
-            restoreOriginalDate()
-        } else {
-            applyAdjustedDate(selectedDate)
-        }
-    }
-
-    private func applyAdjustedDate(_ date: Date) {
-        let originalDate = storedOriginalDate ?? asset.creationDate
-        PHPhotoLibrary.shared().performChanges({
-            let request = PHAssetChangeRequest(for: self.asset)
-            request.creationDate = date
-        }, completionHandler: { success, _ in
-            guard success else { return }
-            if let originalDate {
-                UserDefaults.standard.set(originalDate.timeIntervalSince1970, forKey: self.storageKey)
-            }
-            DispatchQueue.main.async {
-                self.finishWithUpdatedAsset()
-            }
-        })
-    }
-
-    private func restoreOriginalDate() {
-        guard let originalDate = storedOriginalDate else { return }
-        PHPhotoLibrary.shared().performChanges({
-            let request = PHAssetChangeRequest(for: self.asset)
-            request.creationDate = originalDate
-        }, completionHandler: { success, _ in
-            guard success else { return }
-            UserDefaults.standard.removeObject(forKey: self.storageKey)
-            DispatchQueue.main.async {
-                self.finishWithUpdatedAsset()
-            }
-        })
-    }
-
-    private func finishWithUpdatedAsset() {
-        let result = PHAsset.fetchAssets(withLocalIdentifiers: [asset.localIdentifier], options: nil)
-        if let updatedAsset = result.firstObject {
-            onAssetDateUpdated?(updatedAsset)
-        }
-        dismiss(animated: true)
-    }
-
-    private func mergedDate(datePart: Date, timePart: Date) -> Date {
-        let calendar = Calendar.current
-        let dateComponents = calendar.dateComponents([.year, .month, .day], from: datePart)
-        let timeComponents = calendar.dateComponents([.hour, .minute, .second], from: timePart)
-        return calendar.date(from: DateComponents(
-            year: dateComponents.year,
-            month: dateComponents.month,
-            day: dateComponents.day,
-            hour: timeComponents.hour,
-            minute: timeComponents.minute,
-            second: timeComponents.second
-        )) ?? datePart
-    }
-
-    private func formattedDateTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.dateFormat = "yyyy年M月d日 HH:mm:ss"
-        return formatter.string(from: date)
-    }
-
-    private func formattedMonth(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.dateFormat = "yyyy年M月"
-        return formatter.string(from: date)
-    }
-
-    private func formattedTime(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        formatter.locale = Locale(identifier: "zh_CN")
-        formatter.dateFormat = "HH:mm"
-        return formatter.string(from: date)
-    }
-
-    private static func currentTimeZoneDisplayName() -> String {
-        TimeZone.current.identifier == "Asia/Shanghai" ? "北京" : TimeZone.current.localizedName(for: .standard, locale: Locale(identifier: "zh_CN")) ?? TimeZone.current.identifier
+#if DEBUG
+extension AssetDateAdjustmentViewController {
+    static func createPreviewController() -> AssetDateAdjustmentViewController {
+        let placeholderAsset = PHAsset()
+        return AssetDateAdjustmentViewController(asset: placeholderAsset)
     }
 }
+#endif
