@@ -27,6 +27,16 @@ extension GalleryViewerViewController {
         guard currentIndex >= 0, currentIndex < assets.count else { return }
         let asset = assets[currentIndex]
         let vc = PhotoAssetInfoSheetViewController(asset: asset)
+        
+        vc.onAlbumSelected = { [weak self] collection in
+            self?.dismiss(animated: true) {
+                if let coll = collection, let nav = self?.navigationController {
+                    let photoVC = PhotoGridViewController(collection: coll)
+                    nav.pushViewController(photoVC, animated: true)
+                }
+            }
+        }
+        
         if let sheet = vc.sheetPresentationController {
             sheet.detents = [.medium(), .large()]
             sheet.prefersGrabberVisible = true

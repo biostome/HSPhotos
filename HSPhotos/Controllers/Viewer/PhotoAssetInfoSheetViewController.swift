@@ -203,6 +203,8 @@ private final class AssetMetricsStripView: UIView {
 }
 
 private final class AssetLinkRowView: UIView {
+    var onTapped: (() -> Void)?
+
     private let thumbnailImageView = UIImageView()
     private let iconContainer = UIView()
     private let iconImageView = UIImageView()
@@ -234,9 +236,12 @@ private final class AssetLinkRowView: UIView {
 
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
         titleLabel.font = .systemFont(ofSize: 16, weight: .regular)
-        titleLabel.textColor = .secondaryLabel
+        titleLabel.textColor = .label
         titleLabel.text = title
         titleLabel.numberOfLines = 1
+
+        isUserInteractionEnabled = true
+        addGestureRecognizer(UITapGestureRecognizer(target: self, action: #selector(handleTap)))
 
         chevronImageView.translatesAutoresizingMaskIntoConstraints = false
         chevronImageView.image = UIImage(systemName: "chevron.right")
@@ -293,6 +298,10 @@ private final class AssetLinkRowView: UIView {
         thumbnailImageView.image = image
         thumbnailImageView.isHidden = image == nil
         iconContainer.isHidden = image != nil
+    }
+
+    @objc private func handleTap() {
+        onTapped?()
     }
 
     func setValue(_ text: String) {
@@ -487,6 +496,9 @@ private final class AssetLocationPlaceholderCardView: UIView {
 }
 
 final class PhotoAssetInfoSheetViewController: UIViewController {
+    
+    var onAlbumSelected: ((PHAssetCollection?) -> Void)?
+    
     private var asset: PHAsset
     private var metadataSummary = AssetMetadataSummary()
     private var metadataRequestID: PHImageRequestID = PHInvalidImageRequestID
@@ -503,8 +515,7 @@ final class PhotoAssetInfoSheetViewController: UIViewController {
     private let metricsStripContainer = AssetInfoCardView(cornerRadius: 14)
     private let locationCardContainer = UIStackView()
     private let collectionsCard = AssetInfoCardView()
-    private let allPhotosRow = AssetLinkRowView(title: "在所有照片中")
-    private let sourceRow = AssetLinkRowView(title: "来自本机照片图库", showsSeparator: false)
+    private var dynamicCollectionRows: [AssetLinkRowView] = []
     private let showAllButton = UIButton(type: .system)
 
     private var hasCameraMetadata: Bool {
@@ -809,20 +820,37 @@ final class PhotoAssetInfoSheetViewController: UIViewController {
         metricsStripContainer.stackView.addArrangedSubview(AssetMetricsStripView(items: displayItems))
     }
 
+    struct AlbumRowData {
+        let title: String
+        let collection: PHAssetCollection?
+    }
+
     private func rebuildCollectionsCard() {
         collectionsCard.stackView.arrangedSubviews.forEach { $0.removeFromSuperview() }
+        dynamicCollectionRows.removeAll()
         let rows = Self.collectionMembershipRows(for: asset)
-        allPhotosRow.setThumbnail(nil)
-        allPhotosRow.setIcon(symbolName: "photo", backgroundColor: .systemGray5)
-        sourceRow.setIcon(symbolName: "photo.fill", backgroundColor: UIColor(red: 0.88, green: 0.19, blue: 0.27, alpha: 1))
-        if let first = rows.first {
-            allPhotosRow.setValue(first)
+        
+        for (index, rowData) in rows.enumerated() {
+            let isLast = index == rows.count - 1
+            let rowView = AssetLinkRowView(title: rowData.title, showsSeparator: !isLast)
+            
+            if rowData.collection == nil {
+                if index == 0 && rows.count == 2 {
+                    rowView.setIcon(symbolName: "photo", backgroundColor: .systemGray5)
+                } else {
+                    rowView.setIcon(symbolName: "photo.fill", backgroundColor: UIColor(red: 0.88, green: 0.19, blue: 0.27, alpha: 1))
+                }
+            } else {
+                rowView.setIcon(symbolName: "rectangle.stack", backgroundColor: .systemGray5)
+            }
+            
+            rowView.onTapped = { [weak self] in
+                self?.onAlbumSelected?(rowData.collection)
+            }
+            
+            dynamicCollectionRows.append(rowView)
+            collectionsCard.stackView.addArrangedSubview(rowView)
         }
-        if rows.count > 1 {
-            sourceRow.setValue(rows[1])
-        }
-        collectionsCard.stackView.addArrangedSubview(allPhotosRow)
-        collectionsCard.stackView.addArrangedSubview(sourceRow)
     }
 
     private func loadThumbnailRows() {
@@ -836,7 +864,7 @@ final class PhotoAssetInfoSheetViewController: UIViewController {
             let degraded = info?[PHImageResultIsDegradedKey] as? Bool ?? false
             guard let image else { return }
             DispatchQueue.main.async {
-                self.allPhotosRow.setThumbnail(image)
+                self.dynamicCollectionRows.first?.setThumbnail(image)
                 if !degraded {
                     self.thumbnailRequestID = PHInvalidImageRequestID
                 }
@@ -857,21 +885,19 @@ final class PhotoAssetInfoSheetViewController: UIViewController {
         PHAssetResource.assetResources(for: asset).first?.originalFilename ?? asset.localIdentifier
     }
 
-    private static func collectionMembershipRows(for asset: PHAsset) -> [String] {
+    private static func collectionMembershipRows(for asset: PHAsset) -> [AlbumRowData] {
         let fetch = PHAssetCollection.fetchAssetCollectionsContaining(asset, with: .album, options: nil)
-        var rows: [String] = []
-        fetch.enumerateObjects { collection, _, stop in
+        var rows: [AlbumRowData] = []
+        fetch.enumerateObjects { collection, _, _ in
             if let title = collection.localizedTitle, !title.isEmpty {
-                rows.append("包含在\(title)中")
-            }
-            if rows.count >= 2 {
-                stop.pointee = true
+                rows.append(AlbumRowData(title: "包含在\(title)中", collection: collection))
             }
         }
         if rows.isEmpty {
-            rows = ["包含在所有照片中", "来自本机照片图库"]
-        } else if rows.count == 1 {
-            rows.append("来自本机照片图库")
+            rows.append(AlbumRowData(title: "包含在所有照片中", collection: nil))
+            rows.append(AlbumRowData(title: "来自本机照片图库", collection: nil))
+        } else {
+            rows.append(AlbumRowData(title: "来自本机照片图库", collection: nil))
         }
         return rows
     }
