@@ -66,6 +66,8 @@ struct PhotoGridConstants {
 
 
 class PhotoGridView: UIView {
+    private let overlaySettings = OverlayDisplaySettings.shared
+    private var overlaySettingsObserver: NSObjectProtocol?
     
     public var assets: [PHAsset] = [] {
         didSet {
@@ -221,10 +223,27 @@ class PhotoGridView: UIView {
         super.init(frame: frame)
         setupUI()
         setupGestures()
+        observeOverlaySettings()
     }
     
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
+    }
+
+    deinit {
+        if let token = overlaySettingsObserver {
+            NotificationCenter.default.removeObserver(token)
+        }
+    }
+
+    private func observeOverlaySettings() {
+        overlaySettingsObserver = NotificationCenter.default.addObserver(
+            forName: .overlayDisplaySettingsDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            self?.collectionView.reloadData()
+        }
     }
     
     private func setupUI() {
@@ -785,6 +804,7 @@ extension PhotoGridView: UICollectionViewDataSource {
                 isSelected: isSelected,
                 selectionIndex: nil,
                 selectionMode: selectionMode,
+                showFieldPrefixes: overlaySettings.showFieldPrefixes,
                 compact: true
             )
         } else {
@@ -819,14 +839,24 @@ extension PhotoGridView: UICollectionViewDataSource {
             switch sortPreference {
             case .albumOldestFirst, .albumNewestFirst:
                 let orderIndex = getCustomOrderIndex(for: photo)
-                customOrderNumber = orderIndex >= 0 ? (orderIndex + 1) : nil
+                if overlaySettings.overlayEnabled && overlaySettings.showCustomOrderInDateSort {
+                    customOrderNumber = orderIndex >= 0 ? (orderIndex + 1) : nil
+                } else {
+                    customOrderNumber = nil
+                }
                 creationDateText = nil
                 modificationDateText = nil
             case .albumCustom:
-                customOrderNumber = nil
-                let texts = dateTextCache[assetID]
-                creationDateText = texts?.creation
-                modificationDateText = texts?.modification
+                if overlaySettings.overlayEnabled {
+                    customOrderNumber = nil
+                    let texts = dateTextCache[assetID]
+                    creationDateText = overlaySettings.showCreationDateInCustom ? texts?.creation : nil
+                    modificationDateText = overlaySettings.showModificationDateInCustom ? texts?.modification : nil
+                } else {
+                    customOrderNumber = nil
+                    creationDateText = nil
+                    modificationDateText = nil
+                }
             case .homeRecentAdded, .homeCaptureDate:
                 customOrderNumber = nil
                 creationDateText = nil
@@ -841,6 +871,7 @@ extension PhotoGridView: UICollectionViewDataSource {
                 customOrderNumber: customOrderNumber,
                 creationDateText: creationDateText,
                 modificationDateText: modificationDateText,
+                showFieldPrefixes: overlaySettings.showFieldPrefixes,
                 isAnchor: isAnchor,
                 hierarchyText: hierarchyText,
                 isHierarchyCollapsed: isHierarchyCollapsed

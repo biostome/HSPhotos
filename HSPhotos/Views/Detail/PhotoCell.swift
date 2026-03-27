@@ -345,6 +345,7 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         customOrderNumber: Int? = nil,
         creationDateText: String? = nil,
         modificationDateText: String? = nil,
+        showFieldPrefixes: Bool = true,
         isAnchor: Bool = false,
         hierarchyText: String? = nil,
         isHierarchyCollapsed: Bool = false,
@@ -401,21 +402,21 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         }
 
         if let customOrderNumber {
-            customOrderLabel.text = " #\(customOrderNumber) "
+            customOrderLabel.text = showFieldPrefixes ? " #\(customOrderNumber) " : " \(customOrderNumber) "
             customOrderLabel.isHidden = false
         } else {
             customOrderLabel.isHidden = true
         }
 
         if let creationDateText, !creationDateText.isEmpty {
-            creationDateLabel.text = " C \(creationDateText) "
+            creationDateLabel.text = showFieldPrefixes ? " C \(creationDateText) " : " \(creationDateText) "
             creationDateLabel.isHidden = false
         } else {
             creationDateLabel.isHidden = true
         }
 
         if let modificationDateText, !modificationDateText.isEmpty {
-            modificationDateLabel.text = " M \(modificationDateText) "
+            modificationDateLabel.text = showFieldPrefixes ? " M \(modificationDateText) " : " \(modificationDateText) "
             modificationDateLabel.isHidden = false
         } else {
             modificationDateLabel.isHidden = true

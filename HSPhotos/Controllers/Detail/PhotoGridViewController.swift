@@ -54,6 +54,15 @@ class PhotoGridViewController: BasePhotoViewController {
         button.menu = createSortMenu()
         return button
     }()
+
+    private lazy var overlaySettingsBarButton: UIBarButtonItem = {
+        UIBarButtonItem(
+            image: UIImage(systemName: "gearshape"),
+            style: .plain,
+            target: self,
+            action: #selector(didTapOverlaySettings)
+        )
+    }()
     
     override init(collection: PHAssetCollection) {
         super.init(collection: collection)
@@ -84,6 +93,7 @@ class PhotoGridViewController: BasePhotoViewController {
             shareButton.widthAnchor.constraint(equalToConstant: 44)
         ])
         
+        appendOverlaySettingsButtonIfNeeded()
         updateBottomActionButtons()
     }
     
@@ -130,7 +140,19 @@ class PhotoGridViewController: BasePhotoViewController {
     
     override func updateNavigationBar() {
         super.updateNavigationBar()
+        appendOverlaySettingsButtonIfNeeded()
         updateBottomActionButtons()
+    }
+
+    @objc private func didTapOverlaySettings() {
+        let settingsVC = OverlaySettingsViewController()
+        navigationController?.pushViewController(settingsVC, animated: true)
+    }
+
+    private func appendOverlaySettingsButtonIfNeeded() {
+        let current = navigationItem.rightBarButtonItems ?? []
+        if current.contains(where: { $0 === overlaySettingsBarButton }) { return }
+        navigationItem.rightBarButtonItems = current + [overlaySettingsBarButton]
     }
     
     @objc(photoGridView:didPasteAssets:after:) override func photoGridView(_ photoGridView: PhotoGridView, didPasteAssets assets: [PHAsset], after: PHAsset) {
