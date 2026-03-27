@@ -70,6 +70,7 @@ class PhotoGridView: UIView {
     public var assets: [PHAsset] = [] {
         didSet {
             invalidateCustomOrderCache()
+            invalidateDateTextCache()
             updateVisibleAssets()
         }
     }
@@ -145,6 +146,7 @@ class PhotoGridView: UIView {
         didSet {
             hierarchyCache.removeAll()
             customOrderIndexCache.removeAll()
+            dateTextCache.removeAll()
         }
     }
 
@@ -158,6 +160,13 @@ class PhotoGridView: UIView {
     
     // 自定义排序索引缓存：assetID -> index，O(1) 查找
     private var customOrderIndexCache: [String: Int] = [:]
+    // 日期文本缓存：assetID -> (creationText, modificationText)
+    private var dateTextCache: [String: (creation: String, modification: String)] = [:]
+    private static let displayDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm"
+        return formatter
+    }()
     
     private var columns: Int = PhotoGridConstants.defaultColumns
     
@@ -620,6 +629,7 @@ class PhotoGridView: UIView {
             PhotoCell.cachingManager.stopCachingImagesForAllAssets()
             visibleAssets = newVisibleAssets
             preloadCustomOrderCache()
+            preloadDateTextCache()
             if sortPreference == .albumCustom, supportsHierarchyNumbering {
                 prewarmHierarchyCache(for: newVisibleAssets)
             }
@@ -631,13 +641,43 @@ class PhotoGridView: UIView {
     func invalidateCustomOrderCache() {
         customOrderIndexCache.removeAll()
     }
+    private func invalidateDateTextCache() {
+        dateTextCache.removeAll()
+    }
     private func preloadCustomOrderCache() {
         guard customOrderIndexCache.isEmpty else { return }
-        var dict = [String: Int](minimumCapacity: assets.count)
-        for (i, asset) in assets.enumerated() {
-            dict[asset.localIdentifier] = i
+        guard let collection = currentCollection else {
+            var dict = [String: Int](minimumCapacity: assets.count)
+            for (i, asset) in assets.enumerated() {
+                dict[asset.localIdentifier] = i
+            }
+            customOrderIndexCache = dict
+            return
         }
-        customOrderIndexCache = dict
+        // 自定义序号以系统相册默认顺序为准；后台构建缓存避免阻塞滚动。
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            let fetched = PHAsset.fetchAssets(in: collection, options: nil)
+            var dict = [String: Int](minimumCapacity: fetched.count)
+            fetched.enumerateObjects { asset, index, _ in
+                dict[asset.localIdentifier] = index
+            }
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                guard self.customOrderIndexCache.isEmpty else { return }
+                self.customOrderIndexCache = dict
+                self.collectionView.reloadData()
+            }
+        }
+    }
+    private func preloadDateTextCache() {
+        guard dateTextCache.isEmpty else { return }
+        var dict = [String: (creation: String, modification: String)](minimumCapacity: assets.count)
+        for asset in assets {
+            let creation = Self.displayDateFormatter.string(from: asset.creationDate ?? Date())
+            let modification = Self.displayDateFormatter.string(from: asset.modificationDate ?? asset.creationDate ?? Date())
+            dict[asset.localIdentifier] = (creation: creation, modification: modification)
+        }
+        dateTextCache = dict
     }
     
     /// 批量预计算层级信息并写入缓存（一次计算整表，避免滚动时每 cell 重复 O(n) 计算）
@@ -773,12 +813,24 @@ extension PhotoGridView: UICollectionViewDataSource {
                 }
             }
             
-            let displayIndex: Int
+            let customOrderNumber: Int?
+            let creationDateText: String?
+            let modificationDateText: String?
             switch sortPreference {
-            case .homeRecentAdded, .homeCaptureDate, .albumOldestFirst, .albumNewestFirst:
-                displayIndex = getCustomOrderIndex(for: photo)
+            case .albumOldestFirst, .albumNewestFirst:
+                let orderIndex = getCustomOrderIndex(for: photo)
+                customOrderNumber = orderIndex >= 0 ? (orderIndex + 1) : nil
+                creationDateText = nil
+                modificationDateText = nil
             case .albumCustom:
-                displayIndex = indexPath.item
+                customOrderNumber = nil
+                let texts = dateTextCache[assetID]
+                creationDateText = texts?.creation
+                modificationDateText = texts?.modification
+            case .homeRecentAdded, .homeCaptureDate:
+                customOrderNumber = nil
+                creationDateText = nil
+                modificationDateText = nil
             }
             
             cell.configure(
@@ -786,7 +838,9 @@ extension PhotoGridView: UICollectionViewDataSource {
                 isSelected: isSelected,
                 selectionIndex: selectionIndex,
                 selectionMode: selectionMode,
-                index: displayIndex,
+                customOrderNumber: customOrderNumber,
+                creationDateText: creationDateText,
+                modificationDateText: modificationDateText,
                 isAnchor: isAnchor,
                 hierarchyText: hierarchyText,
                 isHierarchyCollapsed: isHierarchyCollapsed

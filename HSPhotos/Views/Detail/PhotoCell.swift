@@ -131,6 +131,49 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         iv.translatesAutoresizingMaskIntoConstraints = false
         return iv
     }()
+
+    private lazy var displayInfoStackView: UIStackView = {
+        let stackView = UIStackView()
+        stackView.axis = .vertical
+        stackView.spacing = 2
+        stackView.alignment = .trailing
+        stackView.translatesAutoresizingMaskIntoConstraints = false
+        return stackView
+    }()
+
+    private lazy var customOrderLabel: UILabel = {
+        let label = UILabel()
+        label.font = UIFont.monospacedDigitSystemFont(ofSize: 10, weight: .semibold)
+        label.textColor = .white
+        label.backgroundColor = UIColor.black.withAlphaComponent(0.45)
+        label.layer.cornerRadius = 4
+        label.clipsToBounds = true
+        label.isHidden = true
+        label.setContentCompressionResistancePriority(.required, for: .horizontal)
+        return label
+    }()
+
+    private lazy var creationDateLabel: UILabel = {
+        let label = UILabel()
+        label.font = UIFont.monospacedDigitSystemFont(ofSize: 9, weight: .regular)
+        label.textColor = .white
+        label.backgroundColor = UIColor.black.withAlphaComponent(0.45)
+        label.layer.cornerRadius = 4
+        label.clipsToBounds = true
+        label.isHidden = true
+        return label
+    }()
+
+    private lazy var modificationDateLabel: UILabel = {
+        let label = UILabel()
+        label.font = UIFont.monospacedDigitSystemFont(ofSize: 9, weight: .regular)
+        label.textColor = .white
+        label.backgroundColor = UIColor.black.withAlphaComponent(0.45)
+        label.layer.cornerRadius = 4
+        label.clipsToBounds = true
+        label.isHidden = true
+        return label
+    }()
     
     // MARK: - 数据缓存
     private var currentAssetID: String?
@@ -244,6 +287,7 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         
         contentView.addSubview(topLabelsStackView)
         contentView.addSubview(bottomStackView)
+        contentView.addSubview(displayInfoStackView)
         
         topLabelsStackView.addArrangedSubview(anchorLabel)
         topLabelsStackView.addArrangedSubview(hierarchyLabel)
@@ -251,6 +295,10 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         bottomStackView.addArrangedSubview(mediaIconView)
         bottomStackView.addArrangedSubview(mediaDurationLabel)
         bottomStackView.addArrangedSubview(favoriteIcon)
+
+        displayInfoStackView.addArrangedSubview(customOrderLabel)
+        displayInfoStackView.addArrangedSubview(creationDateLabel)
+        displayInfoStackView.addArrangedSubview(modificationDateLabel)
         
         NSLayoutConstraint.activate([
             topLabelsStackView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 6),
@@ -258,6 +306,9 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
             
             bottomStackView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
             bottomStackView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
+
+            displayInfoStackView.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -6),
+            displayInfoStackView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -6),
             
             mediaIconView.widthAnchor.constraint(equalToConstant: 16),
             mediaIconView.heightAnchor.constraint(equalToConstant: 16),
@@ -286,7 +337,19 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
     }()
 
     // MARK: - 配置
-    func configure(with asset: PHAsset, isSelected: Bool, selectionIndex: Int?, selectionMode: PhotoSelectionMode, index: Int? = nil, isAnchor: Bool = false, hierarchyText: String? = nil, isHierarchyCollapsed: Bool = false, compact: Bool = false) {
+    func configure(
+        with asset: PHAsset,
+        isSelected: Bool,
+        selectionIndex: Int?,
+        selectionMode: PhotoSelectionMode,
+        customOrderNumber: Int? = nil,
+        creationDateText: String? = nil,
+        modificationDateText: String? = nil,
+        isAnchor: Bool = false,
+        hierarchyText: String? = nil,
+        isHierarchyCollapsed: Bool = false,
+        compact: Bool = false
+    ) {
         
         currentAsset = asset
         
@@ -304,6 +367,11 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
                 selectionOverlay.isHidden = false
             } else if overlaysInstalled {
                 selectionOverlay.isHidden = true
+            }
+            if labelsInstalled {
+                customOrderLabel.isHidden = true
+                creationDateLabel.isHidden = true
+                modificationDateLabel.isHidden = true
             }
             return
         }
@@ -330,6 +398,27 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         if favoriteIcon.isHidden != !isFavorite {
             favoriteIcon.isHidden = !isFavorite
             favoriteIcon.image = isFavorite ? Self.heartFillImage : Self.heartImage
+        }
+
+        if let customOrderNumber {
+            customOrderLabel.text = " #\(customOrderNumber) "
+            customOrderLabel.isHidden = false
+        } else {
+            customOrderLabel.isHidden = true
+        }
+
+        if let creationDateText, !creationDateText.isEmpty {
+            creationDateLabel.text = " C \(creationDateText) "
+            creationDateLabel.isHidden = false
+        } else {
+            creationDateLabel.isHidden = true
+        }
+
+        if let modificationDateText, !modificationDateText.isEmpty {
+            modificationDateLabel.text = " M \(modificationDateText) "
+            modificationDateLabel.isHidden = false
+        } else {
+            modificationDateLabel.isHidden = true
         }
         
         let isLivePhoto = asset.mediaSubtypes.contains(.photoLive)
@@ -412,6 +501,9 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
             mediaIconView.isHidden = true
             mediaDurationLabel.isHidden = true
             favoriteIcon.isHidden = true
+            customOrderLabel.isHidden = true
+            creationDateLabel.isHidden = true
+            modificationDateLabel.isHidden = true
         }
         currentAsset = nil
         lastHierarchyText = nil
