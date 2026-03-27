@@ -10,10 +10,12 @@ import UIKit
 protocol SearchBarViewDelegate: AnyObject {
     func searchBarView(_ searchBarView: SearchBarView, didSearchWith text: String)
     func searchBarViewDidRemoveToken(_ searchBarView: SearchBarView, tagID: String)
+    func searchBarViewDidTapFilter(_ searchBarView: SearchBarView)
 }
 
 extension SearchBarViewDelegate {
     func searchBarViewDidRemoveToken(_ searchBarView: SearchBarView, tagID: String) {}
+    func searchBarViewDidTapFilter(_ searchBarView: SearchBarView) {}
 }
 
 class SearchBarView: UIView {
@@ -75,6 +77,15 @@ class SearchBarView: UIView {
         return field
     }()
 
+    private lazy var filterButton: UIButton = {
+        let button = UIButton(type: .system)
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.setImage(UIImage(systemName: "line.3.horizontal.decrease.circle"), for: .normal)
+        button.tintColor = .secondaryLabel
+        button.addTarget(self, action: #selector(didTapFilterButton), for: .touchUpInside)
+        return button
+    }()
+
     var text: String? {
         get { return searchTextField.text }
         set { searchTextField.text = newValue }
@@ -82,6 +93,10 @@ class SearchBarView: UIView {
 
     var activeTokenIDs: [String] {
         return searchTextField.tokens.compactMap { $0.representedObject as? String }
+    }
+
+    var isFilterActive: Bool = false {
+        didSet { updateFilterButtonAppearance() }
     }
 
     // MARK: - Initialization
@@ -102,6 +117,7 @@ class SearchBarView: UIView {
         translatesAutoresizingMaskIntoConstraints = false
         addSubview(backgroundView)
         addSubview(searchTextField)
+        addSubview(filterButton)
 
         NSLayoutConstraint.activate([
             backgroundView.topAnchor.constraint(equalTo: topAnchor),
@@ -111,9 +127,15 @@ class SearchBarView: UIView {
 
             searchTextField.topAnchor.constraint(equalTo: topAnchor),
             searchTextField.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
-            searchTextField.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            searchTextField.trailingAnchor.constraint(equalTo: filterButton.leadingAnchor, constant: -6),
             searchTextField.bottomAnchor.constraint(equalTo: bottomAnchor),
+
+            filterButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -8),
+            filterButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            filterButton.widthAnchor.constraint(equalToConstant: 26),
+            filterButton.heightAnchor.constraint(equalToConstant: 26),
         ])
+        updateFilterButtonAppearance()
     }
 
     // MARK: - Token 管理
@@ -165,6 +187,16 @@ class SearchBarView: UIView {
     /// 上层调用，每次同步完 token 后更新记录
     func markTokensSynced() {
         lastKnownTokenIDs = Set(activeTokenIDs)
+    }
+
+    @objc private func didTapFilterButton() {
+        delegate?.searchBarViewDidTapFilter(self)
+    }
+
+    private func updateFilterButtonAppearance() {
+        filterButton.tintColor = isFilterActive ? .systemBlue : .secondaryLabel
+        let imageName = isFilterActive ? "line.3.horizontal.decrease.circle.fill" : "line.3.horizontal.decrease.circle"
+        filterButton.setImage(UIImage(systemName: imageName), for: .normal)
     }
 }
 

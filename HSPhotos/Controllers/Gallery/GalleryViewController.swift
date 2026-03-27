@@ -59,15 +59,15 @@ class GalleryViewController: BasePhotoViewController {
     
     override func updateNavigationBar() {
         if selectionMode == .none {
-            // 其他相册不显示排序按钮
-            navigationItem.setRightBarButtonItems([selectBarButton, menuBarButton, redoBarButton, undoBarButton], animated: true)
+            // 普通模式：选择 + 更多
+            navigationItem.setRightBarButtonItems([selectBarButton, menuBarButton], animated: true)
             // 退出选择模式时，隐藏全选按钮
             navigationItem.leftBarButtonItem = nil
             tabBarController?.tabBar.isHidden = false
             additionalSafeAreaInsets.bottom = 0
         } else {
-            // 选择模式下不显示排序按钮
-            navigationItem.setRightBarButtonItems([cancelSelectBarButton, rangeSwitchItem, menuBarButton, redoBarButton, undoBarButton], animated: true)
+            // 选择模式：取消 + 范围选择 + 更多
+            navigationItem.setRightBarButtonItems([cancelSelectBarButton, rangeSwitchItem, menuBarButton], animated: true)
             // 进入选择模式时，显示全选/取消全选按钮
             updateSelectAllButton()
             tabBarController?.tabBar.isHidden = true
@@ -158,7 +158,12 @@ class GalleryViewController: BasePhotoViewController {
     
     override func createOperationMenu() -> UIMenu {
         let attributes: UIMenuElement.Attributes = gridView.selectedAssets.isEmpty ? .disabled : []
-        
+        let undoAction = UIAction(title: "撤销", image: UIImage(systemName: "arrow.uturn.left"), attributes: canUndo ? [] : .disabled) { [weak self] _ in
+            self?.undoAction()
+        }
+        let redoAction = UIAction(title: "重做", image: UIImage(systemName: "arrow.uturn.right"), attributes: canRedo ? [] : .disabled) { [weak self] _ in
+            self?.redoAction()
+        }
         let addToAlbum = UIAction(title: "添加到相簿", image: UIImage(systemName: "plus.rectangle.on.folder"), attributes: attributes) { [weak self] _ in
             self?.onAddToAlbumSelectedAssets()
         }
@@ -188,7 +193,7 @@ class GalleryViewController: BasePhotoViewController {
             self?.onMove()
         }
         
-        return UIMenu(title: "操作选项", children: [addToAlbum, delete, move, paste, copy, duplicate])
+        return UIMenu(title: "操作选项", children: [undoAction, redoAction, addToAlbum, delete, move, paste, copy, duplicate])
     }
     
     override func updateOperationMenu() {

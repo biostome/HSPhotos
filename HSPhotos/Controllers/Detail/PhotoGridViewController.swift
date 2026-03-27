@@ -150,9 +150,18 @@ class PhotoGridViewController: BasePhotoViewController {
     }
 
     private func appendOverlaySettingsButtonIfNeeded() {
-        let current = navigationItem.rightBarButtonItems ?? []
+        guard selectionMode == .none else { return }
+        guard var current = navigationItem.rightBarButtonItems else {
+            navigationItem.rightBarButtonItems = [overlaySettingsBarButton]
+            return
+        }
         if current.contains(where: { $0 === overlaySettingsBarButton }) { return }
-        navigationItem.rightBarButtonItems = current + [overlaySettingsBarButton]
+        if let menuIndex = current.firstIndex(where: { $0 === menuBarButton }) {
+            current.insert(overlaySettingsBarButton, at: menuIndex)
+        } else {
+            current.append(overlaySettingsBarButton)
+        }
+        navigationItem.rightBarButtonItems = current
     }
     
     @objc(photoGridView:didPasteAssets:after:) override func photoGridView(_ photoGridView: PhotoGridView, didPasteAssets assets: [PHAsset], after: PHAsset) {

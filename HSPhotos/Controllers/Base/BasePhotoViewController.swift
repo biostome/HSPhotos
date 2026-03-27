@@ -219,8 +219,8 @@ class BasePhotoViewController: UIViewController {
             gridView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
         
-        // 初始状态下的按钮顺序，包含menuBarButton和标签过滤按钮
-        navigationItem.setRightBarButtonItems([selectBarButton, tagFilterBarButton, menuBarButton, redoBarButton, undoBarButton], animated: true)
+        // 初始状态下的按钮顺序
+        navigationItem.setRightBarButtonItems([selectBarButton, menuBarButton], animated: true)
 
         // 设置 gridView 的滚动委托
         gridView.scrollDelegate = self
@@ -697,13 +697,13 @@ class BasePhotoViewController: UIViewController {
     internal func updateNavigationBar() {
         // 根据选择模式更新按钮状态
         if selectionMode == .none {
-            // 退出选择模式时，显示选择按钮，隐藏范围选择开关，使用动画效果
-            navigationItem.setRightBarButtonItems([selectBarButton, menuBarButton, redoBarButton, undoBarButton], animated: true)
+            // 普通模式：精简为「选择 + 更多」
+            navigationItem.setRightBarButtonItems([selectBarButton, menuBarButton], animated: true)
             // 恢复默认的返回按钮
             navigationItem.leftBarButtonItem = nil
         } else {
-            // 进入选择模式时，显示取消按钮和范围选择开关，使用动画效果
-            navigationItem.setRightBarButtonItems([cancelSelectBarButton, rangeSwitchItem, menuBarButton, redoBarButton, undoBarButton], animated: true)
+            // 选择模式：取消 + 范围选择 + 更多
+            navigationItem.setRightBarButtonItems([cancelSelectBarButton, rangeSwitchItem, menuBarButton], animated: true)
             // 根据当前选择状态显示全选或取消全选按钮
             updateSelectAllButton()
         }
@@ -781,7 +781,13 @@ class BasePhotoViewController: UIViewController {
     internal func createOperationMenu() -> UIMenu {
         let attributes: UIMenuElement.Attributes = gridView.selectedAssets.isEmpty ? .disabled : []
         var menuChildren: [UIMenuElement] = []
-        
+
+        let undoAction = UIAction(title: "撤销", image: UIImage(systemName: "arrow.uturn.left"), attributes: canUndo ? [] : .disabled) { [weak self] _ in
+            self?.undoAction()
+        }
+        let redoAction = UIAction(title: "重做", image: UIImage(systemName: "arrow.uturn.right"), attributes: canRedo ? [] : .disabled) { [weak self] _ in
+            self?.redoAction()
+        }
         let addToAlbum = UIAction(title: "添加到相簿", image: UIImage(systemName: "plus.rectangle.on.folder"), attributes: attributes) { [weak self] _ in
             self?.onAddToAlbumSelectedAssets()
         }
@@ -814,7 +820,7 @@ class BasePhotoViewController: UIViewController {
             self?.onTagSelectedAssets()
         }
 
-        menuChildren = [addToAlbum, tagAction]
+        menuChildren = [undoAction, redoAction, addToAlbum, tagAction]
         if sortPreference == .albumCustom, supportsHierarchyNumbering {
             menuChildren.append(createHierarchyMenu(attributes: attributes))
         }
@@ -1104,7 +1110,7 @@ class BasePhotoViewController: UIViewController {
     }
 
     /// 弹出标签筛选面板
-    @objc private func didTapTagFilter() {
+    @objc internal func didTapTagFilter() {
         let panel = TagFilterPanelViewController(currentState: filterState)
         panel.candidateIdentifiers = assets.map { $0.localIdentifier }
         panel.delegate = self
@@ -1136,12 +1142,10 @@ class BasePhotoViewController: UIViewController {
         }
     }
 
-    /// 更新标签过滤按钮的激活状态外观
+    /// 标签过滤状态变化后刷新操作菜单
     private func updateTagFilterButtonAppearance() {
-        tagFilterBarButton.image = filterState.isActive
-            ? UIImage(systemName: "tag.fill")
-            : UIImage(systemName: "tag")
-        tagFilterBarButton.tintColor = filterState.isActive ? .systemBlue : nil
+        searchTextField.isFilterActive = filterState.isActive
+        updateOperationMenu()
     }
 
 }
@@ -1367,6 +1371,10 @@ extension BasePhotoViewController: SearchBarViewDelegate {
     func searchBarViewDidRemoveToken(_ searchBarView: SearchBarView, tagID: String) {
         filterState.selectedTagIDs.remove(tagID)
         // filterState didSet 会触发 applyTagFilter + syncSearchTokens
+    }
+
+    func searchBarViewDidTapFilter(_ searchBarView: SearchBarView) {
+        didTapTagFilter()
     }
 }
 

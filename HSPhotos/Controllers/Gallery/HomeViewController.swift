@@ -20,7 +20,7 @@ class HomeViewController: GalleryViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         title = "图库"
-        navigationItem.setRightBarButtonItems([selectBarButton, tagFilterBarButton, menuBarButton, redoBarButton, undoBarButton, sortBarButton], animated: true)
+        navigationItem.setRightBarButtonItems([selectBarButton, sortBarButton, menuBarButton], animated: true)
     }
 
     override func createSortMenu() -> UIMenu {
@@ -60,12 +60,13 @@ class HomeViewController: GalleryViewController {
 
     override func updateNavigationBar() {
         if selectionMode == .none {
-            navigationItem.setRightBarButtonItems([selectBarButton, tagFilterBarButton, menuBarButton, redoBarButton, undoBarButton, sortBarButton], animated: true)
+            navigationItem.setRightBarButtonItems([selectBarButton, sortBarButton, menuBarButton], animated: true)
             navigationItem.leftBarButtonItem = nil
             tabBarController?.tabBar.isHidden = false
             additionalSafeAreaInsets.bottom = 0
         } else {
-            navigationItem.setRightBarButtonItems([cancelSelectBarButton, rangeSwitchItem, tagFilterBarButton, menuBarButton, redoBarButton, undoBarButton, sortBarButton], animated: true)
+            navigationItem.setRightBarButtonItems([cancelSelectBarButton, rangeSwitchItem, menuBarButton], animated: true)
+            updateSelectAllButton()
             tabBarController?.tabBar.isHidden = true
             let tabBarHeight = tabBarController?.tabBar.frame.height ?? 0
             additionalSafeAreaInsets.bottom = -tabBarHeight
@@ -75,6 +76,11 @@ class HomeViewController: GalleryViewController {
     }
     
     override func updateSelectAllButton() {
-        
+        let isAllSelected = isAllAssetsSelected()
+        if isAllSelected {
+            navigationItem.setLeftBarButtonItems([deselectAllBarButton], animated: true)
+        } else {
+            navigationItem.setLeftBarButtonItems([selectAllBarButton], animated: true)
+        }
     }
 }
