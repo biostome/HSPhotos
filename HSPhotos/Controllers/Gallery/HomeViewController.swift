@@ -10,7 +10,7 @@ class HomeViewController: GalleryViewController {
         // 使用所有照片的集合
         let allPhotosCollection = PHAssetCollection.fetchAssetCollections(with: .smartAlbum, subtype: .smartAlbumUserLibrary, options: nil).firstObject!
         super.init(collection: allPhotosCollection)
-        sortPreference = PhotoSortPreference.creationDate.preference(for: allPhotosCollection)
+        sortPreference = PhotoSortPreference.homeCaptureDate.preference(for: allPhotosCollection)
     }
     
     required init?(coder: NSCoder) {
@@ -27,18 +27,18 @@ class HomeViewController: GalleryViewController {
         let creationDateAction = UIAction(
             title: "按拍摄日期排序",
             image: UIImage(systemName: "camera"),
-            state: sortPreference == .creationDate ? .on : .off
+            state: sortPreference == .homeCaptureDate ? .on : .off
         ) { [weak self] _ in
-            self?.onChanged(sort: .creationDate)
+            self?.onChanged(sort: .homeCaptureDate)
             self?.sortBarButton.menu = self?.createSortMenu()
         }
 
         let modificationDateAction = UIAction(
             title: "按最近添加排序",
             image: UIImage(systemName: "clock"),
-            state: sortPreference == .recentDate ? .on : .off
+            state: sortPreference == .homeRecentAdded ? .on : .off
         ) { [weak self] _ in
-            self?.onChanged(sort: .recentDate)
+            self?.onChanged(sort: .homeRecentAdded)
             self?.sortBarButton.menu = self?.createSortMenu()
         }
 
@@ -46,6 +46,16 @@ class HomeViewController: GalleryViewController {
             title: "排序方式",
             children: [modificationDateAction, creationDateAction]
         )
+    }
+
+    override func sortDescriptors(for preference: PhotoSortPreference) -> [NSSortDescriptor]? {
+        switch preference {
+        case .homeRecentAdded:
+            // 首页「最近添加」使用系统默认顺序，保持与系统图库一致。
+            return nil
+        default:
+            return super.sortDescriptors(for: preference)
+        }
     }
 
     override func updateNavigationBar() {

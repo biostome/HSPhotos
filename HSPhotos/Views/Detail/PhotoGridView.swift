@@ -132,7 +132,7 @@ class PhotoGridView: UIView {
     // 当前层级参照照片（用于“设为某项子级/插入到某级后面”）
     
     // 当前排序方式
-    public var sortPreference: PhotoSortPreference = .custom {
+    public var sortPreference: PhotoSortPreference = .albumCustom {
         didSet {
             if oldValue != sortPreference {
                 hierarchyCache.removeAll()
@@ -608,7 +608,7 @@ class PhotoGridView: UIView {
     /// 更新可见资产（仅自定义排序且支持层级时应用折叠过滤）
     private func updateVisibleAssets() {
         let newVisibleAssets: [PHAsset]
-        if sortPreference == .custom, supportsHierarchyNumbering, let collection = currentCollection {
+        if sortPreference == .albumCustom, supportsHierarchyNumbering, let collection = currentCollection {
             newVisibleAssets = numberingService.visibleAssets(from: assets, in: collection)
         } else {
             newVisibleAssets = assets
@@ -620,7 +620,7 @@ class PhotoGridView: UIView {
             PhotoCell.cachingManager.stopCachingImagesForAllAssets()
             visibleAssets = newVisibleAssets
             preloadCustomOrderCache()
-            if sortPreference == .custom, supportsHierarchyNumbering {
+            if sortPreference == .albumCustom, supportsHierarchyNumbering {
                 prewarmHierarchyCache(for: newVisibleAssets)
             }
             collectionView.reloadData()
@@ -632,11 +632,10 @@ class PhotoGridView: UIView {
         customOrderIndexCache.removeAll()
     }
     private func preloadCustomOrderCache() {
-        guard let collection = currentCollection, customOrderIndexCache.isEmpty else { return }
-        let order = PhotoOrder.order(for: collection)
-        var dict = [String: Int](minimumCapacity: order.count)
-        for (i, id) in order.enumerated() {
-            dict[id] = i
+        guard customOrderIndexCache.isEmpty else { return }
+        var dict = [String: Int](minimumCapacity: assets.count)
+        for (i, asset) in assets.enumerated() {
+            dict[asset.localIdentifier] = i
         }
         customOrderIndexCache = dict
     }
@@ -706,7 +705,7 @@ class PhotoGridView: UIView {
         collectionView.performBatchUpdates {
             self.assets.removeAll { assetsToDeleteSet.contains($0.localIdentifier) }
             invalidateCustomOrderCache()
-            if sortPreference == .custom, supportsHierarchyNumbering, let collection = currentCollection {
+            if sortPreference == .albumCustom, supportsHierarchyNumbering, let collection = currentCollection {
                 visibleAssets = numberingService.visibleAssets(from: assets, in: collection)
             } else {
                 visibleAssets = assets
@@ -756,7 +755,7 @@ extension PhotoGridView: UICollectionViewDataSource {
             var hierarchyText: String?
             var isHierarchyCollapsed: Bool = false
             
-            if sortPreference == .custom, supportsHierarchyNumbering {
+            if sortPreference == .albumCustom, supportsHierarchyNumbering {
                 if let cached = hierarchyCache[assetID] {
                     hierarchyText = cached.text
                     isHierarchyCollapsed = cached.isCollapsed
@@ -776,9 +775,9 @@ extension PhotoGridView: UICollectionViewDataSource {
             
             let displayIndex: Int
             switch sortPreference {
-            case .creationDate, .modificationDate, .recentDate:
+            case .homeRecentAdded, .homeCaptureDate, .albumOldestFirst, .albumNewestFirst:
                 displayIndex = getCustomOrderIndex(for: photo)
-            case .custom:
+            case .albumCustom:
                 displayIndex = indexPath.item
             }
             
@@ -1145,7 +1144,7 @@ extension PhotoGridView {
             }
             
             // 情况 2 & 3: 层级操作 (由于层级必须连续且有根，这里根据上下文提供智能选项)
-            if sortPreference == .custom, supportsHierarchyNumbering, let collection = currentCollection {
+            if sortPreference == .albumCustom, supportsHierarchyNumbering, let collection = currentCollection {
                 let currLv = numberingService.level(for: asset, in: collection)
                 
                 // 向上递归查找最近的一个层级节点作为参考点 (prevLevel)
@@ -1303,10 +1302,10 @@ extension PhotoGridView: CustomVerticalScrollIndicatorDelegate {
         let asset = visibleAssets[clampedIndex]
         
         switch sortPreference {
-        case .creationDate, .modificationDate, .recentDate:
+        case .homeRecentAdded, .homeCaptureDate, .albumOldestFirst, .albumNewestFirst:
             // 日期排序：显示日期
             return formatDate(for: asset)
-        case .custom:
+        case .albumCustom:
             // 自定义排序：显示下标（从1开始）
             return "\(clampedIndex + 1)"
         }
@@ -1320,11 +1319,11 @@ extension PhotoGridView: CustomVerticalScrollIndicatorDelegate {
     private func formatDate(for asset: PHAsset) -> String {
         let date: Date
         switch sortPreference {
-        case .creationDate:
+        case .homeCaptureDate, .albumOldestFirst:
             date = asset.creationDate ?? Date()
-        case .modificationDate, .recentDate:
-            date = asset.modificationDate ?? asset.creationDate ?? Date()
-        case .custom:
+        case .homeRecentAdded, .albumNewestFirst:
+            date = asset.creationDate ?? asset.modificationDate ?? Date()
+        case .albumCustom:
             date = asset.creationDate ?? Date()
         }
         

@@ -82,27 +82,27 @@ class GalleryViewController: BasePhotoViewController {
         let creationDateAction = UIAction(
             title: "按照拍摄时间排序",
             image: UIImage(systemName: "camera"),
-            state: sortPreference == .creationDate ? .on : .off
+            state: sortPreference == .albumOldestFirst ? .on : .off
         ) { [weak self] _ in
-            self?.onChanged(sort: .creationDate)
+            self?.onChanged(sort: .albumOldestFirst)
             self?.sortBarButton.menu = self?.createSortMenu()
         }
         
         let modificationDateAction = UIAction(
             title: "按照最近加入时间排序",
             image: UIImage(systemName: "clock"),
-            state: sortPreference == .recentDate ? .on : .off
+            state: sortPreference == .albumNewestFirst ? .on : .off
         ) { [weak self] _ in
-            self?.onChanged(sort: .recentDate)
+            self?.onChanged(sort: .albumNewestFirst)
             self?.sortBarButton.menu = self?.createSortMenu()
         }
         
         let customAction = UIAction(
             title: "按照自定义排序",
             image: UIImage(systemName: "hand.draw"),
-            state: sortPreference == .custom ? .on : .off
+            state: sortPreference == .albumCustom ? .on : .off
         ) { [weak self] _ in
-            self?.onChanged(sort: .custom)
+            self?.onChanged(sort: .albumCustom)
             self?.sortBarButton.menu = self?.createSortMenu()
         }
         
