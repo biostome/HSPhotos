@@ -93,7 +93,8 @@ class FolderCell: BaseAlbumCell, UICollectionViewDelegate, UICollectionViewDataS
     }
     
     // MARK: - Configure
-    func configure(with item: AlbumListItem) {
+    func configure(with item: AlbumListItem, selectionMode: Bool = false, isSelected: Bool = false) {
+        defer { applyMultiSelectAppearance(selectionMode: selectionMode, isSelected: isSelected) }
         titleLabel.text = item.title
         
         // 取消之前的图片请求

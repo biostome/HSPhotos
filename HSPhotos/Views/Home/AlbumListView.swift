@@ -16,6 +16,12 @@ protocol AlbumListViewDelegate {
     func albumListView(_ albumListView: AlbumListView, didTapAddPhotosFor item: AlbumListItem)
     func albumListView(_ albumListView: AlbumListView, didTapEditTitleFor item: AlbumListItem)
     func albumListView(_ albumListView: AlbumListView, didTapDeleteFor item: AlbumListItem)
+    /// 多选选中项变化（含进入/退出多选）
+    func albumListViewDidUpdateMultiSelection(_ albumListView: AlbumListView)
+}
+
+extension AlbumListViewDelegate {
+    func albumListViewDidUpdateMultiSelection(_ albumListView: AlbumListView) {}
 }
 
 /// 相册列表布局模式
@@ -29,6 +35,10 @@ class AlbumListView: UIView{
     public var delegate: AlbumListViewDelegate?
     
     public private(set) var collections: [AlbumListItem] = []
+
+    /// 多选模式（与列表/网格独立，展开/收起批量操作仅在列表模式有意义）
+    public private(set) var isMultiSelectMode = false
+    public private(set) var multiSelectedIdentifiers = Set<String>()
     
     /// 布局模式
     public var layoutMode: AlbumListLayoutMode = .grid {
@@ -106,6 +116,31 @@ class AlbumListView: UIView{
             collectionView.bottomAnchor.constraint(equalTo: bottomAnchor)
         ])
     }
+
+    /// 进入/退出多选；退出时清空选中
+    public func setMultiSelectMode(_ enabled: Bool) {
+        guard isMultiSelectMode != enabled else { return }
+        isMultiSelectMode = enabled
+        if !enabled {
+            multiSelectedIdentifiers.removeAll()
+        }
+        collectionView.allowsMultipleSelection = enabled
+        collectionView.reloadData()
+        delegate?.albumListViewDidUpdateMultiSelection(self)
+    }
+
+    /// 切换某一行的选中（多选模式下由点击触发）
+    public func toggleMultiSelection(forItemAt indexPath: IndexPath) {
+        guard isMultiSelectMode, indexPath.item < collections.count else { return }
+        let id = collections[indexPath.item].localIdentifier
+        if multiSelectedIdentifiers.contains(id) {
+            multiSelectedIdentifiers.remove(id)
+        } else {
+            multiSelectedIdentifiers.insert(id)
+        }
+        collectionView.reloadItems(at: [indexPath])
+        delegate?.albumListViewDidUpdateMultiSelection(self)
+    }
     
     /// 滚动到指定的相册位置
     public func scrollToItem(at indexPath: IndexPath, at scrollPosition: UICollectionView.ScrollPosition, animated: Bool) {
@@ -119,6 +154,7 @@ class AlbumListView: UIView{
         // 无动画刷新（首次加载、全量重载）不做后台 diff，避免多余计算与一次额外线程切换
         if !animated {
             collections = newCollections
+            pruneMultiSelectionToVisibleItems()
             collectionView.reloadData()
             return
         }
@@ -160,11 +196,13 @@ class AlbumListView: UIView{
                 if !animated || self.window == nil || newCollections.count > 100 {
                     // 优化：当数据量较大时，使用reloadData以获得更好的性能
                     self.collections = newCollections
+                    self.pruneMultiSelectionToVisibleItems()
                     self.collectionView.reloadData()
                     return
                 }
                 
                 self.collections = newCollections
+                self.pruneMultiSelectionToVisibleItems()
                 
                 if deletedIndexPaths.isEmpty && insertedIndexPaths.isEmpty && reloadedIndexPaths.isEmpty {
                     let albumContentChanged = zip(oldCollections, newCollections).contains { old, new in
@@ -212,6 +250,15 @@ class AlbumListView: UIView{
         let typePrefix = item.isFolder ? "folder" : "album"
         return "\(typePrefix)-\(item.localIdentifier)-\(item.hierarchyLevel)"
     }
+
+    private func pruneMultiSelectionToVisibleItems() {
+        let visible = Set(collections.map(\.localIdentifier))
+        let before = multiSelectedIdentifiers.count
+        multiSelectedIdentifiers = multiSelectedIdentifiers.intersection(visible)
+        if multiSelectedIdentifiers.count != before {
+            delegate?.albumListViewDidUpdateMultiSelection(self)
+        }
+    }
 }
 
 // MARK: - UICollectionViewDataSource
@@ -222,16 +269,17 @@ extension AlbumListView: UICollectionViewDataSource {
     
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         let item = collections[indexPath.item]
+        let sel = multiSelectedIdentifiers.contains(item.localIdentifier)
         
         if item.isFolder {
             switch layoutMode {
             case .grid:
                 let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "FolderCell", for: indexPath) as! FolderCell
-                cell.configure(with: item)
+                cell.configure(with: item, selectionMode: isMultiSelectMode, isSelected: sel)
                 return cell
             case .list:
                 let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "FolderListCell", for: indexPath) as! FolderListCell
-                cell.configure(with: item)
+                cell.configure(with: item, selectionMode: isMultiSelectMode, isSelected: sel)
                 cell.onDisclosureTap = { [weak self, weak collectionView, weak cell] in
                     guard
                         let self = self,
@@ -249,11 +297,11 @@ extension AlbumListView: UICollectionViewDataSource {
             switch layoutMode {
             case .grid:
                 let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "AlbumCell", for: indexPath) as! AlbumCell
-                cell.configure(with: item)
+                cell.configure(with: item, selectionMode: isMultiSelectMode, isSelected: sel)
                 return cell
             case .list:
                 let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "AlbumListCell", for: indexPath) as! AlbumListCell
-                cell.configure(with: item)
+                cell.configure(with: item, selectionMode: isMultiSelectMode, isSelected: sel)
                 return cell
             }
         }
@@ -322,6 +370,11 @@ extension AlbumListView: UICollectionViewDelegateFlowLayout {
 // MARK: - UICollectionViewDelegate
 extension AlbumListView: UICollectionViewDelegate {
     func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
+        if isMultiSelectMode {
+            toggleMultiSelection(forItemAt: indexPath)
+            collectionView.deselectItem(at: indexPath, animated: false)
+            return
+        }
         let item = self.collections[indexPath.item]
         self.delegate?.albumListView(self, didSelectItemAt: indexPath)
         
@@ -346,6 +399,7 @@ extension AlbumListView: UICollectionViewDelegate {
     }
     
     func collectionView(_ collectionView: UICollectionView, contextMenuConfigurationForItemAt indexPath: IndexPath, point: CGPoint) -> UIContextMenuConfiguration? {
+        if isMultiSelectMode { return nil }
         let item = self.collections[indexPath.item]
         
         return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { _ in

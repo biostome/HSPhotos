@@ -43,6 +43,10 @@ class AlbumListViewController: UIViewController {
     private lazy var menuButton: UIBarButtonItem = {
         UIBarButtonItem(image: UIImage(systemName: "ellipsis"), primaryAction: nil, menu: createMenu())
     }()
+
+    private lazy var selectBarButton: UIBarButtonItem = {
+        UIBarButtonItem(title: "选择", style: .plain, target: self, action: #selector(enterAlbumMultiSelectMode))
+    }()
     private lazy var toggleExpandCollapseButton: UIBarButtonItem = {
         let image = UIImage(systemName: "chevron.down.circle")
         let button = UIBarButtonItem(
@@ -54,6 +58,17 @@ class AlbumListViewController: UIViewController {
         button.accessibilityLabel = "展开全部"
         return button
     }()
+
+    private lazy var doneMultiSelectBarButton: UIBarButtonItem = {
+        let style: UIBarButtonItem.Style
+        if #available(iOS 26.0, *) {
+            style = .prominent
+        } else {
+            style = .done
+        }
+        return UIBarButtonItem(title: "完成", style: style, target: self, action: #selector(finishAlbumMultiSelect))
+    }()
+
     
     init(
         collectionList: PHCollectionList? = nil,
@@ -143,7 +158,11 @@ class AlbumListViewController: UIViewController {
             self?.switchToCoverPhotoMode()
         }
         
-        let listViewAction = UIAction(title: "列表视图", image: UIImage(systemName: "list.bullet")) { [weak self] _ in
+        let listViewAction = UIAction(
+            title: "列表视图",
+            subtitle: "文件夹可在此展开或收起",
+            image: UIImage(systemName: "list.bullet")
+        ) { [weak self] _ in
             self?.switchToListViewMode()
         }
         
@@ -161,25 +180,63 @@ class AlbumListViewController: UIViewController {
         let sortByCustomAction = UIAction(title: "按自定义顺序排序", image: UIImage(systemName: "arrow.up.arrow.down")) { [weak self] _ in
             self?.sortByCustomOrder()
         }
-        
-        // 创建主菜单
+
         return UIMenu(title: "", children: [viewModeMenu, sortByModificationDateAction, sortByNameAction, sortByCustomAction])
     }
+
+    @objc private func enterAlbumMultiSelectMode() {
+        albumListView.setMultiSelectMode(true)
+        navigationItem.hidesBackButton = true
+        navigationItem.leftBarButtonItem = doneMultiSelectBarButton
+        title = "选择项目"
+        refreshMultiSelectToolbarForCurrentLayout()
+        updateToggleExpandCollapseButtonState()
+    }
+
+    @objc private func finishAlbumMultiSelect() {
+        albumListView.setMultiSelectMode(false)
+        navigationItem.hidesBackButton = false
+        navigationItem.leftBarButtonItem = nil
+        refreshMultiSelectToolbarForCurrentLayout()
+        title = isPickerMode ? (collectionList?.localizedTitle ?? "选择相簿") : (collectionList?.localizedTitle ?? "相册")
+        updateToggleExpandCollapseButtonState()
+    }
+
+    private func updateMultiSelectTitle() {
+        let n = albumListView.multiSelectedIdentifiers.count
+        title = n == 0 ? "选择项目" : "已选 \(n) 项"
+    }
+
+    /// 多选时不使用底部工具栏（展开/收起在导航栏按钮）
+    private func refreshMultiSelectToolbarForCurrentLayout() {
+        navigationController?.setToolbarHidden(true, animated: true)
+        toolbarItems = nil
+    }
+
+    /// 当前选中项里可展开的文件夹 ID（用于选择模式下的展开/收起）
+    private func selectedExpandableFolderIDs() -> Set<String> {
+        let selected = albumListView.multiSelectedIdentifiers
+        var ids = Set<String>()
+        for item in displayedItems {
+            guard selected.contains(item.localIdentifier), item.isFolder, item.canExpand else { continue }
+            ids.insert(item.localIdentifier)
+        }
+        return ids
+    }
+
     
     // 切换到封面照片模式
     private func switchToCoverPhotoMode() {
-        // 实现封面照片模式逻辑
         albumListView.layoutMode = .grid
         applyCurrentDisplayData()
-        print("切换到封面照片模式")
+        if albumListView.isMultiSelectMode { refreshMultiSelectToolbarForCurrentLayout() }
     }
     
     // 切换到列表视图模式
     private func switchToListViewMode() {
-        // 实现列表视图模式逻辑
         albumListView.layoutMode = .list
         applyCurrentDisplayData()
-        print("切换到列表视图模式")
+        if albumListView.isMultiSelectMode { refreshMultiSelectToolbarForCurrentLayout() }
     }
     
 
@@ -326,16 +383,36 @@ class AlbumListViewController: UIViewController {
     
     @objc private func toggleExpandCollapse() {
         guard albumListView.layoutMode == .list else { return }
-        
+
+        if albumListView.isMultiSelectMode {
+            let ids = selectedExpandableFolderIDs()
+            guard !ids.isEmpty else { return }
+            var changed = false
+            if ids.isSubset(of: expandedFolderIDs) {
+                for id in ids where expandedFolderIDs.contains(id) {
+                    expandedFolderIDs.remove(id)
+                    changed = true
+                }
+            } else {
+                for id in ids where !expandedFolderIDs.contains(id) {
+                    expandedFolderIDs.insert(id)
+                    changed = true
+                }
+            }
+            if changed { applyCurrentDisplayData(animated: true) }
+            updateToggleExpandCollapseButtonState()
+            return
+        }
+
         let expandableFolderIDs = allExpandableFolderIDs()
         guard !expandableFolderIDs.isEmpty else { return }
-        
+
         if expandableFolderIDs.isSubset(of: expandedFolderIDs) {
             expandedFolderIDs.subtract(expandableFolderIDs)
         } else {
             expandedFolderIDs.formUnion(expandableFolderIDs)
         }
-        
+
         applyCurrentDisplayData(animated: true)
     }
     
@@ -349,24 +426,41 @@ class AlbumListViewController: UIViewController {
     
     private func updateToggleExpandCollapseButtonState() {
         let isListMode = albumListView.layoutMode == .list
+        let expandImage = UIImage(systemName: "chevron.down.circle")
+        let collapseImage = UIImage(systemName: "chevron.up.circle")
+
+        if albumListView.isMultiSelectMode {
+            guard isListMode else {
+                navigationItem.rightBarButtonItems = []
+                return
+            }
+            let selectedExpandable = selectedExpandableFolderIDs()
+            let hasTargets = !selectedExpandable.isEmpty
+            let allSelectedExpanded = hasTargets && selectedExpandable.isSubset(of: expandedFolderIDs)
+            toggleExpandCollapseButton.image = allSelectedExpanded ? collapseImage : expandImage
+            toggleExpandCollapseButton.accessibilityLabel = allSelectedExpanded ? "收起所选文件夹" : "展开所选文件夹"
+            toggleExpandCollapseButton.isEnabled = hasTargets
+            navigationItem.rightBarButtonItems = [toggleExpandCollapseButton]
+            return
+        }
+
         let expandableFolderIDs = allExpandableFolderIDs()
         let hasExpandableFolders = !expandableFolderIDs.isEmpty
         let allExpanded = hasExpandableFolders && expandableFolderIDs.isSubset(of: expandedFolderIDs)
-        
-        let expandImage = UIImage(systemName: "chevron.down.circle")
-        let collapseImage = UIImage(systemName: "chevron.up.circle")
         toggleExpandCollapseButton.image = allExpanded ? collapseImage : expandImage
         toggleExpandCollapseButton.accessibilityLabel = allExpanded ? "收起全部" : "展开全部"
         toggleExpandCollapseButton.isEnabled = isListMode && hasExpandableFolders
-        
-        var rightItems: [UIBarButtonItem] = [menuButton]
-        
+
+        var rightItems: [UIBarButtonItem] = []
+        if isListMode {
+            rightItems.append(selectBarButton)
+        }
+        rightItems.append(menuButton)
         if isListMode {
             rightItems.append(toggleExpandCollapseButton)
         }
-        
         rightItems.append(addButton)
-        
+
         navigationItem.setRightBarButtonItems(rightItems, animated: true)
     }
     
@@ -649,6 +743,12 @@ extension AlbumListViewController: PHPhotoLibraryChangeObserver {
 }
 
 extension AlbumListViewController: AlbumListViewDelegate {
+    func albumListViewDidUpdateMultiSelection(_ albumListView: AlbumListView) {
+        guard albumListView.isMultiSelectMode else { return }
+        updateMultiSelectTitle()
+        updateToggleExpandCollapseButtonState()
+    }
+
     func albumListView(_ albumListView: AlbumListView, didSelectItemAt indexPath: IndexPath) {
     }
     

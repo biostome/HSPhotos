@@ -55,6 +55,9 @@ class ImageCache {
 class BaseAlbumCell: UICollectionViewCell {
     // 标题标签
     let titleLabel = UILabel()
+
+    /// 多选：右下角圈/对勾
+    private let multiSelectIndicator = UIImageView()
     
     // 图片请求ID数组，用于取消请求
     var imageRequests: [PHImageRequestID] = []
@@ -93,6 +96,35 @@ class BaseAlbumCell: UICollectionViewCell {
         titleLabel.numberOfLines = 1
         titleLabel.textAlignment = .center
         titleLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        multiSelectIndicator.translatesAutoresizingMaskIntoConstraints = false
+        multiSelectIndicator.isHidden = true
+        multiSelectIndicator.contentMode = .scaleAspectFit
+        contentView.addSubview(multiSelectIndicator)
+        NSLayoutConstraint.activate([
+            multiSelectIndicator.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -6),
+            multiSelectIndicator.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -6),
+            multiSelectIndicator.widthAnchor.constraint(equalToConstant: 28),
+            multiSelectIndicator.heightAnchor.constraint(equalToConstant: 28),
+        ])
+    }
+
+    /// 多选模式下更新勾选外观（子类在 `configure` 末尾调用）
+    func applyMultiSelectAppearance(selectionMode: Bool, isSelected: Bool) {
+        guard selectionMode else {
+            multiSelectIndicator.isHidden = true
+            return
+        }
+        multiSelectIndicator.isHidden = false
+        contentView.bringSubviewToFront(multiSelectIndicator)
+        let config = UIImage.SymbolConfiguration(pointSize: 22, weight: .medium)
+        if isSelected {
+            multiSelectIndicator.image = UIImage(systemName: "checkmark.circle.fill", withConfiguration: config)
+            multiSelectIndicator.tintColor = .systemBlue
+        } else {
+            multiSelectIndicator.image = UIImage(systemName: "circle", withConfiguration: config)
+            multiSelectIndicator.tintColor = .secondaryLabel
+        }
     }
     
     /// 设置背景色，支持深色模式
@@ -182,6 +214,7 @@ class BaseAlbumCell: UICollectionViewCell {
         super.prepareForReuse()
         titleLabel.text = ""
         cancelImageRequests()
+        applyMultiSelectAppearance(selectionMode: false, isSelected: false)
         // 优化：不在prepareForReuse中重置层级，避免不必要的布局更新
         // applyHierarchyAppearance(level: 0)
     }

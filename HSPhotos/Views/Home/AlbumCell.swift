@@ -99,7 +99,8 @@ class AlbumCell: BaseAlbumCell {
     }
 
     // MARK: - Configure
-    func configure(with item: AlbumListItem) {
+    func configure(with item: AlbumListItem, selectionMode: Bool = false, isSelected: Bool = false) {
+        defer { applyMultiSelectAppearance(selectionMode: selectionMode, isSelected: isSelected) }
         // 取消之前的图片请求
         cancelImageRequests()
         
