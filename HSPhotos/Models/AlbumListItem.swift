@@ -44,32 +44,41 @@ class AlbumListItem {
         }
     }
     
-    /// 获取封面照片（文件夹获取第一个子相册的封面）
+    /// 获取封面照片（文件夹取第一个直接子相册的首张图，避免扫全库）
     var coverAsset: PHAsset? {
         switch type {
         case .album(let collection):
-            let assets = PHAsset.fetchAssets(in: collection, options: nil)
-            return assets.firstObject
-        case .folder:
-            // 文件夹获取第一个子相册的封面
-            let fetchOptions = PHFetchOptions()
-            fetchOptions.fetchLimit = 1
-            // 获取所有相册
-            let allAlbums = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: fetchOptions)
-            
-            guard let album = allAlbums.firstObject else { return nil }
-            let assets = PHAsset.fetchAssets(in: album, options: nil)
-            return assets.firstObject
+            let options = PHFetchOptions()
+            options.fetchLimit = 1
+            options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+            return PHAsset.fetchAssets(in: collection, options: options).firstObject
+        case .folder(let collectionList):
+            let children = PHCollection.fetchCollections(in: collectionList, options: nil)
+            var firstAlbum: PHAssetCollection?
+            children.enumerateObjects { obj, _, stop in
+                if let album = obj as? PHAssetCollection {
+                    firstAlbum = album
+                    stop.pointee = true
+                }
+            }
+            guard let album = firstAlbum else { return nil }
+            let options = PHFetchOptions()
+            options.fetchLimit = 1
+            options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: false)]
+            return PHAsset.fetchAssets(in: album, options: options).firstObject
         }
     }
     
-    /// 获取项目数量（文件夹返回子文件夹 + 子相册总数，相册返回照片数）
+    /// 获取项目数量（相册优先用 estimatedAssetCount，避免全量枚举资源）
     var itemCount: Int {
         switch type {
         case .album(let collection):
+            let estimated = collection.estimatedAssetCount
+            if estimated >= 0 {
+                return estimated
+            }
             return PHAsset.fetchAssets(in: collection, options: nil).count
         case .folder:
-            // 文件夹：返回子文件夹和子相册的总数（简化为 0）
             return 0
         }
     }

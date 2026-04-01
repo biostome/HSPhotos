@@ -113,24 +113,16 @@ class AlbumListView: UIView{
     }
     
     public func setCollections(_ newCollections: [AlbumListItem], animated: Bool) {
-        // 优化：快速路径，当数据相同时直接返回
-        if collections.count == newCollections.count {
-            var hasChanges = false
-            for (old, new) in zip(collections, newCollections) {
-                if old.localIdentifier != new.localIdentifier || 
-                   old.isExpanded != new.isExpanded || 
-                   old.canExpand != new.canExpand || 
-                   old.hierarchyLevel != new.hierarchyLevel {
-                    hasChanges = true
-                    break
-                }
-            }
-            if !hasChanges {
-                return
-            }
+        // 注意：不能因「identifier / 展开状态相同」就提前 return。
+        // 向相册增删照片时结构不变，但张数与封面会变，必须落到 reloadData / reloadItems。
+
+        // 无动画刷新（首次加载、全量重载）不做后台 diff，避免多余计算与一次额外线程切换
+        if !animated {
+            collections = newCollections
+            collectionView.reloadData()
+            return
         }
         
-        // 异步处理数据计算，避免阻塞主线程
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
             
@@ -152,9 +144,12 @@ class AlbumListView: UIView{
                 let item = entry.element
                 let key = self.itemKey(for: item)
                 guard let oldItem = oldItemByKey[key] else { return nil }
-                let needsReload = oldItem.isExpanded != item.isExpanded
+                var needsReload = oldItem.isExpanded != item.isExpanded
                     || oldItem.canExpand != item.canExpand
                     || oldItem.hierarchyLevel != item.hierarchyLevel
+                if !needsReload, oldItem.isAlbum, item.isAlbum {
+                    needsReload = oldItem.itemCount != item.itemCount
+                }
                 return needsReload ? IndexPath(item: entry.offset, section: 0) : nil
             }
             
@@ -172,6 +167,13 @@ class AlbumListView: UIView{
                 self.collections = newCollections
                 
                 if deletedIndexPaths.isEmpty && insertedIndexPaths.isEmpty && reloadedIndexPaths.isEmpty {
+                    let albumContentChanged = zip(oldCollections, newCollections).contains { old, new in
+                        guard old.localIdentifier == new.localIdentifier, old.isAlbum, new.isAlbum else { return false }
+                        return old.itemCount != new.itemCount
+                    }
+                    if albumContentChanged {
+                        self.collectionView.reloadData()
+                    }
                     return
                 }
 

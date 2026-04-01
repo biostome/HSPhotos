@@ -82,6 +82,7 @@ class AlbumListViewController: UIViewController {
         setupUI()
         setupNavigationBar()
         setupTraitChangeObserver()
+        registerPhotoLibraryObserver()
         loadAlbums()
     }
     
@@ -203,95 +204,54 @@ class AlbumListViewController: UIViewController {
     
     // 异步加载相册列表
     private func loadAlbumsAsync() {
-        // 在后台线程中执行加载操作
-        DispatchQueue.global(qos: .userInitiated).async {
-            // 加载相册数据
+        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+            guard let self = self else { return }
             var items: [AlbumListItem] = []
             
             if let collectionList = self.collectionList {
-                // 加载文件夹内的子内容
                 items = self.fetchItems(in: collectionList)
             } else {
-                // 加载根相册列表
-                // 1. 加载所有文件夹
                 let folderOptions = self.getFetchOptions()
                 let allFolders = PHCollectionList.fetchCollectionLists(with: .folder, subtype: .any, options: folderOptions)
                 
-                // 2. 加载所有相册
                 let albumOptions = self.getFetchOptions()
                 let allAlbums = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: albumOptions)
                 
-                // 3. 检查每个文件夹是否有父文件夹
+                // 一次遍历：收集「曾作为任意文件夹子项」出现的 localIdentifier，等价于原嵌套 O(n²) 判断「是否有父文件夹」
+                var childIDsContainedInSomeFolder = Set<String>()
+                allFolders.enumerateObjects { parentFolder, _, _ in
+                    let subCollections = PHCollection.fetchCollections(in: parentFolder, options: nil)
+                    subCollections.enumerateObjects { sub, _, _ in
+                        childIDsContainedInSomeFolder.insert(sub.localIdentifier)
+                    }
+                }
+                
                 var topLevelFolders: [PHCollectionList] = []
-                allFolders.enumerateObjects { collectionList, _, _ in
-                    // 获取所有可能包含此文件夹的父文件夹
-                    let parentFolderOptions = PHFetchOptions()
-                    let parentFolders = PHCollectionList.fetchCollectionLists(with: .folder, subtype: .any, options: parentFolderOptions)
-                    
-                    var hasParent = false
-                    parentFolders.enumerateObjects { parentFolder, _, stop in
-                        let subCollections = PHCollection.fetchCollections(in: parentFolder, options: nil)
-                        subCollections.enumerateObjects { subCollection, _, stopSub in
-                            if subCollection.localIdentifier == collectionList.localIdentifier {
-                                hasParent = true
-                                stop.pointee = true
-                                stopSub.pointee = true
-                            }
-                        }
-                    }
-                    
-                    if !hasParent {
-                        topLevelFolders.append(collectionList)
+                allFolders.enumerateObjects { folder, _, _ in
+                    if !childIDsContainedInSomeFolder.contains(folder.localIdentifier) {
+                        topLevelFolders.append(folder)
                     }
                 }
                 
-                // 4. 检查每个相册是否有父文件夹
                 var topLevelAlbums: [PHAssetCollection] = []
-                allAlbums.enumerateObjects { collection, _, _ in
-                    // 获取所有可能包含此相册的父文件夹
-                    let parentFolderOptions = PHFetchOptions()
-                    let parentFolders = PHCollectionList.fetchCollectionLists(with: .folder, subtype: .any, options: parentFolderOptions)
-                    
-                    var hasParent = false
-                    parentFolders.enumerateObjects { parentFolder, _, stop in
-                        let subCollections = PHCollection.fetchCollections(in: parentFolder, options: nil)
-                        subCollections.enumerateObjects { subCollection, _, stopSub in
-                            if subCollection.localIdentifier == collection.localIdentifier {
-                                hasParent = true
-                                stop.pointee = true
-                                stopSub.pointee = true
-                            }
-                        }
-                    }
-                    
-                    if !hasParent {
-                        topLevelAlbums.append(collection)
+                allAlbums.enumerateObjects { album, _, _ in
+                    if !childIDsContainedInSomeFolder.contains(album.localIdentifier) {
+                        topLevelAlbums.append(album)
                     }
                 }
                 
-                // 5. 添加顶级文件夹
                 for folder in topLevelFolders {
                     items.append(AlbumListItem(type: .folder(folder)))
                 }
-                
-                // 6. 添加顶级相册
                 for album in topLevelAlbums {
                     items.append(AlbumListItem(type: .album(album)))
                 }
             }
             
-            // 对于自定义排序，需要特殊处理
-            var sortedItems: [AlbumListItem]
-            if self.currentSortType == .custom {
-                // 自定义排序逻辑
-                sortedItems = items
-            } else {
-                // 其他排序方式已经通过PHFetchOptions处理
-                sortedItems = items
-            }
+            let sortedItems = items
             
-            // 在主线程上更新UI
-            DispatchQueue.main.async {
+            DispatchQueue.main.async { [weak self] in
+                guard let self = self else { return }
                 self.albumListItems = sortedItems
                 self.applyCurrentDisplayData(animated: false)
             }
@@ -623,7 +583,12 @@ class AlbumListViewController: UIViewController {
     }
     
     deinit {
-        // 系统会自动处理trait变化注册的清理
+        PHPhotoLibrary.shared().unregisterChangeObserver(self)
+    }
+
+    /// 监听系统相册增删、相簿/文件夹结构变化等，自动刷新列表
+    private func registerPhotoLibraryObserver() {
+        PHPhotoLibrary.shared().register(self)
     }
     
     private func checkPermissionStatus() {
@@ -669,6 +634,17 @@ class AlbumListViewController: UIViewController {
         super.viewDidLayoutSubviews()
         // 更新渐变层的frame
         backgroundGradientLayer.frame = view.bounds
+    }
+}
+
+extension AlbumListViewController: PHPhotoLibraryChangeObserver {
+    func photoLibraryDidChange(_ changeInstance: PHChange) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            let status = PhotoPermissionManager.shared.getCurrentPermissionStatus()
+            guard status == .authorized || status == .limited else { return }
+            self.loadAlbums()
+        }
     }
 }
 
