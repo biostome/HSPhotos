@@ -156,6 +156,17 @@ final class PhotoNumberingService {
 
     // MARK: - 可见性与折叠（栈式算法，支持无限级）
 
+    /// 从 `startIndex` 起向后第一个 level>0 的层级，若无则 nil
+    private func firstNumberedLevel(from startIndex: Int, orderedAssets: [PHAsset], levels: [String: Int]) -> Int? {
+        var i = startIndex
+        while i < orderedAssets.count {
+            let v = levels[orderedAssets[i].localIdentifier] ?? 0
+            if v > 0 { return v }
+            i += 1
+        }
+        return nil
+    }
+
     /// 某个层级节点是否有比自己更深的子节点
     func hasDescendants(
         _ asset: PHAsset,
@@ -168,18 +179,38 @@ final class PhotoNumberingService {
         guard let idx = orderedAssets.firstIndex(where: { $0.localIdentifier == asset.localIdentifier }) else {
             return false
         }
-        for i in (idx + 1)..<orderedAssets.count {
-            let lv = levels[orderedAssets[i].localIdentifier] ?? 0
-            if lv == 0 { return false }          // 无层级照片，终止
-            if lv <= myLevel { return false }    // 遇到同层或更高层，终止
-            if lv > myLevel { return true }      // 找到更深的子节点
+        let mode = HierarchyCollapseSettings.shared.spanMode
+        if mode == .breakAtUnnumbered {
+            for i in (idx + 1)..<orderedAssets.count {
+                let lv = levels[orderedAssets[i].localIdentifier] ?? 0
+                if lv == 0 { return false }
+                if lv <= myLevel { return false }
+                if lv > myLevel { return true }
+            }
+            return false
         }
-        return false
+        // includeGaps：无编号仅当「其后第一个有编号」仍深于当前根（仍在子编号范围内）才算可藏；其后已是同级/更浅则有编号边界外的间隙不算
+        var i = idx + 1
+        var foundHideable = false
+        while i < orderedAssets.count {
+            let lv = levels[orderedAssets[i].localIdentifier] ?? 0
+            if lv > 0 && lv <= myLevel { break }
+            if lv > myLevel {
+                foundHideable = true
+            } else if lv == 0,
+                      let nextLv = firstNumberedLevel(from: i + 1, orderedAssets: orderedAssets, levels: levels),
+                      nextLv > myLevel {
+                foundHideable = true
+            }
+            i += 1
+        }
+        return foundHideable
     }
 
     /// 根据折叠状态返回可见照片
-    /// 算法：用 collapsingLevel 追踪当前折叠的最高层级，
-    /// 遇到 level <= collapsingLevel 或 level=0 时退出隐藏区域。
+    /// 算法：用 collapsingLevel 追踪当前折叠的最高层级；
+    /// 「遇无编号断开」时 level=0 会退出隐藏区域；
+    /// 「折叠含间隙」时：仅当其后第一个有编号项仍比折叠根更深时，该无编号项才随折叠隐藏（同级/更浅边界外的间隙仍显示）。
     func visibleAssets(
         from orderedAssets: [PHAsset],
         in collection: PHAssetCollection
@@ -188,25 +219,26 @@ final class PhotoNumberingService {
         let levels = levelsCache[key] ?? [:]
         let collapsed = collapsedCache[key] ?? [:]
         var visible: [PHAsset] = []
-        // 当前折叠根节点的层级（nil = 不在隐藏区域）
         var collapsingLevel: Int? = nil
+        let includeGaps = HierarchyCollapseSettings.shared.spanMode == .includeGaps
 
-        for asset in orderedAssets {
+        for (index, asset) in orderedAssets.enumerated() {
             let id = asset.localIdentifier
             let lv = levels[id] ?? 0
 
             if lv == 0 {
-                // 无层级照片：始终可见，退出任何折叠上下文
+                if let L = collapsingLevel, includeGaps,
+                   let nextLv = firstNumberedLevel(from: index + 1, orderedAssets: orderedAssets, levels: levels),
+                   nextLv > L {
+                    continue
+                }
                 collapsingLevel = nil
                 visible.append(asset)
             } else if let hiding = collapsingLevel, lv > hiding {
-                // 在折叠区域内且比折叠根更深：隐藏
                 continue
             } else {
-                // 可见的层级节点（或者比折叠根同层/更浅，退出折叠）
                 collapsingLevel = nil
                 visible.append(asset)
-                // 如果这个节点本身被折叠，开始隐藏更深的节点
                 if collapsed[id] == true {
                     collapsingLevel = lv
                 }

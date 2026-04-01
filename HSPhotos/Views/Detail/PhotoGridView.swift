@@ -68,6 +68,7 @@ struct PhotoGridConstants {
 class PhotoGridView: UIView {
     private let overlaySettings = OverlayDisplaySettings.shared
     private var overlaySettingsObserver: NSObjectProtocol?
+    private var hierarchyCollapseSettingsObserver: NSObjectProtocol?
     
     public var assets: [PHAsset] = [] {
         didSet {
@@ -223,7 +224,7 @@ class PhotoGridView: UIView {
         super.init(frame: frame)
         setupUI()
         setupGestures()
-        observeOverlaySettings()
+        observeOverlayAndHierarchySettings()
     }
     
     required init?(coder: NSCoder) {
@@ -234,15 +235,27 @@ class PhotoGridView: UIView {
         if let token = overlaySettingsObserver {
             NotificationCenter.default.removeObserver(token)
         }
+        if let token = hierarchyCollapseSettingsObserver {
+            NotificationCenter.default.removeObserver(token)
+        }
     }
 
-    private func observeOverlaySettings() {
+    private func observeOverlayAndHierarchySettings() {
         overlaySettingsObserver = NotificationCenter.default.addObserver(
             forName: .overlayDisplaySettingsDidChange,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             self?.collectionView.reloadData()
+        }
+        hierarchyCollapseSettingsObserver = NotificationCenter.default.addObserver(
+            forName: .hierarchyCollapseSettingsDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self = self else { return }
+            self.updateVisibleAssets()
+            self.collectionView.reloadData()
         }
     }
     
