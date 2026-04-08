@@ -329,7 +329,7 @@ class BasePhotoViewController: UIViewController {
             }
             
             let validAssetIDs = Set(newAssets.map { $0.localIdentifier })
-            PhotoNumberingService.shared.cleanupInvalidNodes(validAssetIDs: validAssetIDs, for: collection)
+            PhotoNumberingService.shared.cleanupInvalidNodes(validAssetIDs: validAssetIDs, orderedAssets: newAssets, for: collection)
             
             DispatchQueue.main.async {
                 self.assets = newAssets

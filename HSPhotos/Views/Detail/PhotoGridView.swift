@@ -72,9 +72,17 @@ class PhotoGridView: UIView {
     
     public var assets: [PHAsset] = [] {
         didSet {
+            let idsChanged = oldValue.map(\.localIdentifier) != assets.map(\.localIdentifier)
             invalidateCustomOrderCache()
             invalidateDateTextCache()
+            if idsChanged {
+                hierarchyCache.removeAll()
+            }
             updateVisibleAssets()
+            // 删除节点后存储层级已校正，但可见序列可能不变（例如删的是折叠分支内未展示的项），须强制刷新编号 overlay
+            if idsChanged, sortPreference == .albumCustom, supportsHierarchyNumbering {
+                collectionView.reloadData()
+            }
         }
     }
     
@@ -715,9 +723,12 @@ class PhotoGridView: UIView {
     /// 批量预计算层级信息并写入缓存（一次计算整表，避免滚动时每 cell 重复 O(n) 计算）
     private func prewarmHierarchyCache(for visible: [PHAsset]) {
         guard supportsHierarchyNumbering, let collection = currentCollection else { return }
-        guard !assets.isEmpty else { return }
-        // 若缓存已满说明已预计算过，跳过
-        if hierarchyCache.count >= assets.count { return }
+        guard !assets.isEmpty else {
+            hierarchyCache.removeAll()
+            return
+        }
+        // 不可再用「缓存条数 >= assets 条数」跳过：删除相片后 assets 变少但旧缓存仍多，会沿用错误编号
+        hierarchyCache.removeAll()
         let (numbers, collapsed) = numberingService.computeNumbersAndCollapsed(for: assets, in: collection)
         for asset in assets {
             let id = asset.localIdentifier
@@ -778,6 +789,9 @@ class PhotoGridView: UIView {
             self.assets.removeAll { assetsToDeleteSet.contains($0.localIdentifier) }
             invalidateCustomOrderCache()
             if sortPreference == .albumCustom, supportsHierarchyNumbering, let collection = currentCollection {
+                let valid = Set(self.assets.map(\.localIdentifier))
+                numberingService.cleanupInvalidNodes(validAssetIDs: valid, orderedAssets: self.assets, for: collection)
+                hierarchyCache.removeAll()
                 visibleAssets = numberingService.visibleAssets(from: assets, in: collection)
             } else {
                 visibleAssets = assets

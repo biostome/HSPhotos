@@ -249,7 +249,30 @@ final class PhotoNumberingService {
 
     // MARK: - 数据清理（更新内存后保存，loadPhoto 时调用）
 
-    func cleanupInvalidNodes(validAssetIDs: Set<String>, for collection: PHAssetCollection) {
+    /// 按当前顺序将已存储的 level 写回为与 `computeNumbers` 一致的合法值（例如父节点删除后子级 depth 回落）。
+    private func reconcileStoredLevelsWithOrder(orderedAssets: [PHAsset], in collection: PHAssetCollection) {
+        let key = cacheKey(collection)
+        guard var dict = levelsCache[key], !dict.isEmpty else { return }
+        var lastLevel = 0
+        var changed = false
+        for asset in orderedAssets {
+            let id = asset.localIdentifier
+            guard let lv = dict[id], lv > 0 else { continue }
+            let corrected = min(lv, lastLevel + 1)
+            if corrected != lv {
+                dict[id] = corrected
+                changed = true
+            }
+            lastLevel = corrected
+        }
+        if changed {
+            levelsCache[key] = dict
+            saveForCollection(collection)
+        }
+    }
+
+    /// - Parameter orderedAssets: 若传入，在过滤无效 ID 后按该顺序校正剩余节点的存储层级并持久化。
+    func cleanupInvalidNodes(validAssetIDs: Set<String>, orderedAssets: [PHAsset]? = nil, for collection: PHAssetCollection) {
         let key = cacheKey(collection)
         var levels = levelsCache[key] ?? [:]
         var collapsed = collapsedCache[key] ?? [:]
@@ -261,6 +284,9 @@ final class PhotoNumberingService {
         collapsedCache[key] = collapsed
         if levels.count != beforeL || collapsed.count != beforeC {
             saveForCollection(collection)
+        }
+        if let order = orderedAssets, !order.isEmpty {
+            reconcileStoredLevelsWithOrder(orderedAssets: order, in: collection)
         }
     }
 }
