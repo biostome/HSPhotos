@@ -1332,6 +1332,8 @@ extension PhotoGridView {
                     // 选项：取消编号 (级联执行，清理下属子树)
                     let clearAction = UIAction(title: "取消编号", image: UIImage(systemName: "xmark.circle"), attributes: .destructive) { [weak self] _ in
                         guard let self = self, let idx = self.visibleAssets.firstIndex(of: asset) else { return }
+                        self.numberingService.beginBatchUpdates(for: collection)
+                        defer { self.numberingService.endBatchUpdates(for: collection) }
                         self.numberingService.clearLevel(for: asset, in: collection)
                         // 级联清除下属子节点
                         for i in (idx + 1)..<self.visibleAssets.count {

@@ -4,7 +4,7 @@
 //
 //  照片多级编号系统（类似 Word 多级列表，支持无限级嵌套）
 //  编号由 (顺序, 层级) 纯函数计算，不可手动输入
-//  运行时仅使用内存缓存，UserDefaults 仅在进入/离开视图及变更时读写
+//  运行时在内存缓存中读写；UserDefaults 在进入相册时 load、离开时 save，且每次变更（默认）或批量收尾时也会写入。
 //
 
 import Foundation
@@ -15,7 +15,7 @@ final class PhotoNumberingService {
     static let shared = PhotoNumberingService()
     private init() {}
 
-    // MARK: - 内存缓存（运行时仅读写此缓存，不碰 UserDefaults）
+    // MARK: - 内存缓存（编号逻辑只读此缓存；落盘见 persistAfterMutation / saveForCollection）
 
     private func cacheKey(_ collection: PHAssetCollection) -> String {
         collection.localIdentifier
@@ -25,8 +25,10 @@ final class PhotoNumberingService {
     private var levelsCache: [String: [String: Int]] = [:]
     /// 相册ID -> (assetID -> collapsed)
     private var collapsedCache: [String: [String: Bool]] = [:]
+    /// 合并持久化：批量改 level 时每项都写 UserDefaults 会序列化整表数万次，用深度计数收尾写一次
+    private var persistenceBatchDepth: [String: Int] = [:]
 
-    // MARK: - UserDefaults 读写时机（仅在进入/离开/变更时）
+    // MARK: - UserDefaults（进入时加载、离开时保存；单次操作后默认立即持久化；begin/endBatchUpdates 期间合并写入）
 
     private func levelsKey(_ collection: PHAssetCollection) -> String {
         "photo_numbering_levels_\(collection.localIdentifier)"
@@ -48,6 +50,32 @@ final class PhotoNumberingService {
         let key = cacheKey(collection)
         if let levels = levelsCache[key] { UserDefaults.standard.set(levels, forKey: levelsKey(collection)) }
         if let collapsed = collapsedCache[key] { UserDefaults.standard.set(collapsed, forKey: collapseKey(collection)) }
+    }
+
+    /// 与 `endBatchUpdates` 成对使用，期间 `setLevel` / `toggleCollapse` / 内部 reconcile 不落盘，结束时写一次
+    func beginBatchUpdates(for collection: PHAssetCollection) {
+        let k = cacheKey(collection)
+        persistenceBatchDepth[k, default: 0] += 1
+    }
+
+    func endBatchUpdates(for collection: PHAssetCollection) {
+        let k = cacheKey(collection)
+        guard let d = persistenceBatchDepth[k], d > 0 else { return }
+        if d == 1 {
+            persistenceBatchDepth[k] = nil
+            saveForCollection(collection)
+        } else {
+            persistenceBatchDepth[k] = d - 1
+        }
+    }
+
+    private func isPersistenceBatching(_ collection: PHAssetCollection) -> Bool {
+        (persistenceBatchDepth[cacheKey(collection)] ?? 0) > 0
+    }
+
+    private func persistAfterMutation(for collection: PHAssetCollection) {
+        guard !isPersistenceBatching(collection) else { return }
+        saveForCollection(collection)
     }
 
     // MARK: - 运行时只读（纯内存）
@@ -74,7 +102,7 @@ final class PhotoNumberingService {
             dict[asset.localIdentifier] = level
         }
         levelsCache[key] = dict
-        saveForCollection(collection)
+        persistAfterMutation(for: collection)
     }
 
     /// 清理某张照片的层级
@@ -88,7 +116,7 @@ final class PhotoNumberingService {
         var dict = collapsedCache[key] ?? [:]
         dict[asset.localIdentifier] = !(dict[asset.localIdentifier] ?? false)
         collapsedCache[key] = dict
-        saveForCollection(collection)
+        persistAfterMutation(for: collection)
     }
 
     // MARK: - 编号计算（栈式算法，支持无限级，O(n)）
@@ -267,7 +295,7 @@ final class PhotoNumberingService {
         }
         if changed {
             levelsCache[key] = dict
-            saveForCollection(collection)
+            persistAfterMutation(for: collection)
         }
     }
 
@@ -283,7 +311,7 @@ final class PhotoNumberingService {
         levelsCache[key] = levels
         collapsedCache[key] = collapsed
         if levels.count != beforeL || collapsed.count != beforeC {
-            saveForCollection(collection)
+            persistAfterMutation(for: collection)
         }
         if let order = orderedAssets, !order.isEmpty {
             reconcileStoredLevelsWithOrder(orderedAssets: order, in: collection)
