@@ -251,7 +251,7 @@ class PhotoGridViewController: BasePhotoViewController {
     
     private func updateBottomActionButtons() {
         let inSelectionMode = selectionMode != .none
-        let hasSelectedAssets = !gridView.selectedAssets.isEmpty
+        let hasSelectedAssets = gridView.hasSelectedAssets
         
         sortButton.isHidden = inSelectionMode
         shareButton.isHidden = !inSelectionMode

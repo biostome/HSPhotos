@@ -127,40 +127,8 @@ final class PhotoNumberingService {
         in collection: PHAssetCollection
     ) -> [String: String] {
         let levels = levelsCache[cacheKey(collection)] ?? [:]
-        var result: [String: String] = [:]
-        // counters[i] 表示第 i 层当前的计数（从下标 1 开始有效，故初始化一个 [0] 占位）
-        var counters: [Int] = [0]
-        var lastLevel = 0
-
-        for asset in orderedAssets {
-            let id = asset.localIdentifier
-            let lv = levels[id] ?? 0
-            guard lv > 0 else { continue }
-
-            // 1. 结构完整性规范：层级深度不能超过前一个资产的深度 + 1 (确保有主级才有子级，且无断档)
-            let correctedLv = min(lv, lastLevel + 1)
-
-            // 2. 确保 counters 数组足够长
-            while counters.count <= correctedLv {
-                counters.append(0)
-            }
-
-            // 3. 重置更深层的计数器：遇到更高层级时，其下的子层级全部归零
-            if correctedLv <= lastLevel {
-                for i in (correctedLv + 1)..<counters.count {
-                    counters[i] = 0
-                }
-            }
-
-            // 4. 当前层级计数并记录
-            counters[correctedLv] += 1
-            lastLevel = correctedLv
-
-            // 5. 生成字符串 (1.1.1)
-            let parts = (1...correctedLv).map { String(counters[$0]) }
-            result[id] = parts.joined(separator: ".")
-        }
-        return result
+        let orderedIDs = orderedAssets.map(\.localIdentifier)
+        return PhotoNumberingLogic.computeNumbers(orderedAssetIDs: orderedIDs, levels: levels)
     }
 
     /// 批量计算编号与折叠状态（仅用内存缓存）
@@ -184,17 +152,6 @@ final class PhotoNumberingService {
 
     // MARK: - 可见性与折叠（栈式算法，支持无限级）
 
-    /// 从 `startIndex` 起向后第一个 level>0 的层级，若无则 nil
-    private func firstNumberedLevel(from startIndex: Int, orderedAssets: [PHAsset], levels: [String: Int]) -> Int? {
-        var i = startIndex
-        while i < orderedAssets.count {
-            let v = levels[orderedAssets[i].localIdentifier] ?? 0
-            if v > 0 { return v }
-            i += 1
-        }
-        return nil
-    }
-
     /// 某个层级节点是否有比自己更深的子节点
     func hasDescendants(
         _ asset: PHAsset,
@@ -202,37 +159,13 @@ final class PhotoNumberingService {
         collection: PHAssetCollection
     ) -> Bool {
         let levels = levelsCache[cacheKey(collection)] ?? [:]
-        let myLevel = levels[asset.localIdentifier] ?? 0
-        guard myLevel > 0 else { return false }
-        guard let idx = orderedAssets.firstIndex(where: { $0.localIdentifier == asset.localIdentifier }) else {
-            return false
-        }
-        let mode = HierarchyCollapseSettings.shared.spanMode
-        if mode == .breakAtUnnumbered {
-            for i in (idx + 1)..<orderedAssets.count {
-                let lv = levels[orderedAssets[i].localIdentifier] ?? 0
-                if lv == 0 { return false }
-                if lv <= myLevel { return false }
-                if lv > myLevel { return true }
-            }
-            return false
-        }
-        // includeGaps：无编号仅当「其后第一个有编号」仍深于当前根（仍在子编号范围内）才算可藏；其后已是同级/更浅则有编号边界外的间隙不算
-        var i = idx + 1
-        var foundHideable = false
-        while i < orderedAssets.count {
-            let lv = levels[orderedAssets[i].localIdentifier] ?? 0
-            if lv > 0 && lv <= myLevel { break }
-            if lv > myLevel {
-                foundHideable = true
-            } else if lv == 0,
-                      let nextLv = firstNumberedLevel(from: i + 1, orderedAssets: orderedAssets, levels: levels),
-                      nextLv > myLevel {
-                foundHideable = true
-            }
-            i += 1
-        }
-        return foundHideable
+        let orderedIDs = orderedAssets.map(\.localIdentifier)
+        return PhotoNumberingLogic.hasDescendants(
+            assetID: asset.localIdentifier,
+            orderedAssetIDs: orderedIDs,
+            levels: levels,
+            spanMode: HierarchyCollapseSettings.shared.spanMode
+        )
     }
 
     /// 根据折叠状态返回可见照片
@@ -246,33 +179,20 @@ final class PhotoNumberingService {
         let key = cacheKey(collection)
         let levels = levelsCache[key] ?? [:]
         let collapsed = collapsedCache[key] ?? [:]
-        var visible: [PHAsset] = []
-        var collapsingLevel: Int? = nil
         let includeGaps = HierarchyCollapseSettings.shared.spanMode == .includeGaps
-
-        for (index, asset) in orderedAssets.enumerated() {
-            let id = asset.localIdentifier
-            let lv = levels[id] ?? 0
-
-            if lv == 0 {
-                if let L = collapsingLevel, includeGaps,
-                   let nextLv = firstNumberedLevel(from: index + 1, orderedAssets: orderedAssets, levels: levels),
-                   nextLv > L {
-                    continue
-                }
-                collapsingLevel = nil
-                visible.append(asset)
-            } else if let hiding = collapsingLevel, lv > hiding {
-                continue
-            } else {
-                collapsingLevel = nil
-                visible.append(asset)
-                if collapsed[id] == true {
-                    collapsingLevel = lv
-                }
-            }
+        let orderedIDs = orderedAssets.map(\.localIdentifier)
+        let visibleIDs = PhotoNumberingLogic.visibleAssetIDs(
+            orderedAssetIDs: orderedIDs,
+            levels: levels,
+            collapsed: collapsed,
+            includeGaps: includeGaps
+        )
+        var idToAsset: [String: PHAsset] = [:]
+        idToAsset.reserveCapacity(orderedAssets.count)
+        for asset in orderedAssets {
+            idToAsset[asset.localIdentifier] = asset
         }
-        return visible
+        return visibleIDs.compactMap { idToAsset[$0] }
     }
 
     // MARK: - 数据清理（更新内存后保存，loadPhoto 时调用）
@@ -280,21 +200,11 @@ final class PhotoNumberingService {
     /// 按当前顺序将已存储的 level 写回为与 `computeNumbers` 一致的合法值（例如父节点删除后子级 depth 回落）。
     private func reconcileStoredLevelsWithOrder(orderedAssets: [PHAsset], in collection: PHAssetCollection) {
         let key = cacheKey(collection)
-        guard var dict = levelsCache[key], !dict.isEmpty else { return }
-        var lastLevel = 0
-        var changed = false
-        for asset in orderedAssets {
-            let id = asset.localIdentifier
-            guard let lv = dict[id], lv > 0 else { continue }
-            let corrected = min(lv, lastLevel + 1)
-            if corrected != lv {
-                dict[id] = corrected
-                changed = true
-            }
-            lastLevel = corrected
-        }
-        if changed {
-            levelsCache[key] = dict
+        guard let dict = levelsCache[key], !dict.isEmpty else { return }
+        let orderedIDs = orderedAssets.map(\.localIdentifier)
+        let reconciled = PhotoNumberingLogic.reconcileLevelsWithOrder(orderedAssetIDs: orderedIDs, levels: dict)
+        if reconciled != dict {
+            levelsCache[key] = reconciled
             persistAfterMutation(for: collection)
         }
     }

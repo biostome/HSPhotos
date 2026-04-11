@@ -157,7 +157,7 @@ class GalleryViewController: BasePhotoViewController {
     }
     
     override func createOperationMenu() -> UIMenu {
-        let attributes: UIMenuElement.Attributes = gridView.selectedAssets.isEmpty ? .disabled : []
+        let attributes: UIMenuElement.Attributes = gridView.hasSelectedAssets ? [] : .disabled
         let undoAction = UIAction(title: "撤销", image: UIImage(systemName: "arrow.uturn.left"), attributes: canUndo ? [] : .disabled) { [weak self] _ in
             self?.undoAction()
         }
@@ -226,7 +226,7 @@ class GalleryViewController: BasePhotoViewController {
     internal func updateShareButtonState() {
         let inSelectionMode = selectionMode != .none
         shareButton.isHidden = !inSelectionMode
-        shareButton.isEnabled = !gridView.selectedAssets.isEmpty
+        shareButton.isEnabled = gridView.hasSelectedAssets
     }
     
     private func makeSharePlaceholderText(for count: Int) -> String {

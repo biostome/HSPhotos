@@ -35,6 +35,7 @@ protocol PhotoGridViewDelegate {
     func photoGridView(_ photoGridView: PhotoGridView, didSelectItemAt asset: PHAsset)
     func photoGridView(_ photoGridView: PhotoGridView, didDeselectItemAt indexPath: IndexPath)
     func photoGridView(_ photoGridView: PhotoGridView, didDeselectItemAt asset: PHAsset)
+    /// 选中集变化。`assets` 在数量很大时可能为空以省内存，请使用 `photoGridView.selectedAssets` 取全量。
     func photoGridView(_ photoGridView: PhotoGridView, didSelectedItems assets: [PHAsset])
     func photoGridView(_ photoGridView: PhotoGridView, didSetAnchor asset: PHAsset)
     func photoGridView(_ photoGridView: PhotoGridView, didPasteAssets assets: [PHAsset], after: PHAsset)
@@ -94,6 +95,21 @@ class PhotoGridView: UIView {
     public weak var scrollDelegate: UIScrollViewDelegate?
     
     public var selectedAssets: [PHAsset] { selectedPhotos }
+
+    public var selectedAssetCount: Int { selectionState.count }
+
+    public var hasSelectedAssets: Bool { selectionState.count > 0 }
+
+    /// 与 `selectedAssets` 成员一致，用于 O(1) 成员判断而无需构造 `[PHAsset]`。
+    public var selectedMembershipIdentifiers: Set<String> { selectionState.selectedIdentifierSet }
+
+    private static let maxSelectedAssetsInDelegatePayload = 512
+
+    /// 通知 delegate 时避免在数万选中下分配整表 `[PHAsset]`。
+    private var selectedAssetsForDelegateNotification: [PHAsset] {
+        if selectionState.count > Self.maxSelectedAssetsInDelegatePayload { return [] }
+        return selectedPhotos
+    }
     
     // 获取所有资产（包括隐藏的）
     public var allAssets: [PHAsset] { assets }
@@ -132,11 +148,12 @@ class PhotoGridView: UIView {
     
     // 选中照片（根据选中顺序排序的派生数组）
     private var selectedPhotos: [PHAsset] {
-        return selectedMap.values.sorted { $0.0 < $1.0 }.map { $0.1 }
+        selectionState.orderedIDs.compactMap { selectedAssetByID[$0] }
     }
-    
-    // 照片ID -> (选中序号(从1开始且连续), 资产)
-    private var selectedMap: [String: (Int, PHAsset)] = [:]
+
+    private var selectionState = PhotoGridSelectionState()
+    /// 仅缓存「当前在选中集中」的资源，供 `selectedPhotos` 与 delegate 使用。
+    private var selectedAssetByID: [String: PHAsset] = [:]
     
     // 当前锚点照片
     private var anchorPhoto: PHAsset?
@@ -369,15 +386,16 @@ class PhotoGridView: UIView {
                 
                 // 记录起始位置的初始选择状态
                 if let asset = getAsset(at: indexPath) {
-                    panInitialSelectionState = selectedMap[asset.localIdentifier] != nil
+                    panInitialSelectionState = selectionState.contains(asset.localIdentifier)
                     
-                    // 切换起始位置的选择状态
-                    _ = toggle(photo: asset)
-                    
-                    // 刷新UI
-                    collectionView.reloadItems(at: [indexPath])
+                    let rankChanged = Set(toggle(photo: asset))
+                    let toReload = indexPathsMergingExplicitAndVisibleRankChanges(
+                        rankChangedIDs: rankChanged,
+                        explicit: [indexPath]
+                    )
+                    reloadSelectionCellsWithoutAnimation(at: toReload)
                     // 通知代理
-                    delegate?.photoGridView(self, didSelectedItems: selectedPhotos)
+                    delegate?.photoGridView(self, didSelectedItems: selectedAssetsForDelegateNotification)
                 }
             }
         case .changed:
@@ -393,13 +411,17 @@ class PhotoGridView: UIView {
                 
                 guard let lastIndexPath = panLastIndexPath else {
                     let targetSelectionState = !panInitialSelectionState
-                    let isCurrentlySelected = selectedMap[currentAsset.localIdentifier] != nil
-                    if isCurrentlySelected != targetSelectionState {
-                        _ = toggle(photo: currentAsset)
-                    }
+                    let isCurrentlySelected = selectionState.contains(currentAsset.localIdentifier)
+                    let rankChanged: Set<String> = isCurrentlySelected != targetSelectionState
+                        ? Set(toggle(photo: currentAsset))
+                        : []
+                    let toReload = indexPathsMergingExplicitAndVisibleRankChanges(
+                        rankChangedIDs: rankChanged,
+                        explicit: [currentIndexPath]
+                    )
+                    reloadSelectionCellsWithoutAnimation(at: toReload)
                     panLastIndexPath = currentIndexPath
-                    collectionView.reloadItems(at: [currentIndexPath])
-                    delegate?.photoGridView(self, didSelectedItems: selectedPhotos)
+                    delegate?.photoGridView(self, didSelectedItems: selectedAssetsForDelegateNotification)
                     return
                 }
                 
@@ -410,15 +432,16 @@ class PhotoGridView: UIView {
                 let fullRangeStart = min(startVisibleIndex, currentVisibleIndex)
                 let fullRangeEnd = max(startVisibleIndex, currentVisibleIndex)
                 
+                var rankChangedAccumulator = Set<String>()
                 var indexPathsToUpdate: [IndexPath] = []
                 for i in rangeStart...rangeEnd {
                     guard i < visibleAssets.count else { continue }
                     let asset = visibleAssets[i]
-                    let isCurrentlySelected = selectedMap[asset.localIdentifier] != nil
+                    let isCurrentlySelected = selectionState.contains(asset.localIdentifier)
                     let isInFullRange = i >= fullRangeStart && i <= fullRangeEnd
                     let expectedState = isInFullRange ? targetSelectionState : panInitialSelectionState
                     if isCurrentlySelected != expectedState {
-                        _ = toggle(photo: asset)
+                        rankChangedAccumulator.formUnion(toggle(photo: asset))
                         indexPathsToUpdate.append(IndexPath(item: i, section: 0))
                     }
                 }
@@ -426,13 +449,16 @@ class PhotoGridView: UIView {
                 // 更新最后处理的indexPath
                 panLastIndexPath = currentIndexPath
                 
-                // 刷新所有受影响的单元格
                 if !indexPathsToUpdate.isEmpty {
-                    collectionView.reloadItems(at: indexPathsToUpdate)
+                    let toReload = indexPathsMergingExplicitAndVisibleRankChanges(
+                        rankChangedIDs: rankChangedAccumulator,
+                        explicit: indexPathsToUpdate
+                    )
+                    reloadSelectionCellsWithoutAnimation(at: toReload)
                 }
                 
                 // 通知代理
-                delegate?.photoGridView(self, didSelectedItems: selectedPhotos)
+                delegate?.photoGridView(self, didSelectedItems: selectedAssetsForDelegateNotification)
             }
         case .ended, .cancelled, .failed:
             // 清理状态
@@ -477,45 +503,57 @@ class PhotoGridView: UIView {
         guard indexPath.item < visibleAssets.count else { return nil }
         return visibleAssets[indexPath.item]
     }
-    
-    internal func toggle(photo: PHAsset) -> [PHAsset] {
-        var updatedPhotos: [PHAsset] = []
-        
-        if let (removedRank, _) = selectedMap[photo.localIdentifier] {
-            // 取消选择：移除照片
-            selectedMap.removeValue(forKey: photo.localIdentifier)
-            // 如果删除的是锚点照片，清除锚点
-            if anchorPhoto?.localIdentifier == photo.localIdentifier {
-                anchorPhoto = nil
+
+    /// 合并「必须刷的 indexPath」与「当前屏幕上且序号可能已变的 cell」，避免对整表做 O(n×m) 的 `contains` 与上万次 `reloadItems`。
+    private func indexPathsMergingExplicitAndVisibleRankChanges(
+        rankChangedIDs: Set<String>,
+        explicit indexPaths: [IndexPath]
+    ) -> [IndexPath] {
+        var result = Set(indexPaths)
+        for ip in collectionView.indexPathsForVisibleItems {
+            guard ip.section == 0, ip.item < visibleAssets.count else { continue }
+            if rankChangedIDs.contains(visibleAssets[ip.item].localIdentifier) {
+                result.insert(ip)
             }
-            
-            // 只调整比被取消序号大的项的序号，而不是重新分配所有序号
-            for (assetId, (currentRank, asset)) in selectedMap {
-                if currentRank > removedRank {
-                    selectedMap[assetId] = (currentRank - 1, asset)
-                    // 记录需要更新的照片
-                    updatedPhotos.append(asset)
-                }
-            }
-        } else {
-            // 新选：序号为当前数量+1
-            let newRank = selectedMap.count + 1
-            selectedMap[photo.localIdentifier] = (newRank, photo)
         }
-        
-        return updatedPhotos
+        return Array(result)
+    }
+
+    /// 无动画批量 `reloadItems`，让大量选中下的点选更快结束一帧布局。
+    private func reloadItemsForSelectionChange(at indexPaths: [IndexPath], completion: @escaping (Bool) -> Void) {
+        guard !indexPaths.isEmpty else {
+            completion(true)
+            return
+        }
+        UIView.performWithoutAnimation {
+            self.collectionView.performBatchUpdates({
+                self.collectionView.reloadItems(at: indexPaths)
+            }, completion: completion)
+        }
+    }
+
+    /// 滑动手势等高频路径：无动画、无 batch，直接 `reloadItems`。
+    private func reloadSelectionCellsWithoutAnimation(at indexPaths: [IndexPath]) {
+        guard !indexPaths.isEmpty else { return }
+        UIView.performWithoutAnimation {
+            self.collectionView.reloadItems(at: indexPaths)
+        }
     }
     
-    /// 重新分配所有选中照片的序号，确保连续且与选择顺序对应
-    private func reassignRanks() {
-        // 获取当前选中的照片，按照选择顺序排序
-        let sortedPhotos = selectedMap.values.sorted { $0.0 < $1.0 }.map { $0.1 }
-        // 清空当前的序号映射
-        selectedMap.removeAll()
-        // 重新分配序号，从1开始连续递增
-        for (index, photo) in sortedPhotos.enumerated() {
-            selectedMap[photo.localIdentifier] = (index + 1, photo)
+    /// - Returns: 序号发生变化的其它资源的 `localIdentifier`（不含本次点选的那张若其为取消选中）。
+    internal func toggle(photo: PHAsset) -> [String] {
+        let id = photo.localIdentifier
+        let wasSelected = selectionState.contains(id)
+        if wasSelected, anchorPhoto?.localIdentifier == id {
+            anchorPhoto = nil
         }
+        let updatedIDs = selectionState.toggle(id: id)
+        if wasSelected {
+            selectedAssetByID.removeValue(forKey: id)
+        } else {
+            selectedAssetByID[id] = photo
+        }
+        return updatedIDs
     }
     
     /// 选择指定范围的照片（根据方向分配顺序）
@@ -526,14 +564,12 @@ class PhotoGridView: UIView {
         let high = max(startIndex, endIndex)
         let baseRange = low...high
         let indices: [Int] = reverse ? Array(baseRange.reversed()) : Array(baseRange)
-        var nextRank = selectedMap.count + 1
-        
+
         for index in indices {
             guard index < visibleAssets.count else { continue }
             let asset = visibleAssets[index]
-            if selectedMap[asset.localIdentifier] == nil {
-                selectedMap[asset.localIdentifier] = (nextRank, asset)
-                nextRank += 1
+            if selectionState.insertIfAbsent(id: asset.localIdentifier) {
+                selectedAssetByID[asset.localIdentifier] = asset
                 indexPaths.append(IndexPath(item: index, section: 0))
                 delegate?.photoGridView(self, didSelectItemAt: IndexPath(item: index, section: 0))
                 delegate?.photoGridView(self, didSelectItemAt: asset)
@@ -541,54 +577,40 @@ class PhotoGridView: UIView {
         }
         
         if !indexPaths.isEmpty {
-            collectionView.performBatchUpdates {
-                collectionView.reloadItems(at: indexPaths)
-            } completion: { _ in
-                self.delegate?.photoGridView(self, didSelectedItems: self.selectedPhotos)
+            reloadItemsForSelectionChange(at: indexPaths) { _ in
+                self.delegate?.photoGridView(self, didSelectedItems: self.selectedAssetsForDelegateNotification)
             }
         }
     }
     
     /// 取消选择指定范围的照片（根据方向分配顺序）
     private func deselectRange(from startIndex: Int, to endIndex: Int) {
-        var indexPaths: [IndexPath] = []
-        var updatedPhotos: [PHAsset] = []
+        var explicitIndexPaths: [IndexPath] = []
+        var rankChangedIDs = Set<String>()
         // 根据方向决定追加顺序
         let indices = startIndex <= endIndex ? Array(startIndex...endIndex) : Array(endIndex...startIndex).reversed()
         
         for index in indices {
             guard index < visibleAssets.count else { continue }
             let asset = visibleAssets[index]
-            if selectedMap[asset.localIdentifier] != nil {
-                let assetsToUpdate = toggle(photo: asset)
-                updatedPhotos.append(contentsOf: assetsToUpdate)
-                indexPaths.append(IndexPath(item: index, section: 0))
+            if selectionState.contains(asset.localIdentifier) {
+                rankChangedIDs.formUnion(toggle(photo: asset))
+                explicitIndexPaths.append(IndexPath(item: index, section: 0))
                 delegate?.photoGridView(self, didDeselectItemAt: IndexPath(item: index, section: 0))
                 delegate?.photoGridView(self, didDeselectItemAt: asset)
             }
         }
         
-        if !indexPaths.isEmpty {
-            collectionView.performBatchUpdates {
-                collectionView.reloadItems(at: indexPaths)
-                
-                // 只重新加载序号发生变化的照片的单元格，提高性能
-                var updatedIndexPaths: [IndexPath] = []
-                for (index, asset) in visibleAssets.enumerated() {
-                    if updatedPhotos.contains(where: { $0.localIdentifier == asset.localIdentifier }) {
-                        updatedIndexPaths.append(IndexPath(item: index, section: 0))
-                    }
-                }
-                if !updatedIndexPaths.isEmpty {
-                    collectionView.reloadItems(at: updatedIndexPaths)
-                }
-            } completion: { _ in
-                self.delegate?.photoGridView(self, didSelectedItems: self.selectedPhotos)
+        if !explicitIndexPaths.isEmpty {
+            let toReload = indexPathsMergingExplicitAndVisibleRankChanges(
+                rankChangedIDs: rankChangedIDs,
+                explicit: explicitIndexPaths
+            )
+            reloadItemsForSelectionChange(at: toReload) { _ in
+                self.delegate?.photoGridView(self, didSelectedItems: self.selectedAssetsForDelegateNotification)
             }
         }
     }
-    
-    // 已不需要按次序计算排名，直接从 selectedMap 中读取
     
     /// O(1) 查找照片在自定义排序中的下标
     private func getCustomOrderIndex(for photo: PHAsset) -> Int {
@@ -625,30 +647,24 @@ class PhotoGridView: UIView {
     }
     
     func clearSelected() {
-        selectedMap.removeAll()
+        selectionState.clear()
+        selectedAssetByID.removeAll()
         selectedStart = nil
         selectedEnd = nil
         anchorPhoto = nil  // 清除锚点
-        // 清空后序号从1开始（由 selectedMap.count + 1 决定），无需重置计数器
-        delegate?.photoGridView(self, didSelectedItems: selectedPhotos)
+        delegate?.photoGridView(self, didSelectedItems: selectedAssetsForDelegateNotification)
         collectionView.reloadData()
     }
     
     /// 全选所有可见照片
     func selectAll() {
-        // 清除现有选中状态
-        selectedMap.removeAll()
         selectedStart = nil
         selectedEnd = nil
         anchorPhoto = nil
-        
-        // 选中所有可见照片
-        for (index, asset) in visibleAssets.enumerated() {
-            selectedMap[asset.localIdentifier] = (index + 1, asset)
-        }
-        
-        // 通知代理
-        delegate?.photoGridView(self, didSelectedItems: selectedPhotos)
+        selectionState.replaceAll(orderedIDs: visibleAssets.map(\.localIdentifier))
+        selectedAssetByID = Dictionary(uniqueKeysWithValues: visibleAssets.map { ($0.localIdentifier, $0) })
+
+        delegate?.photoGridView(self, didSelectedItems: selectedAssetsForDelegateNotification)
         collectionView.reloadData()
     }
     
@@ -798,8 +814,10 @@ class PhotoGridView: UIView {
             }
             
             for asset in assetsToDelete {
-                selectedMap.removeValue(forKey: asset.localIdentifier)
-                if anchorPhoto?.localIdentifier == asset.localIdentifier {
+                let id = asset.localIdentifier
+                selectionState.removeIdentifierWithoutRankShift(id: id)
+                selectedAssetByID.removeValue(forKey: id)
+                if anchorPhoto?.localIdentifier == id {
                     anchorPhoto = nil
                 }
             }
@@ -820,7 +838,7 @@ extension PhotoGridView: UICollectionViewDataSource {
     func collectionView(_ collectionView: UICollectionView, cellForItemAt indexPath: IndexPath) -> UICollectionViewCell {
         let cell = collectionView.dequeueReusableCell(withReuseIdentifier: "PhotoCell", for: indexPath) as! PhotoCell
         let photo = visibleAssets[indexPath.item]
-        let isSelected = selectedMap[photo.localIdentifier] != nil
+        let isSelected = selectionState.contains(photo.localIdentifier)
         
         // 列数多时 cell 很小，跳过不可见的 UI 计算（层级、媒体图标、收藏等）
         let isCompact = columns >= 7
@@ -835,10 +853,9 @@ extension PhotoGridView: UICollectionViewDataSource {
                 compact: true
             )
         } else {
-            let selectionIndex = selectedMap[photo.localIdentifier]?.0
-            let isAnchor = anchorPhoto?.localIdentifier == photo.localIdentifier
-            
             let assetID = photo.localIdentifier
+            let selectionIndex = selectionState.rank(for: assetID)
+            let isAnchor = anchorPhoto?.localIdentifier == photo.localIdentifier
             var hierarchyText: String?
             var isHierarchyCollapsed: Bool = false
             
@@ -981,24 +998,13 @@ extension PhotoGridView {
         // 如果启用了滑动选择，则不处理点击选择
         guard !isSlidingSelectionEnabled else { return }
         
-        let wasSelected = selectedMap[photo.localIdentifier] != nil
-        collectionView.performBatchUpdates {
-            let updatedPhotos = toggle(photo: photo)
-            collectionView.reloadItems(at: [indexPath])
-            
-            // 只重新加载序号发生变化的照片的单元格，提高性能
-            if wasSelected {
-                var updatedIndexPaths: [IndexPath] = []
-                for (index, asset) in visibleAssets.enumerated() {
-                    if updatedPhotos.contains(where: { $0.localIdentifier == asset.localIdentifier }) {
-                        updatedIndexPaths.append(IndexPath(item: index, section: 0))
-                    }
-                }
-                if !updatedIndexPaths.isEmpty {
-                    collectionView.reloadItems(at: updatedIndexPaths)
-                }
-            }
-        } completion: { _ in
+        let wasSelected = selectionState.contains(photo.localIdentifier)
+        let rankChanged = Set(toggle(photo: photo))
+        let reloadIndexPaths = indexPathsMergingExplicitAndVisibleRankChanges(
+            rankChangedIDs: rankChanged,
+            explicit: [indexPath]
+        )
+        reloadItemsForSelectionChange(at: reloadIndexPaths) { _ in
             if wasSelected {
                 self.delegate?.photoGridView(self, didDeselectItemAt: indexPath)
                 self.delegate?.photoGridView(self, didDeselectItemAt: photo)
@@ -1006,7 +1012,7 @@ extension PhotoGridView {
                 self.delegate?.photoGridView(self, didSelectItemAt: indexPath)
                 self.delegate?.photoGridView(self, didSelectItemAt: photo)
             }
-            self.delegate?.photoGridView(self, didSelectedItems: self.selectedPhotos)
+            self.delegate?.photoGridView(self, didSelectedItems: self.selectedAssetsForDelegateNotification)
         }
     }
     
@@ -1015,28 +1021,18 @@ extension PhotoGridView {
         guard !isSlidingSelectionEnabled else { return }
         
         let index = indexPath.item
-        let isSelected = selectedMap[photo.localIdentifier] != nil
+        let isSelected = selectionState.contains(photo.localIdentifier)
         
         if isSelected {
-            // 如果点击已选中照片，反选它，并重设范围
-            collectionView.performBatchUpdates {
-                let updatedPhotos = toggle(photo: photo)
-                collectionView.reloadItems(at: [indexPath])
-                
-                // 只重新加载序号发生变化的照片的单元格，提高性能
-                var updatedIndexPaths: [IndexPath] = []
-                for (idx, asset) in visibleAssets.enumerated() {
-                    if updatedPhotos.contains(where: { $0.localIdentifier == asset.localIdentifier }) {
-                        updatedIndexPaths.append(IndexPath(item: idx, section: 0))
-                    }
-                }
-                if !updatedIndexPaths.isEmpty {
-                    collectionView.reloadItems(at: updatedIndexPaths)
-                }
-            } completion: { _ in
+            let rankChanged = Set(toggle(photo: photo))
+            let reloadIndexPaths = indexPathsMergingExplicitAndVisibleRankChanges(
+                rankChangedIDs: rankChanged,
+                explicit: [indexPath]
+            )
+            reloadItemsForSelectionChange(at: reloadIndexPaths) { _ in
                 self.delegate?.photoGridView(self, didDeselectItemAt: indexPath)
                 self.delegate?.photoGridView(self, didDeselectItemAt: photo)
-                self.delegate?.photoGridView(self, didSelectedItems: self.selectedPhotos)
+                self.delegate?.photoGridView(self, didSelectedItems: self.selectedAssetsForDelegateNotification)
             }
             selectedStart = nil
             selectedEnd = nil
@@ -1046,13 +1042,11 @@ extension PhotoGridView {
         if selectedStart == nil {
             // 第一次点击：设置开始位置，选中单个
             selectedStart = index
-            collectionView.performBatchUpdates {
-                _ = toggle(photo: photo)
-                collectionView.reloadItems(at: [indexPath])
-            } completion: { _ in
+            _ = toggle(photo: photo)
+            reloadItemsForSelectionChange(at: [indexPath]) { _ in
                 self.delegate?.photoGridView(self, didSelectItemAt: indexPath)
                 self.delegate?.photoGridView(self, didSelectItemAt: photo)
-                self.delegate?.photoGridView(self, didSelectedItems: self.selectedPhotos)
+                self.delegate?.photoGridView(self, didSelectedItems: self.selectedAssetsForDelegateNotification)
             }
         } else {
             // 第二次点击：设置结束位置，选中范围，重设范围
@@ -1066,7 +1060,7 @@ extension PhotoGridView {
             for i in startIndex...endIndex {
                 if i < visibleAssets.count {
                     let asset = visibleAssets[i]
-                    if selectedMap[asset.localIdentifier] == nil {
+                    if !selectionState.contains(asset.localIdentifier) {
                         allSelected = false
                         break
                     }
@@ -1091,26 +1085,15 @@ extension PhotoGridView {
         // 如果启用了滑动选择，则不处理点击取消选择
         guard !isSlidingSelectionEnabled else { return }
         
-        collectionView.performBatchUpdates {
-            // 取消选择并获取需要更新序号的照片列表
-            let updatedPhotos = toggle(photo: photo)
-            // 重新加载当前取消选择的照片的单元格
-            collectionView.reloadItems(at: [indexPath])
-            
-            // 只重新加载序号发生变化的照片的单元格，提高性能
-            var updatedIndexPaths: [IndexPath] = []
-            for (index, asset) in visibleAssets.enumerated() {
-                if updatedPhotos.contains(where: { $0.localIdentifier == asset.localIdentifier }) {
-                    updatedIndexPaths.append(IndexPath(item: index, section: 0))
-                }
-            }
-            if !updatedIndexPaths.isEmpty {
-                collectionView.reloadItems(at: updatedIndexPaths)
-            }
-        } completion: { _ in
+        let rankChanged = Set(toggle(photo: photo))
+        let reloadIndexPaths = indexPathsMergingExplicitAndVisibleRankChanges(
+            rankChangedIDs: rankChanged,
+            explicit: [indexPath]
+        )
+        reloadItemsForSelectionChange(at: reloadIndexPaths) { _ in
             self.delegate?.photoGridView(self, didDeselectItemAt: indexPath)
             self.delegate?.photoGridView(self, didDeselectItemAt: photo)
-            self.delegate?.photoGridView(self, didSelectedItems: self.selectedPhotos)
+            self.delegate?.photoGridView(self, didSelectedItems: self.selectedAssetsForDelegateNotification)
         }
         selectedStart = nil
         selectedEnd = nil

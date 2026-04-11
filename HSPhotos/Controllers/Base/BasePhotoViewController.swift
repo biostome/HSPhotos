@@ -723,7 +723,7 @@ class BasePhotoViewController: UIViewController {
     
     /// 检查是否所有可见资产都已被选中
     internal func isAllAssetsSelected() -> Bool {
-        return gridView.selectedAssets.count == gridView.allAssets.count && !gridView.allAssets.isEmpty
+        gridView.selectedAssetCount == gridView.allAssets.count && !gridView.allAssets.isEmpty
     }
     
     // MARK: - Undo Manager Helper Methods
@@ -779,7 +779,7 @@ class BasePhotoViewController: UIViewController {
     }
     
     internal func createOperationMenu() -> UIMenu {
-        let attributes: UIMenuElement.Attributes = gridView.selectedAssets.isEmpty ? .disabled : []
+        let attributes: UIMenuElement.Attributes = gridView.hasSelectedAssets ? [] : .disabled
         var menuChildren: [UIMenuElement] = []
 
         let undoAction = UIAction(title: "撤销", image: UIImage(systemName: "arrow.uturn.left"), attributes: canUndo ? [] : .disabled) { [weak self] _ in
@@ -1082,7 +1082,8 @@ class BasePhotoViewController: UIViewController {
     }
 
     internal func orderedSelectedAssets() -> [PHAsset] {
-        let selectedIDs = Set(gridView.selectedAssets.map { $0.localIdentifier })
+        let selectedIDs = gridView.selectedMembershipIdentifiers
+        guard !selectedIDs.isEmpty else { return [] }
         return assets.filter { selectedIDs.contains($0.localIdentifier) }
     }
     
@@ -1316,11 +1317,13 @@ extension BasePhotoViewController: PhotoGridViewDelegate {
     }
     
     @objc internal func photoGridView(_ photoGridView: PhotoGridView, didSelectedItems assets: [PHAsset]) {
-        updateOperationMenu()
-        updateUndoRedoButtons()
-        // 更新全选/取消全选按钮状态
-        if selectionMode != .none {
-            updateSelectAllButton()
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.updateOperationMenu()
+            self.updateUndoRedoButtons()
+            if self.selectionMode != .none {
+                self.updateSelectAllButton()
+            }
         }
     }
     
