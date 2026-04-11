@@ -109,12 +109,12 @@ class PhotoGridViewController: BasePhotoViewController {
             self.sortButton.menu = self.createSortMenu()
         }
         
-        let modificationDateAction = UIAction(
+        let newestSortAction = UIAction(
             title: "按最新的排最前排序",
             image: UIImage(systemName: "clock"),
-            state: sortPreference == .recentDate ? .on : .off
+            state: sortPreference == .newest ? .on : .off
         ) { [weak self] _ in
-            self?.onChanged(sort: .recentDate)
+            self?.onChanged(sort: .newest)
             self?.sortButton.menu = self?.createSortMenu()
         }
         
@@ -129,7 +129,7 @@ class PhotoGridViewController: BasePhotoViewController {
         
         return UIMenu(
             title: "排序方式",
-            children: [customAction, modificationDateAction, creationDateAction]
+            children: [customAction, newestSortAction, creationDateAction]
         )
     }
     
@@ -178,10 +178,7 @@ class PhotoGridViewController: BasePhotoViewController {
         // 先更新本地数据和自定义排序
         var newAssets = self.assets
         newAssets.insert(contentsOf: assets, at: insertIndex)
-        
-        // 立即更新自定义排序数据
-        PhotoOrder.set(order: newAssets, for: self.collection)
-        
+
         // 提交到系统相册
         PHPhotoLibrary.shared().performChanges({
             guard let changeRequest = PHAssetCollectionChangeRequest(for: self.collection) else {
@@ -212,14 +209,13 @@ class PhotoGridViewController: BasePhotoViewController {
                         self.gridView.sortPreference = .custom
                         // 保存排序偏好
                         PhotoSortPreference.custom.set(preference: self.collection)
+                        self.refreshFetchOptionsForCurrentSortPreference()
                         // 更新排序按钮菜单
                         self.sortButton.menu = self.createSortMenu()
                     }
                     
                     self.showAlert(title: "粘贴成功", message: "已成功粘贴 \(assets.count) 张照片")
                 } else {
-                    // 失败时回滚自定义排序数据
-                    PhotoOrder.set(order: self.assets, for: self.collection)
                     self.showAlert(title: "粘贴失败", message: error?.localizedDescription ?? "无法粘贴照片")
                 }
                 

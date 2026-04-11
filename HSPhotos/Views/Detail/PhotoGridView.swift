@@ -710,16 +710,7 @@ class PhotoGridView: UIView {
             customOrderIndexCache = dict
             return
         }
-        let order = PhotoOrder.order(for: collection)
-        if !order.isEmpty {
-            var dict = [String: Int](minimumCapacity: order.count)
-            for (i, id) in order.enumerated() {
-                dict[id] = i
-            }
-            customOrderIndexCache = dict
-            return
-        }
-        // 自定义序号以系统相册默认顺序为准；后台构建缓存避免阻塞滚动。
+        // 与系统「相簿内默认顺序」一致（`fetch` 无 sortDescriptors）；后台构建避免阻塞主线程。
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             let fetched = PHAsset.fetchAssets(in: collection, options: nil)
             var dict = [String: Int](minimumCapacity: fetched.count)
@@ -890,7 +881,7 @@ extension PhotoGridView: UICollectionViewDataSource {
             let creationDateText: String?
             let modificationDateText: String?
             switch sortPreference {
-            case .creationDate, .modificationDate, .recentDate:
+            case .creationDate, .modificationDate, .recentDate, .oldest, .newest:
                 let orderIndex = getCustomOrderIndex(for: photo)
                 if overlaySettings.overlayEnabled && overlaySettings.showCustomOrderInDateSort {
                     customOrderNumber = orderIndex >= 0 ? (orderIndex + 1) : nil
@@ -1403,7 +1394,7 @@ extension PhotoGridView: CustomVerticalScrollIndicatorDelegate {
         let asset = visibleAssets[clampedIndex]
 
         switch sortPreference {
-        case .creationDate, .modificationDate, .recentDate:
+        case .creationDate, .modificationDate, .recentDate, .oldest, .newest:
             // 日期排序：显示日期
             return formatDate(for: asset)
         case .custom:
@@ -1420,7 +1411,7 @@ extension PhotoGridView: CustomVerticalScrollIndicatorDelegate {
     private func formatDate(for asset: PHAsset) -> String {
         let date: Date
         switch sortPreference {
-        case .creationDate:
+        case .creationDate,.oldest,.newest:
             date = asset.creationDate ?? Date()
         case .modificationDate, .recentDate:
             date = asset.modificationDate ?? asset.creationDate ?? Date()

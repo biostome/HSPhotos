@@ -100,7 +100,7 @@ class BasePhotoViewController: UIViewController {
 
     private lazy var fetchOptions: PHFetchOptions = {
         let options = PHFetchOptions()
-        options.sortDescriptors = sortPreference.sortDescriptors
+        options.sortDescriptors = sortDescriptors(for: sortPreference)
         return options
     }()
 
@@ -164,7 +164,6 @@ class BasePhotoViewController: UIViewController {
 
         // 进入相册时从 UserDefaults 加载到内存；之后每次改编号默认仍会写回（批量操作用 batch 合并写入）
         PhotoNumberingService.shared.loadForCollection(collection)
-        PhotoOrder.loadForCollection(collection)
         PhotoHeaderService.shared.loadForCollection(collection)
 
         // 同步初始排序偏好到 PhotoGridView
@@ -263,7 +262,6 @@ class BasePhotoViewController: UIViewController {
         super.viewWillDisappear(animated)
         // 离开相册时将数据持久化到 UserDefaults
         PhotoNumberingService.shared.saveForCollection(collection)
-        PhotoOrder.saveForCollection(collection)
         PhotoHeaderService.shared.saveForCollection(collection)
     }
 
@@ -286,20 +284,6 @@ class BasePhotoViewController: UIViewController {
             guard let self = self else { return }
             loadingAlert.dismiss(animated: true) {
                 if success {
-                    if case .sort(_, let originalAssets, _) = action.type {
-                        PhotoOrder.set(order: originalAssets, for: self.collection)
-                    } else if case .delete(_, let assets) = action.type {
-                        var restored = self.assets
-                        restored.append(contentsOf: assets)
-                        PhotoOrder.set(order: restored, for: self.collection)
-                    } else if case .move(let sourceCollection, _, let assets) = action.type, sourceCollection.localIdentifier == self.collection.localIdentifier {
-                        var restored = self.assets
-                        restored.append(contentsOf: assets)
-                        PhotoOrder.set(order: restored, for: self.collection)
-                    } else if case .paste(let assets, let destinationCollection, _) = action.type, destinationCollection.localIdentifier == self.collection.localIdentifier {
-                        let remaining = self.assets.filter { !Set(assets.map(\.localIdentifier)).contains($0.localIdentifier) }
-                        PhotoOrder.set(order: remaining, for: self.collection)
-                    }
                     self.loadPhoto()
                 }
                 // 撤销失败不提示，仅更新按钮状态
@@ -319,20 +303,6 @@ class BasePhotoViewController: UIViewController {
             guard let self = self else { return }
             loadingAlert.dismiss(animated: true) {
                 if success {
-                    if case .sort(_, _, let sortedAssets) = action.type {
-                        PhotoOrder.set(order: sortedAssets, for: self.collection)
-                    } else if case .delete(_, let assets) = action.type {
-                        let remaining = self.assets.filter { !Set(assets.map(\.localIdentifier)).contains($0.localIdentifier) }
-                        PhotoOrder.set(order: remaining, for: self.collection)
-                    } else if case .move(let sourceCollection, _, let assets) = action.type, sourceCollection.localIdentifier == self.collection.localIdentifier {
-                        let remaining = self.assets.filter { !Set(assets.map(\.localIdentifier)).contains($0.localIdentifier) }
-                        PhotoOrder.set(order: remaining, for: self.collection)
-                    } else if case .paste(let assets, let destinationCollection, let insertIndex) = action.type, destinationCollection.localIdentifier == self.collection.localIdentifier {
-                        var newOrder = self.assets
-                        let clampedIndex = min(insertIndex, newOrder.count)
-                        newOrder.insert(contentsOf: assets, at: clampedIndex)
-                        PhotoOrder.set(order: newOrder, for: self.collection)
-                    }
                     self.loadPhoto()
                 } else {
                     self.showAlert(title: "重做失败", message: error ?? "无法重做操作")
@@ -343,11 +313,18 @@ class BasePhotoViewController: UIViewController {
         }
     }
 
+    /// 重建 `PHFetchOptions`，使 `loadPhoto` 与当前 `sortPreference` 一致。
+    /// 凡不经由 `onChanged` 而直接修改 `sortPreference`（例如排序同步后、粘贴后强制切到自定义）都必须调用，否则会仍按旧描述符 fetch。
+    internal func refreshFetchOptionsForCurrentSortPreference() {
+        let options = PHFetchOptions()
+        options.sortDescriptors = sortDescriptors(for: sortPreference)
+        fetchOptions = options
+    }
+
     internal func loadPhoto() {
         // 在后台线程执行耗时操作，避免阻塞主线程造成卡顿
         let collection = self.collection
         let options = self.fetchOptions
-        let preference = self.sortPreference
 
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
@@ -356,18 +333,6 @@ class BasePhotoViewController: UIViewController {
             var newAssets: [PHAsset] = []
             assets.enumerateObjects { asset, _, _ in
                 newAssets.append(asset)
-            }
-
-            // 检查是否有自定义排序数据，如果没有则创建默认的
-            let customOrder = PhotoOrder.order(for: collection)
-            if customOrder.isEmpty && !newAssets.isEmpty {
-                print("📝 初始化自定义排序数据")
-                PhotoOrder.set(order: newAssets, for: collection)
-            }
-
-            // 如果是自定义排序，应用自定义排序
-            if preference == .custom {
-                newAssets = PhotoOrder.apply(to: newAssets, for: collection)
             }
 
             let validAssetIDs = Set(newAssets.map { $0.localIdentifier })
@@ -381,12 +346,10 @@ class BasePhotoViewController: UIViewController {
 
     internal func onChanged(sort preference: PhotoSortPreference) {
         self.sortPreference = preference
-
-        let options = PHFetchOptions()
-        options.sortDescriptors = preference.sortDescriptors
-        fetchOptions = options
+        refreshFetchOptionsForCurrentSortPreference()
 
         let collection = self.collection
+        let options = self.fetchOptions
 
         // 在后台线程执行耗时操作，避免切换排序时卡顿
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -398,15 +361,11 @@ class BasePhotoViewController: UIViewController {
                 newAssets.append(asset)
             }
 
-            // 如果是自定义排序，应用自定义排序
-            if preference == .custom {
-                newAssets = PhotoOrder.apply(to: newAssets, for: collection)
-            }
-
             DispatchQueue.main.async {
                 self.assets = newAssets
                 self.gridView.sortPreference = preference
                 preference.set(preference: self.collection)
+                
                 self.updateOperationMenu()
             }
         }
@@ -414,7 +373,6 @@ class BasePhotoViewController: UIViewController {
 
     internal func onOrder() {
         do {
-            let start = Date()
             let originalAssets = self.assets
             let sortedAssets = try gridView.sort()
             self.assets = sortedAssets
@@ -424,12 +382,8 @@ class BasePhotoViewController: UIViewController {
 
             PhotoChangesService.sync(sortedAssets: sortedAssets, for: self.collection) { [weak self] success, message in
                 guard let self = self else { return }
-                let duration = Date().timeIntervalSince(start)
                 loadingAlert.dismiss(animated: true) {
                     if success {
-                        // 保存自定义排序数据到 UserDefaults
-                        PhotoOrder.set(order: sortedAssets, for: self.collection)
-
                         // 排序后必须切换到自定义排序模式，否则再次进入相册会按日期加载丢失顺序
                         if self.sortPreference != .custom {
                             self.sortPreference = .custom
@@ -437,6 +391,7 @@ class BasePhotoViewController: UIViewController {
                             PhotoSortPreference.custom.set(preference: self.collection)
                             self.updateOperationMenu()
                         }
+                        self.refreshFetchOptionsForCurrentSortPreference()
 
                         // 记录撤销操作
                         let undoAction = UndoAction.sort(collection: self.collection, originalAssets: originalAssets, sortedAssets: sortedAssets)
@@ -630,10 +585,6 @@ class BasePhotoViewController: UIViewController {
                 if success {
                     let undoAction = UndoAction.move(sourceCollection: self.collection, destinationCollection: destinationCollection, assets: assets)
                     self.addAction(undoAction)
-                    if self.sortPreference == .custom {
-                        let remaining = self.assets.filter { !Set(assets.map(\.localIdentifier)).contains($0.localIdentifier) }
-                        PhotoOrder.set(order: remaining, for: self.collection)
-                    }
                     self.gridView.clearSelected()
                     self.loadPhoto()
                 } else {
@@ -673,10 +624,6 @@ class BasePhotoViewController: UIViewController {
                     if self.collection.assetCollectionSubtype != .smartAlbumUserLibrary {
                         let undoAction = UndoAction.delete(collection: self.collection, assets: assets)
                         self.addAction(undoAction)
-                    }
-                    if self.sortPreference == .custom {
-                        let remaining = self.assets.filter { !Set(assets.map(\.localIdentifier)).contains($0.localIdentifier) }
-                        PhotoOrder.set(order: remaining, for: self.collection)
                     }
                     self.gridView.clearSelected()
                     self.loadPhoto()
@@ -795,6 +742,11 @@ class BasePhotoViewController: UIViewController {
         return UndoManagerService.shared.canRedo
     }
 
+    /// 子类（如图库首页）可覆盖，以对同一 `PhotoSortPreference` 使用与枚举默认不同的 fetch 描述符（例如「最近添加」用 `nil` 对齐系统）。
+    internal func sortDescriptors(for preference: PhotoSortPreference) -> [NSSortDescriptor]? {
+        preference.sortDescriptors
+    }
+
     // MARK: - Menu Creation Methods
 
     internal func createSortMenu() -> UIMenu {
@@ -806,12 +758,12 @@ class BasePhotoViewController: UIViewController {
             self.onChanged(sort: .creationDate)
         }
 
-        let modificationDateAction = UIAction(
+        let newestSortAction = UIAction(
             title: "按最新的排最前排序",
             image: UIImage(systemName: "clock"),
-            state: sortPreference == .recentDate ? .on : .off
+            state: sortPreference == .newest ? .on : .off
         ) { [weak self] _ in
-            self?.onChanged(sort: .recentDate)
+            self?.onChanged(sort: .newest)
         }
 
         let customAction = UIAction(
@@ -824,7 +776,7 @@ class BasePhotoViewController: UIViewController {
 
         return UIMenu(
             title: "排序方式",
-            children: [customAction, modificationDateAction, creationDateAction]
+            children: [customAction, newestSortAction, creationDateAction]
         )
     }
 
@@ -1400,12 +1352,8 @@ extension BasePhotoViewController: PhotoGridViewDelegate {
         let loadingAlert = UIAlertController(title: "粘贴中", message: "正在粘贴照片...", preferredStyle: .alert)
         present(loadingAlert, animated: true)
 
-        // 先更新本地数据和自定义排序
         var newAssets = self.assets
         newAssets.insert(contentsOf: assets, at: insertIndex)
-
-        // 立即更新自定义排序数据
-        PhotoOrder.set(order: newAssets, for: self.collection)
 
         // 提交到系统相册
         PHPhotoLibrary.shared().performChanges({
@@ -1437,12 +1385,11 @@ extension BasePhotoViewController: PhotoGridViewDelegate {
                         self.gridView.sortPreference = .custom
                         // 保存排序偏好
                         PhotoSortPreference.custom.set(preference: self.collection)
+                        self.refreshFetchOptionsForCurrentSortPreference()
                     }
 
                     self.showAlert(title: "粘贴成功", message: "已成功粘贴 \(assets.count) 张照片")
                 } else {
-                    // 失败时回滚自定义排序数据
-                    PhotoOrder.set(order: self.assets, for: self.collection)
                     self.showAlert(title: "粘贴失败", message: error?.localizedDescription ?? "无法粘贴照片")
                 }
 
