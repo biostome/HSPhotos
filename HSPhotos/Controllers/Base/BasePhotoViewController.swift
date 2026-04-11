@@ -313,11 +313,17 @@ class BasePhotoViewController: UIViewController {
         }
     }
     
+    /// 与 `onChanged` 一致：在除菜单切换外的路径修改了 `sortPreference` 后，必须刷新否则 `loadPhoto` 仍按旧排序描述拉取。
+    private func syncFetchOptionsWithSortPreference() {
+        let options = PHFetchOptions()
+        options.sortDescriptors = sortDescriptors(for: sortPreference)
+        fetchOptions = options
+    }
+
     internal func loadPhoto() {
         // 在后台线程执行耗时操作，避免阻塞主线程造成卡顿
         let collection = self.collection
         let options = self.fetchOptions
-        let preference = self.sortPreference
         
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
@@ -339,12 +345,10 @@ class BasePhotoViewController: UIViewController {
     
     internal func onChanged(sort preference: PhotoSortPreference) {
         self.sortPreference = preference
-        
-        let options = PHFetchOptions()
-        options.sortDescriptors = sortDescriptors(for: preference)
-        fetchOptions = options
+        syncFetchOptionsWithSortPreference()
         
         let collection = self.collection
+        let options = self.fetchOptions
         
         // 在后台线程执行耗时操作，避免切换排序时卡顿
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -387,6 +391,8 @@ class BasePhotoViewController: UIViewController {
                             PhotoSortPreference.albumCustom.set(preference: self.collection)
                             self.updateOperationMenu()
                         }
+                        // 关键：否则 fetchOptions 仍保留「按日期」描述符，loadPhoto 会按日期重排覆盖刚同步的顺序
+                        self.syncFetchOptionsWithSortPreference()
                         
                         // 记录撤销操作
                         let undoAction = UndoAction.sort(collection: self.collection, originalAssets: originalAssets, sortedAssets: sortedAssets)
@@ -1363,24 +1369,18 @@ extension BasePhotoViewController: PhotoGridViewDelegate {
                 guard let self = self else { return }
                 
                 if success {
-                    // 以系统相册顺序回读，确保与系统保持一致
-                    self.loadPhoto()
-                    
-                    // 记录撤销操作
-                    let undoAction = UndoAction.paste(assets: assets, into: self.collection, at: insertIndex)
-                    self.addAction(undoAction)
-                    
-                    // 清除选中状态
-                    self.gridView.clearSelected()
-                    
-                    // 重要：粘贴操作后，自动切换到自定义排序模式
+                    // 重要：粘贴后切到自定义排序，并先刷新 fetch 选项再回读，否则仍按旧排序拉相册
                     if self.sortPreference != .albumCustom {
                         self.sortPreference = .albumCustom
-                        // 同步排序偏好到 PhotoGridView
                         self.gridView.sortPreference = .albumCustom
-                        // 保存排序偏好
                         PhotoSortPreference.albumCustom.set(preference: self.collection)
                     }
+                    self.syncFetchOptionsWithSortPreference()
+                    self.loadPhoto()
+                    
+                    let undoAction = UndoAction.paste(assets: assets, into: self.collection, at: insertIndex)
+                    self.addAction(undoAction)
+                    self.gridView.clearSelected()
                     
                     self.showAlert(title: "粘贴成功", message: "已成功粘贴 \(assets.count) 张照片")
                 } else {
