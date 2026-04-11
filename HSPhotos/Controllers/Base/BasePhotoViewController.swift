@@ -10,7 +10,7 @@ import Photos
 import PhotosUI
 
 class BasePhotoViewController: UIViewController {
-    
+
     internal lazy var searchTextField: SearchBarView = {
         let searchBarView = SearchBarView()
         searchBarView.translatesAutoresizingMaskIntoConstraints = false
@@ -18,7 +18,7 @@ class BasePhotoViewController: UIViewController {
         searchBarView.alpha = 0.0
         return searchBarView
     }()
-    
+
     internal lazy var segmentControl: UISegmentedControl = {
         let items = ["年", "月", "日", "所有"]
         let control = UISegmentedControl(items: items)
@@ -26,40 +26,40 @@ class BasePhotoViewController: UIViewController {
         control.translatesAutoresizingMaskIntoConstraints = false
         return control
     }()
-    
+
     internal lazy var gridView: PhotoGridView = {
         let view = PhotoGridView()
         view.translatesAutoresizingMaskIntoConstraints = false
         view.delegate = self
         return view
     }()
-    
+
     internal lazy var selectBarButton: UIBarButtonItem = {
         let button = UIBarButtonItem(title: "选择", style: .plain, target: self, action: #selector(toggleSelectionMode))
         return button
     }()
-    
+
     internal lazy var selectAllBarButton: UIBarButtonItem = {
         let button = UIBarButtonItem(title: "全选", style: .plain, target: self, action: #selector(selectAllAssets))
         return button
     }()
-    
+
     internal lazy var deselectAllBarButton: UIBarButtonItem = {
         let button = UIBarButtonItem(title: "取消全选", style: .plain, target: self, action: #selector(deselectAllAssets))
         return button
     }()
-    
+
     internal lazy var cancelSelectBarButton: UIBarButtonItem = {
         let button = UIBarButtonItem(image: UIImage(systemName: "xmark"), style: .plain, target: self, action: #selector(toggleSelectionMode))
         return button
     }()
-    
+
     internal lazy var rangeSwitchItem: UIBarButtonItem = {
         let button = UIBarButtonItem(image: UIImage(systemName: "checkmark.seal"), style: .plain, target: self, action: #selector(toggleRangeSelection))
         button.tag = 0 // 0: 未选中, 1: 选中
         return button
     }()
-    
+
     internal lazy var menuBarButton: UIBarButtonItem = {
         let button = UIBarButtonItem(image: UIImage(systemName: "ellipsis"), style: .plain, target: nil, action: nil)
         button.menu = createOperationMenu()
@@ -75,7 +75,7 @@ class BasePhotoViewController: UIViewController {
         )
         return button
     }()
-    
+
     internal lazy var undoBarButton: UIBarButtonItem = {
         let button = UIBarButtonItem(
             image: UIImage(systemName: "arrow.uturn.left"),
@@ -86,7 +86,7 @@ class BasePhotoViewController: UIViewController {
         button.isEnabled = false
         return button
     }()
-    
+
     internal lazy var redoBarButton: UIBarButtonItem = {
         let button = UIBarButtonItem(
             image: UIImage(systemName: "arrow.uturn.right"),
@@ -97,15 +97,15 @@ class BasePhotoViewController: UIViewController {
         button.isEnabled = false
         return button
     }()
-    
+
     private lazy var fetchOptions: PHFetchOptions = {
         let options = PHFetchOptions()
-        options.sortDescriptors = sortDescriptors(for: sortPreference)
+        options.sortDescriptors = sortPreference.sortDescriptors
         return options
     }()
-    
+
     internal let collection: PHAssetCollection
-    internal var sortPreference: PhotoSortPreference = .albumCustom
+    internal var sortPreference: PhotoSortPreference = .custom
 
     /// 是否支持层级编号功能。首页（图库）不支持，相册内支持。
     internal var supportsHierarchyNumbering: Bool { true }
@@ -133,49 +133,50 @@ class BasePhotoViewController: UIViewController {
             updateOperationMenu()
         }
     }
-    
+
     private var lastContentOffsetY: CGFloat = 0
     private var isSearchBarVisible = false
     private var searchTextFieldTopConstraint: NSLayoutConstraint!
     private let backgroundGradientLayer = CAGradientLayer()
-    
+
     init(collection: PHAssetCollection) {
         self.collection = collection
         super.init(nibName: nil, bundle: nil)
     }
-    
+
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
     }
-    
+
     override func viewDidLoad() {
         super.viewDidLoad()
         title = collection.localizedTitle
-        
+
         // 禁用大标题模式
         navigationItem.largeTitleDisplayMode = .never
-        
+
         // 允许视图内容延伸到四周
         extendedLayoutIncludesOpaqueBars = true
         edgesForExtendedLayout = .all
 
         setupUI()
         setupTraitChangeObserver()
-        
+
         // 进入相册时从 UserDefaults 加载到内存；之后每次改编号默认仍会写回（批量操作用 batch 合并写入）
         PhotoNumberingService.shared.loadForCollection(collection)
+        PhotoOrder.loadForCollection(collection)
         PhotoHeaderService.shared.loadForCollection(collection)
-        
+
         // 同步初始排序偏好到 PhotoGridView
         gridView.sortPreference = sortPreference
         // 设置当前相册引用与层级支持（必须在loadPhoto之前设置）
         gridView.currentCollection = collection
         gridView.supportsHierarchyNumbering = supportsHierarchyNumbering
-        
+
         loadPhoto()
         setupUndoManager()
     }
-    
+
     private func setupUI() {
         // 配置渐变背景
         let lightColors: [CGColor] = [
@@ -192,53 +193,53 @@ class BasePhotoViewController: UIViewController {
         backgroundGradientLayer.colors = isDark ? darkColors : lightColors
         backgroundGradientLayer.locations = [0.0, 0.45, 1.0]
         view.layer.insertSublayer(backgroundGradientLayer, at: 0)
-        
+
         view.addSubview(gridView)
         view.addSubview(searchTextField)
         searchTextField.isHidden = true
         view.addSubview(segmentControl)
         segmentControl.isHidden = true
-        
+
         // 创建搜索条的顶部约束
         searchTextFieldTopConstraint = searchTextField.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 8)
-        
+
         NSLayoutConstraint.activate([
             searchTextFieldTopConstraint,
             searchTextField.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
             searchTextField.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
             searchTextField.heightAnchor.constraint(equalToConstant: 44),
-            
+
             // 设置segmentControl约束
             segmentControl.topAnchor.constraint(equalTo: view.safeAreaLayoutGuide.topAnchor, constant: 6),
             segmentControl.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
             segmentControl.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
-            
+
             gridView.topAnchor.constraint(equalTo: view.topAnchor),
             gridView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             gridView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             gridView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
         ])
-        
+
         // 初始状态下的按钮顺序
         navigationItem.setRightBarButtonItems([selectBarButton, menuBarButton], animated: true)
 
         // 设置 gridView 的滚动委托
         gridView.scrollDelegate = self
     }
-    
+
     private func setupUndoManager() {
         // 仅在操作后显式调用 updateUndoRedoButtons 即可，不需要定时器轮询
     }
-    
+
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         // 更新渐变层的frame
         backgroundGradientLayer.frame = view.bounds
     }
-    
+
     /// 注册trait变化监听
     private var traitChangeToken: UITraitChangeRegistration?
-    
+
     /// 设置trait变化监听
     private func setupTraitChangeObserver() {
         traitChangeToken = registerForTraitChanges([UITraitUserInterfaceStyle.self]) { (self: BasePhotoViewController, previousTraitCollection: UITraitCollection) in
@@ -257,33 +258,48 @@ class BasePhotoViewController: UIViewController {
             self.backgroundGradientLayer.colors = isDark ? darkColors : lightColors
         }
     }
-    
+
     override func viewWillDisappear(_ animated: Bool) {
         super.viewWillDisappear(animated)
         // 离开相册时将数据持久化到 UserDefaults
         PhotoNumberingService.shared.saveForCollection(collection)
+        PhotoOrder.saveForCollection(collection)
         PhotoHeaderService.shared.saveForCollection(collection)
     }
 
     deinit {
         // 系统会自动处理trait变化注册的清理
     }
-    
+
     internal func updateUndoRedoButtons() {
         undoBarButton.isEnabled = canUndo
         redoBarButton.isEnabled = canRedo
     }
-    
+
     @objc internal func undoAction() {
         guard let action = UndoManagerService.shared.undo() else { return }
-        
+
         let loadingAlert = UIAlertController(title: "撤销中", message: "正在撤销操作...", preferredStyle: .alert)
         present(loadingAlert, animated: true)
-        
+
         PhotoChangesService.undo(action) { [weak self] success, error in
             guard let self = self else { return }
             loadingAlert.dismiss(animated: true) {
                 if success {
+                    if case .sort(_, let originalAssets, _) = action.type {
+                        PhotoOrder.set(order: originalAssets, for: self.collection)
+                    } else if case .delete(_, let assets) = action.type {
+                        var restored = self.assets
+                        restored.append(contentsOf: assets)
+                        PhotoOrder.set(order: restored, for: self.collection)
+                    } else if case .move(let sourceCollection, _, let assets) = action.type, sourceCollection.localIdentifier == self.collection.localIdentifier {
+                        var restored = self.assets
+                        restored.append(contentsOf: assets)
+                        PhotoOrder.set(order: restored, for: self.collection)
+                    } else if case .paste(let assets, let destinationCollection, _) = action.type, destinationCollection.localIdentifier == self.collection.localIdentifier {
+                        let remaining = self.assets.filter { !Set(assets.map(\.localIdentifier)).contains($0.localIdentifier) }
+                        PhotoOrder.set(order: remaining, for: self.collection)
+                    }
                     self.loadPhoto()
                 }
                 // 撤销失败不提示，仅更新按钮状态
@@ -291,18 +307,32 @@ class BasePhotoViewController: UIViewController {
             }
         }
     }
-    
+
     @objc internal func redoAction() {
         guard let action = UndoManagerService.shared.redo() else { return }
-        
+
         // 对于重做操作，我们需要执行原始操作而不是撤销操作
         let loadingAlert = UIAlertController(title: "重做中", message: "正在重做操作...", preferredStyle: .alert)
         present(loadingAlert, animated: true)
-        
+
         PhotoChangesService.redo(action) { [weak self] success, error in
             guard let self = self else { return }
             loadingAlert.dismiss(animated: true) {
                 if success {
+                    if case .sort(_, _, let sortedAssets) = action.type {
+                        PhotoOrder.set(order: sortedAssets, for: self.collection)
+                    } else if case .delete(_, let assets) = action.type {
+                        let remaining = self.assets.filter { !Set(assets.map(\.localIdentifier)).contains($0.localIdentifier) }
+                        PhotoOrder.set(order: remaining, for: self.collection)
+                    } else if case .move(let sourceCollection, _, let assets) = action.type, sourceCollection.localIdentifier == self.collection.localIdentifier {
+                        let remaining = self.assets.filter { !Set(assets.map(\.localIdentifier)).contains($0.localIdentifier) }
+                        PhotoOrder.set(order: remaining, for: self.collection)
+                    } else if case .paste(let assets, let destinationCollection, let insertIndex) = action.type, destinationCollection.localIdentifier == self.collection.localIdentifier {
+                        var newOrder = self.assets
+                        let clampedIndex = min(insertIndex, newOrder.count)
+                        newOrder.insert(contentsOf: assets, at: clampedIndex)
+                        PhotoOrder.set(order: newOrder, for: self.collection)
+                    }
                     self.loadPhoto()
                 } else {
                     self.showAlert(title: "重做失败", message: error ?? "无法重做操作")
@@ -312,54 +342,67 @@ class BasePhotoViewController: UIViewController {
             }
         }
     }
-    
-    /// 与 `onChanged` 一致：在除菜单切换外的路径修改了 `sortPreference` 后，必须刷新否则 `loadPhoto` 仍按旧排序描述拉取。
-    private func syncFetchOptionsWithSortPreference() {
-        let options = PHFetchOptions()
-        options.sortDescriptors = sortDescriptors(for: sortPreference)
-        fetchOptions = options
-    }
 
     internal func loadPhoto() {
         // 在后台线程执行耗时操作，避免阻塞主线程造成卡顿
         let collection = self.collection
         let options = self.fetchOptions
-        
+        let preference = self.sortPreference
+
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
-            
+
             let assets = PHAsset.fetchAssets(in: collection, options: options)
             var newAssets: [PHAsset] = []
             assets.enumerateObjects { asset, _, _ in
                 newAssets.append(asset)
             }
-            
+
+            // 检查是否有自定义排序数据，如果没有则创建默认的
+            let customOrder = PhotoOrder.order(for: collection)
+            if customOrder.isEmpty && !newAssets.isEmpty {
+                print("📝 初始化自定义排序数据")
+                PhotoOrder.set(order: newAssets, for: collection)
+            }
+
+            // 如果是自定义排序，应用自定义排序
+            if preference == .custom {
+                newAssets = PhotoOrder.apply(to: newAssets, for: collection)
+            }
+
             let validAssetIDs = Set(newAssets.map { $0.localIdentifier })
-            PhotoNumberingService.shared.cleanupInvalidNodes(validAssetIDs: validAssetIDs, orderedAssets: newAssets, for: collection)
-            
+            PhotoNumberingService.shared.cleanupInvalidNodes(validAssetIDs: validAssetIDs, for: collection)
+
             DispatchQueue.main.async {
                 self.assets = newAssets
             }
         }
     }
-    
+
     internal func onChanged(sort preference: PhotoSortPreference) {
         self.sortPreference = preference
-        syncFetchOptionsWithSortPreference()
-        
+
+        let options = PHFetchOptions()
+        options.sortDescriptors = preference.sortDescriptors
+        fetchOptions = options
+
         let collection = self.collection
-        let options = self.fetchOptions
-        
+
         // 在后台线程执行耗时操作，避免切换排序时卡顿
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
-            
+
             let assets = PHAsset.fetchAssets(in: collection, options: options)
             var newAssets: [PHAsset] = []
             assets.enumerateObjects { asset, _, _ in
                 newAssets.append(asset)
             }
-            
+
+            // 如果是自定义排序，应用自定义排序
+            if preference == .custom {
+                newAssets = PhotoOrder.apply(to: newAssets, for: collection)
+            }
+
             DispatchQueue.main.async {
                 self.assets = newAssets
                 self.gridView.sortPreference = preference
@@ -375,35 +418,33 @@ class BasePhotoViewController: UIViewController {
             let originalAssets = self.assets
             let sortedAssets = try gridView.sort()
             self.assets = sortedAssets
-            
+
             let loadingAlert = UIAlertController(title: "同步中", message: "正在将照片顺序同步到系统相册...", preferredStyle: .alert)
             present(loadingAlert, animated: true)
-            
+
             PhotoChangesService.sync(sortedAssets: sortedAssets, for: self.collection) { [weak self] success, message in
                 guard let self = self else { return }
                 let duration = Date().timeIntervalSince(start)
                 loadingAlert.dismiss(animated: true) {
                     if success {
+                        // 保存自定义排序数据到 UserDefaults
+                        PhotoOrder.set(order: sortedAssets, for: self.collection)
+
                         // 排序后必须切换到自定义排序模式，否则再次进入相册会按日期加载丢失顺序
-                        if self.sortPreference != .albumCustom {
-                            self.sortPreference = .albumCustom
-                            self.gridView.sortPreference = .albumCustom
-                            PhotoSortPreference.albumCustom.set(preference: self.collection)
+                        if self.sortPreference != .custom {
+                            self.sortPreference = .custom
+                            self.gridView.sortPreference = .custom
+                            PhotoSortPreference.custom.set(preference: self.collection)
                             self.updateOperationMenu()
                         }
-                        // 关键：否则 fetchOptions 仍保留「按日期」描述符，loadPhoto 会按日期重排覆盖刚同步的顺序
-                        self.syncFetchOptionsWithSortPreference()
-                        
+
                         // 记录撤销操作
                         let undoAction = UndoAction.sort(collection: self.collection, originalAssets: originalAssets, sortedAssets: sortedAssets)
                         self.addAction(undoAction)
-                        // 以系统相册顺序回读，确保与系统完全一致
-                        self.loadPhoto()
-                        
+
 //                        let message = "排序耗时: \(String(format: "%.2f", duration))秒"
 //                        self.syncSuccess(message: message)
                     } else {
-                        self.loadPhoto()
 //                        let message = "无法同步照片顺序到系统相册：\(message ?? "")"
 //                        self.syncFailed(message: message)
                     }
@@ -416,7 +457,7 @@ class BasePhotoViewController: UIViewController {
             showAlert(title: "排序失败", message: error.localizedDescription)
         }
     }
-    
+
     internal func onCopy() {
         AssetPasteboard.copyAssets(gridView.selectedAssets) { [weak self] success, message in
             guard let self = self else { return }
@@ -426,17 +467,17 @@ class BasePhotoViewController: UIViewController {
             }
         }
     }
-    
+
     internal func onDuplicate() {
         let selectedAssets = gridView.selectedAssets
         guard !selectedAssets.isEmpty else {
             showAlert(title: "复制失败", message: "请先选择要复制的照片")
             return
         }
-        
+
         let loadingAlert = UIAlertController(title: "复制中", message: "正在创建照片副本...", preferredStyle: .alert)
         present(loadingAlert, animated: true)
-        
+
         PhotoChangesService.duplicate(assets: selectedAssets, to: self.collection) { [weak self] success, message in
             guard let self = self else { return }
             loadingAlert.dismiss(animated: true) {
@@ -451,7 +492,7 @@ class BasePhotoViewController: UIViewController {
             }
         }
     }
-    
+
     internal func onPaste() {
         guard let assets = AssetPasteboard.assetsFromPasteboard() else {
             showAlert(title: "粘贴失败", message: "剪切板里没有资源")
@@ -469,28 +510,28 @@ class BasePhotoViewController: UIViewController {
             }
         }
     }
-    
+
     internal func onDelete() {
         let selectedAssets = gridView.selectedAssets
         guard !selectedAssets.isEmpty else {
             showAlert(title: "删除失败", message: "请先选择要删除的照片")
             return
         }
-        
+
         showDeleteConfirmationAlert(for: selectedAssets)
     }
-    
+
     internal func onMove() {
         let selectedAssets = gridView.selectedAssets
         guard !selectedAssets.isEmpty else {
             showAlert(title: "移动失败", message: "请先选择要移动的照片")
             return
         }
-        
+
         // 显示相册选择器
         showAlbumPicker(for: selectedAssets)
     }
-    
+
     internal func showAddToAlbumPicker(for assets: [PHAsset]) {
         guard !assets.isEmpty else {
             showAlert(title: "添加失败", message: "请先选择要添加的照片")
@@ -504,23 +545,23 @@ class BasePhotoViewController: UIViewController {
         nav.modalPresentationStyle = .formSheet
         present(nav, animated: true)
     }
-    
+
     internal func performAdd(assets: [PHAsset], to destinationCollection: PHAssetCollection) {
         let existingAssets = PHAsset.fetchAssets(in: destinationCollection, options: nil)
         var existingAssetIDs = Set<String>()
         existingAssets.enumerateObjects { asset, _, _ in
             existingAssetIDs.insert(asset.localIdentifier)
         }
-        
+
         let assetsToAdd = assets.filter { !existingAssetIDs.contains($0.localIdentifier) }
         if assetsToAdd.isEmpty {
             showAlert(title: "提示", message: "所选照片已在目标相簿中")
             return
         }
-        
+
         let loadingAlert = UIAlertController(title: "添加中", message: "正在添加到相簿...", preferredStyle: .alert)
         present(loadingAlert, animated: true)
-        
+
         PHPhotoLibrary.shared().performChanges({
             guard let request = PHAssetCollectionChangeRequest(for: destinationCollection) else { return }
             request.addAssets(assetsToAdd as NSArray)
@@ -537,58 +578,62 @@ class BasePhotoViewController: UIViewController {
             }
         })
     }
-    
+
     internal func showAlbumPicker(for assets: [PHAsset]) {
         // 获取所有用户创建的相册
         let options = PHFetchOptions()
         options.sortDescriptors = [NSSortDescriptor(key: "localizedTitle", ascending: true)]
-        
+
         let collections = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: options)
         var albumList: [PHAssetCollection] = []
-        
+
         collections.enumerateObjects { collection, _, _ in
             // 排除当前相册
             if collection.localIdentifier != self.collection.localIdentifier {
                 albumList.append(collection)
             }
         }
-        
+
         guard !albumList.isEmpty else {
             showAlert(title: "移动失败", message: "没有找到其他相册")
             return
         }
-        
+
         // 创建相册选择动作表
         let alert = UIAlertController(title: "选择目标相册", message: nil, preferredStyle: .actionSheet)
-        
+
         for collection in albumList {
             let action = UIAlertAction(title: collection.localizedTitle ?? "未命名相册", style: .default) { _ in
                 self.performMove(assets: assets, to: collection)
             }
             alert.addAction(action)
         }
-        
+
         alert.addAction(UIAlertAction(title: "取消", style: .cancel, handler: nil))
-        
+
         // iPad适配
         if let popover = alert.popoverPresentationController {
             popover.sourceView = self.view
             popover.sourceRect = CGRect(x: self.view.bounds.midX, y: self.view.bounds.midY, width: 0, height: 0)
         }
-        
+
         present(alert, animated: true)
     }
-    
+
     internal func performMove(assets: [PHAsset], to destinationCollection: PHAssetCollection) {
         let loadingAlert = UIAlertController(title: "移动中", message: "正在将照片移动到其他相册...", preferredStyle: .alert)
         present(loadingAlert, animated: true)
-        
+
         PhotoChangesService.move(assets: assets, from: self.collection, to: destinationCollection) { [weak self] success, error in
             guard let self = self else { return }
             loadingAlert.dismiss(animated: true) {
                 if success {
                     let undoAction = UndoAction.move(sourceCollection: self.collection, destinationCollection: destinationCollection, assets: assets)
                     self.addAction(undoAction)
+                    if self.sortPreference == .custom {
+                        let remaining = self.assets.filter { !Set(assets.map(\.localIdentifier)).contains($0.localIdentifier) }
+                        PhotoOrder.set(order: remaining, for: self.collection)
+                    }
                     self.gridView.clearSelected()
                     self.loadPhoto()
                 } else {
@@ -600,21 +645,21 @@ class BasePhotoViewController: UIViewController {
             }
         }
     }
-    
+
     internal func showDeleteConfirmationAlert(for assets: [PHAsset]) {
         let count = assets.count
         let message = count == 1 ? "确定要从相册中删除这张照片吗？" : "确定要从相册中删除这\(count)张照片吗？"
-        
+
         let alert = UIAlertController(title: "删除照片", message: message, preferredStyle: .alert)
-        
+
         alert.addAction(UIAlertAction(title: "取消", style: .cancel, handler: nil))
         alert.addAction(UIAlertAction(title: "删除", style: .destructive) { [weak self] _ in
             self?.performDelete(assets: assets)
         })
-        
+
         present(alert, animated: true)
     }
-    
+
     internal func performDelete(assets: [PHAsset]) {
         let loadingAlert = UIAlertController(title: "删除中", message: "正在从相册中删除照片...", preferredStyle: .alert)
         present(loadingAlert, animated: true)
@@ -629,6 +674,10 @@ class BasePhotoViewController: UIViewController {
                         let undoAction = UndoAction.delete(collection: self.collection, assets: assets)
                         self.addAction(undoAction)
                     }
+                    if self.sortPreference == .custom {
+                        let remaining = self.assets.filter { !Set(assets.map(\.localIdentifier)).contains($0.localIdentifier) }
+                        PhotoOrder.set(order: remaining, for: self.collection)
+                    }
                     self.gridView.clearSelected()
                     self.loadPhoto()
                 } else {
@@ -638,7 +687,7 @@ class BasePhotoViewController: UIViewController {
             }
         }
     }
-    
+
     internal func setSelectionMode(_ mode: PhotoSelectionMode) {
         if mode == .none {
             gridView.clearSelected()
@@ -647,7 +696,7 @@ class BasePhotoViewController: UIViewController {
         }
         selectionMode = mode
     }
-    
+
     /// 切换选择模式：点击进入多选模式，再次点击退出选择模式
     @objc internal func toggleSelectionMode() {
         if selectionMode == .none {
@@ -665,12 +714,12 @@ class BasePhotoViewController: UIViewController {
         }
         updateNavigationBar()
     }
-    
+
     /// 切换范围选择开关
     @objc internal func toggleRangeSelection(forceOff: Bool = false) {
         let isCurrentlyOn = rangeSwitchItem.tag == 1
         let shouldTurnOn = !isCurrentlyOn && !forceOff
-        
+
         if shouldTurnOn {
             // 打开范围选择
             rangeSwitchItem.image = UIImage(systemName: "checkmark.seal.fill")
@@ -685,21 +734,21 @@ class BasePhotoViewController: UIViewController {
             }
         }
     }
-    
+
     /// 全选所有资产
     @objc internal func selectAllAssets() {
         gridView.selectAll()
         // 更新按钮状态
         updateSelectAllButton()
     }
-    
+
     /// 取消全选所有资产
     @objc internal func deselectAllAssets() {
         gridView.clearSelected()
         // 更新按钮状态
         updateSelectAllButton()
     }
-    
+
     internal func updateNavigationBar() {
         // 根据选择模式更新按钮状态
         if selectionMode == .none {
@@ -714,7 +763,7 @@ class BasePhotoViewController: UIViewController {
             updateSelectAllButton()
         }
     }
-    
+
     /// 更新全选/取消全选按钮的显示状态
     internal func updateSelectAllButton() {
         let isAllSelected = isAllAssetsSelected()
@@ -726,64 +775,59 @@ class BasePhotoViewController: UIViewController {
             navigationItem.setLeftBarButtonItems([selectAllBarButton], animated: true)
         }
     }
-    
+
     /// 检查是否所有可见资产都已被选中
     internal func isAllAssetsSelected() -> Bool {
         gridView.selectedAssetCount == gridView.allAssets.count && !gridView.allAssets.isEmpty
     }
-    
+
     // MARK: - Undo Manager Helper Methods
-    
+
     internal func addAction(_ action: UndoAction) {
         UndoManagerService.shared.addUndoAction(action)
     }
-    
+
     internal var canUndo: Bool {
         return UndoManagerService.shared.canUndo
     }
-    
+
     internal var canRedo: Bool {
         return UndoManagerService.shared.canRedo
     }
 
-    /// 允许子类针对同一排序偏好覆盖底层 fetch 的排序描述符。
-    internal func sortDescriptors(for preference: PhotoSortPreference) -> [NSSortDescriptor]? {
-        preference.sortDescriptors
-    }
-    
     // MARK: - Menu Creation Methods
-    
+
     internal func createSortMenu() -> UIMenu {
         let creationDateAction = UIAction(
             title: "按最旧的排最前排序",
             image: UIImage(systemName: "camera"),
-            state: sortPreference == .albumOldestFirst ? .on : .off
+            state: sortPreference == .creationDate ? .on : .off
         ) { [unowned self] _ in
-            self.onChanged(sort: .albumOldestFirst)
+            self.onChanged(sort: .creationDate)
         }
-        
+
         let modificationDateAction = UIAction(
             title: "按最新的排最前排序",
             image: UIImage(systemName: "clock"),
-            state: sortPreference == .albumNewestFirst ? .on : .off
+            state: sortPreference == .recentDate ? .on : .off
         ) { [weak self] _ in
-            self?.onChanged(sort: .albumNewestFirst)
+            self?.onChanged(sort: .recentDate)
         }
-        
+
         let customAction = UIAction(
             title: "按自定义排序",
             image: UIImage(systemName: "hand.draw"),
-            state: sortPreference == .albumCustom ? .on : .off
+            state: sortPreference == .custom ? .on : .off
         ) { [weak self] _ in
-            self?.onChanged(sort: .albumCustom)
+            self?.onChanged(sort: .custom)
         }
-        
+
         return UIMenu(
             title: "排序方式",
             children: [customAction, modificationDateAction, creationDateAction]
         )
     }
-    
+
     internal func createOperationMenu() -> UIMenu {
         let attributes: UIMenuElement.Attributes = gridView.hasSelectedAssets ? [] : .disabled
         var menuChildren: [UIMenuElement] = []
@@ -797,37 +841,37 @@ class BasePhotoViewController: UIViewController {
         let addToAlbum = UIAction(title: "添加到相簿", image: UIImage(systemName: "plus.rectangle.on.folder"), attributes: attributes) { [weak self] _ in
             self?.onAddToAlbumSelectedAssets()
         }
-        
+
         let copy = UIAction(title: "拷贝", image: UIImage(systemName: "doc.on.doc"), attributes: attributes) { [weak self] _ in
             self?.onCopy()
         }
-        
+
         let duplicate = UIAction(title: "复制", image: UIImage(systemName: "doc.on.doc.fill"), attributes: attributes) { [weak self] _ in
             self?.onDuplicate()
         }
-        
+
         let paste = UIAction(title: "粘贴", image: UIImage(systemName: "doc.on.clipboard")) { [weak self] _ in
             self?.onPaste()
         }
-        
+
         let sort = UIAction(title: "排序", image: UIImage(systemName: "arrow.up.arrow.down"), attributes: attributes) { [weak self] _ in
             self?.onOrder()
         }
-        
+
         let delete = UIAction(title: "删除", image: UIImage(systemName: "trash"), attributes: [attributes, .destructive].compactMap { $0 }.reduce([], { $0.union($1) })) { [weak self] _ in
             self?.onDelete()
         }
-        
+
         let move = UIAction(title: "剪切", image: UIImage(systemName: "scissors"), attributes: attributes) { [weak self] _ in
             self?.onMove()
         }
-        
+
         let tagAction = UIAction(title: "添加标签", image: UIImage(systemName: "tag"), attributes: attributes) { [weak self] _ in
             self?.onTagSelectedAssets()
         }
 
         menuChildren = [undoAction, redoAction, addToAlbum, tagAction]
-        if sortPreference == .albumCustom, supportsHierarchyNumbering {
+        if sortPreference == .custom, supportsHierarchyNumbering {
             menuChildren.append(createHierarchyMenu(attributes: attributes))
         }
         menuChildren += [delete, move, paste, copy, duplicate, sort]
@@ -837,22 +881,22 @@ class BasePhotoViewController: UIViewController {
     internal func createHierarchyMenu(attributes: UIMenuElement.Attributes) -> UIMenu {
         let selected = orderedSelectedAssets()
         guard !selected.isEmpty else { return UIMenu(title: "层级", children: []) }
-        
+
         let firstAsset = selected[0]
         let prevLv = getPreviousLevel(for: firstAsset)
         let anyInHierarchy = selected.contains { PhotoNumberingService.shared.level(for: $0, in: collection) > 0 }
-        
+
         // 升级选项：存在不仅是主级(Level 1)的已编号项
         let anyCanUp = selected.contains { PhotoNumberingService.shared.level(for: $0, in: collection) > 1 }
-        
+
         var children: [UIMenuElement] = []
-        
+
         // 1. 设置主级 (Root)
         let setMain = UIAction(title: "批量设为主级", image: UIImage(systemName: "list.number"), attributes: attributes) { [weak self] _ in
             self?.onBatchSetLevel(to: 1)
         }
         children.append(setMain)
-        
+
         // 2. 提升/下降 (缩进平移)
         if anyCanUp {
             let promote = UIAction(title: "批量提升层级", image: UIImage(systemName: "arrow.left"), attributes: attributes) { [weak self] _ in
@@ -860,7 +904,7 @@ class BasePhotoViewController: UIViewController {
             }
             children.append(promote)
         }
-        
+
         // 下降条件：第一个选中的节点深度不能超过上方参考节点 + 1
         let firstLv = PhotoNumberingService.shared.level(for: firstAsset, in: collection)
         if firstLv < prevLv + 1 {
@@ -869,20 +913,20 @@ class BasePhotoViewController: UIViewController {
             }
             children.append(demote)
         }
-        
+
         // 3. 上下文相关：设为同级/子级
         if prevLv > 0 {
             let setSame = UIAction(title: "批量设为同级", image: UIImage(systemName: "arrow.right.to.line"), attributes: attributes) { [weak self] _ in
                 self?.onBatchSetLevel(to: prevLv)
             }
             children.append(setSame)
-            
+
             let setSub = UIAction(title: "批量设为子级", image: UIImage(systemName: "list.bullet.indent"), attributes: attributes) { [weak self] _ in
                 self?.onBatchSetLevel(to: prevLv + 1)
             }
             children.append(setSub)
         }
-        
+
         // 4. 清除
         if anyInHierarchy {
             let clearAction = UIAction(title: "批量取消编号", image: UIImage(systemName: "xmark.circle"), attributes: attributes.union(.destructive)) { [weak self] _ in
@@ -890,25 +934,25 @@ class BasePhotoViewController: UIViewController {
             }
             children.append(clearAction)
         }
-        
+
         return UIMenu(title: "层级操作", children: children)
     }
-    
+
     internal func updateOperationMenu() {
         menuBarButton.menu = createOperationMenu()
     }
-    
+
     internal func onAddPhotos() {
         var configuration = PHPickerConfiguration(photoLibrary: .shared())
         configuration.filter = .images
         configuration.selectionLimit = 0
         configuration.selection = .ordered
-        
+
         let picker = PHPickerViewController(configuration: configuration)
         picker.delegate = self
         present(picker, animated: true)
     }
-    
+
     internal func onAddToAlbumSelectedAssets() {
         let selectedAssets = gridView.selectedAssets
         guard !selectedAssets.isEmpty else {
@@ -979,7 +1023,7 @@ class BasePhotoViewController: UIViewController {
 
         for asset in orderedSelected {
             if processedIDs.contains(asset.localIdentifier) { continue }
-            
+
             let current = PhotoNumberingService.shared.level(for: asset, in: collection)
             if current == 0 {
                 // 无层级 → 1（设为主级）
@@ -1009,7 +1053,7 @@ class BasePhotoViewController: UIViewController {
 
         for asset in orderedSelected {
             if processedIDs.contains(asset.localIdentifier) { continue }
-            
+
             let current = PhotoNumberingService.shared.level(for: asset, in: collection)
             if current == 0 {
                 // 如果当前没有层级，则进入层级。
@@ -1031,22 +1075,22 @@ class BasePhotoViewController: UIViewController {
     private func shiftLevelCascading(asset: PHAsset, delta: Int, processedIDs: inout Set<String>, idToIndex: [String: Int]) {
         let oldLevel = PhotoNumberingService.shared.level(for: asset, in: collection)
         guard oldLevel > 0 else { return }
-        
+
         let newLevel = max(1, oldLevel + delta)
         PhotoNumberingService.shared.setLevel(newLevel, for: asset, in: collection)
         processedIDs.insert(asset.localIdentifier)
-        
+
         guard let idx = idToIndex[asset.localIdentifier] else { return }
         for i in (idx + 1)..<assets.count {
             let next = assets[i]
             let nextLevel = PhotoNumberingService.shared.level(for: next, in: collection)
-            
+
             // 遇到无层级、同层或更浅层级时，表示已经跳出了当前子树，终止
             if nextLevel == 0 || nextLevel <= oldLevel { break }
-            
+
             let targetNextLevel = max(1, nextLevel + delta)
             PhotoNumberingService.shared.setLevel(targetNextLevel, for: next, in: collection)
-            
+
             // 标记为已处理
             processedIDs.insert(next.localIdentifier)
         }
@@ -1075,9 +1119,9 @@ class BasePhotoViewController: UIViewController {
         let myLevel = PhotoNumberingService.shared.level(for: asset, in: collection)
         PhotoNumberingService.shared.clearLevel(for: asset, in: collection)
         processedIDs.insert(asset.localIdentifier)
-        
+
         guard myLevel > 0, let idx = idToIndex[asset.localIdentifier] else { return }
-        
+
         for i in (idx + 1)..<assets.count {
             let child = assets[i]
             let childLevel = PhotoNumberingService.shared.level(for: child, in: collection)
@@ -1092,25 +1136,25 @@ class BasePhotoViewController: UIViewController {
         guard !selectedIDs.isEmpty else { return [] }
         return assets.filter { selectedIDs.contains($0.localIdentifier) }
     }
-    
+
     internal func syncSuccess(message: String) {
         showAlert(title: "同步成功", message: message)
     }
-    
+
     internal func syncFailed(message: String) {
         showAlert(title: "同步失败", message: message)
     }
-    
+
     // MARK: - Helper Methods
-    
+
     internal func showAlert(title: String, message: String) {
         let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
         alert.addAction(UIAlertAction(title: "确定", style: .default))
         present(alert, animated: true)
     }
-    
+
     // MARK: - Search Methods
-    
+
     internal func performSearch(with text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespaces)
 
@@ -1193,40 +1237,40 @@ extension BasePhotoViewController: PHPickerViewControllerDelegate {
             self?.addPickedPhotosToCurrentAlbum(results)
         }
     }
-    
+
     private func addPickedPhotosToCurrentAlbum(_ results: [PHPickerResult]) {
         let selectedIdentifiers = results.compactMap { $0.assetIdentifier }
         guard !selectedIdentifiers.isEmpty else { return }
-        
+
         let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: selectedIdentifiers, options: nil)
         var selectedAssets: [PHAsset] = []
         fetchResult.enumerateObjects { asset, _, _ in
             selectedAssets.append(asset)
         }
         guard !selectedAssets.isEmpty else { return }
-        
+
         let existingAssets = PHAsset.fetchAssets(in: collection, options: nil)
         var existingIDs = Set<String>()
         existingAssets.enumerateObjects { asset, _, _ in
             existingIDs.insert(asset.localIdentifier)
         }
-        
+
         let assetsToAdd = selectedAssets.filter { !existingIDs.contains($0.localIdentifier) }
         if assetsToAdd.isEmpty {
             showAlert(title: "提示", message: "所选照片已在该相簿中")
             return
         }
-        
+
         ensureReadWritePermission { [weak self] granted in
             guard let self = self else { return }
             guard granted else {
                 self.showAlert(title: "权限不足", message: "请允许照片读写权限后重试")
                 return
             }
-            
+
             let loadingAlert = UIAlertController(title: "添加中", message: "正在将照片添加到相簿...", preferredStyle: .alert)
             self.present(loadingAlert, animated: true)
-            
+
             var finished = false
             let finish: (String, String, Bool) -> Void = { title, message, shouldReload in
                 guard !finished else { return }
@@ -1240,11 +1284,11 @@ extension BasePhotoViewController: PHPickerViewControllerDelegate {
                     }
                 }
             }
-            
+
             DispatchQueue.main.asyncAfter(deadline: .now() + 15) {
                 finish("添加失败", "操作超时，请稍后重试", false)
             }
-            
+
             PHPhotoLibrary.shared().performChanges({
                 guard let request = PHAssetCollectionChangeRequest(for: self.collection) else { return }
                 request.addAssets(assetsToAdd as NSArray)
@@ -1259,7 +1303,7 @@ extension BasePhotoViewController: PHPickerViewControllerDelegate {
             })
         }
     }
-    
+
     private func ensureReadWritePermission(_ completion: @escaping (Bool) -> Void) {
         let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
         switch status {
@@ -1283,7 +1327,7 @@ extension BasePhotoViewController: PhotoGridViewDelegate {
     @objc(photoGridView:didSelectItemAtIndexPath:) internal func photoGridView(_ photoGridView: PhotoGridView, didSelectItemAt indexPath: IndexPath) {
         updateOperationMenu()
     }
-    
+
     @objc(photoGridView:didSelectItemAtAsset:) internal func photoGridView(_ photoGridView: PhotoGridView, didSelectItemAt asset: PHAsset) {
         // 打开图片浏览器
         if selectionMode == .none {
@@ -1291,22 +1335,22 @@ extension BasePhotoViewController: PhotoGridViewDelegate {
                 // 获取选中图片的帧和图片
                 var sourceFrame: CGRect = .zero
                 var sourceImage: UIImage? = nil
-                
+
                 // 尝试获取选中的cell的frame
                 if let cellFrame = photoGridView.getCellFrame(for: asset) {
                     sourceFrame = view.convert(cellFrame, from: photoGridView)
                 }
-                
+
                 // 尝试获取缩略图
                 let options = PHImageRequestOptions()
                 options.isSynchronous = true
                 options.deliveryMode = .highQualityFormat
                 options.isNetworkAccessAllowed = true
-                
+
                 PHImageManager.default().requestImage(for: asset, targetSize: CGSize(width: 300, height: 300), contentMode: .aspectFill, options: options) { (image, _) in
                     sourceImage = image
                 }
-                
+
                 let nav = GalleryViewerViewController.makePresentingNavigationContainer(
                     assets: self.assets,
                     initialIndex: index,
@@ -1317,11 +1361,11 @@ extension BasePhotoViewController: PhotoGridViewDelegate {
             }
         }
     }
-    
+
     @objc internal func photoGridView(_ photoGridView: PhotoGridView, didDeselectItemAt indexPath: IndexPath) {
         updateOperationMenu()
     }
-    
+
     @objc internal func photoGridView(_ photoGridView: PhotoGridView, didSelectedItems assets: [PHAsset]) {
         DispatchQueue.main.async { [weak self] in
             guard let self else { return }
@@ -1332,7 +1376,7 @@ extension BasePhotoViewController: PhotoGridViewDelegate {
             }
         }
     }
-    
+
     @objc internal func photoGridView(_ photoGridView: PhotoGridView, didSetAnchor asset: PHAsset) {
         updateOperationMenu()
     }
@@ -1350,12 +1394,19 @@ extension BasePhotoViewController: PhotoGridViewDelegate {
             showAlert(title: "粘贴失败", message: "无法找到目标照片")
             return
         }
-        
+
         let insertIndex = index + 1
-        
+
         let loadingAlert = UIAlertController(title: "粘贴中", message: "正在粘贴照片...", preferredStyle: .alert)
         present(loadingAlert, animated: true)
-        
+
+        // 先更新本地数据和自定义排序
+        var newAssets = self.assets
+        newAssets.insert(contentsOf: assets, at: insertIndex)
+
+        // 立即更新自定义排序数据
+        PhotoOrder.set(order: newAssets, for: self.collection)
+
         // 提交到系统相册
         PHPhotoLibrary.shared().performChanges({
             guard let changeRequest = PHAssetCollectionChangeRequest(for: self.collection) else {
@@ -1365,28 +1416,36 @@ extension BasePhotoViewController: PhotoGridViewDelegate {
         }, completionHandler: { [weak self] success, error in
             DispatchQueue.main.async {
                 loadingAlert.dismiss(animated: true)
-                
+
                 guard let self = self else { return }
-                
+
                 if success {
-                    // 重要：粘贴后切到自定义排序，并先刷新 fetch 选项再回读，否则仍按旧排序拉相册
-                    if self.sortPreference != .albumCustom {
-                        self.sortPreference = .albumCustom
-                        self.gridView.sortPreference = .albumCustom
-                        PhotoSortPreference.albumCustom.set(preference: self.collection)
-                    }
-                    self.syncFetchOptionsWithSortPreference()
-                    self.loadPhoto()
-                    
+                    // 直接使用我们维护的顺序，不重新加载
+                    self.assets = newAssets
+
+                    // 记录撤销操作
                     let undoAction = UndoAction.paste(assets: assets, into: self.collection, at: insertIndex)
                     self.addAction(undoAction)
+
+                    // 清除选中状态
                     self.gridView.clearSelected()
-                    
+
+                    // 重要：粘贴操作后，自动切换到自定义排序模式
+                    if self.sortPreference != .custom {
+                        self.sortPreference = .custom
+                        // 同步排序偏好到 PhotoGridView
+                        self.gridView.sortPreference = .custom
+                        // 保存排序偏好
+                        PhotoSortPreference.custom.set(preference: self.collection)
+                    }
+
                     self.showAlert(title: "粘贴成功", message: "已成功粘贴 \(assets.count) 张照片")
                 } else {
+                    // 失败时回滚自定义排序数据
+                    PhotoOrder.set(order: self.assets, for: self.collection)
                     self.showAlert(title: "粘贴失败", message: error?.localizedDescription ?? "无法粘贴照片")
                 }
-                
+
                 self.updateUndoRedoButtons()
                 self.updateOperationMenu()
             }
@@ -1426,7 +1485,7 @@ extension BasePhotoViewController: UIScrollViewDelegate {
         guard scrollView.isDragging else { return }
         let currentOffsetY = scrollView.contentOffset.y
         let offsetDifference = currentOffsetY - lastContentOffsetY
-        
+
         let shouldShow = offsetDifference > 0 && currentOffsetY > 0
         if shouldShow != isSearchBarVisible {
             isSearchBarVisible = shouldShow
@@ -1438,7 +1497,7 @@ extension BasePhotoViewController: UIScrollViewDelegate {
         }
         lastContentOffsetY = currentOffsetY
     }
-    
+
     private func moveSearchBarToVisible() {
         searchTextField.isHidden = false
         UIView.animate(withDuration: 0.3) {

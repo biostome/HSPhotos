@@ -13,13 +13,10 @@ import Photos
 private let preferenceKeyPrefix = "system_sort_preference_"
 
 enum PhotoSortPreference: String {
-    // 首页（图库）
-    case homeRecentAdded = "homeRecentAdded"
-    case homeCaptureDate = "homeCaptureDate"
-    // 相册内
-    case albumOldestFirst = "albumOldestFirst"
-    case albumNewestFirst = "albumNewestFirst"
-    case albumCustom = "albumCustom"
+    case creationDate = "creationDate"
+    case modificationDate = "modificationDate"
+    case recentDate = "recentDate"
+    case custom = "custom"
 
     /// 首次访问时从 UserDefaults 加载并缓存，后续从内存读取
     func preference(for collection: PHAssetCollection) -> Self {
@@ -28,14 +25,7 @@ enum PhotoSortPreference: String {
             return cached
         }
         let value = UserDefaults.standard.string(forKey: key) ?? rawValue
-        let pref: PhotoSortPreference
-        if let current = PhotoSortPreference(rawValue: value) {
-            pref = current
-        } else {
-            // 兼容历史枚举值，按页面语义自动迁移
-            pref = PhotoSortPreference.mapLegacyPreference(value, for: collection)
-            UserDefaults.standard.set(pref.rawValue, forKey: key)
-        }
+        let pref = PhotoSortPreference(rawValue: value) ?? .custom
         PhotoSortPreference._cache[key] = pref
         return pref
     }
@@ -48,30 +38,18 @@ enum PhotoSortPreference: String {
     }
 
     fileprivate static var _cache: [String: PhotoSortPreference] = [:]
-
-    private static func mapLegacyPreference(_ value: String, for collection: PHAssetCollection) -> PhotoSortPreference {
-        let isHomeCollection = collection.assetCollectionSubtype == .smartAlbumUserLibrary
-        switch value {
-        case "creationDate":
-            return isHomeCollection ? .homeCaptureDate : .albumOldestFirst
-        case "recentDate", "modificationDate":
-            return isHomeCollection ? .homeRecentAdded : .albumNewestFirst
-        case "custom":
-            return isHomeCollection ? .homeRecentAdded : .albumCustom
-        default:
-            return isHomeCollection ? .homeRecentAdded : .albumCustom
-        }
-    }
 }
 
 extension PhotoSortPreference {
     var sortDescriptors: [NSSortDescriptor]? {
         switch self {
-        case .homeCaptureDate, .albumOldestFirst:
+        case .creationDate:
             return [NSSortDescriptor(key: "creationDate", ascending: true)]
-        case .albumNewestFirst:
+        case .recentDate:
             return [NSSortDescriptor(key: "creationDate", ascending: false)]
-        case .homeRecentAdded, .albumCustom:
+        case .modificationDate:
+            return [NSSortDescriptor(key: "modificationDate", ascending: false)]
+        case .custom:
             return nil
         }
     }
