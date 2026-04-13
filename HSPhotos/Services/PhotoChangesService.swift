@@ -18,15 +18,14 @@ class PhotoChangesService {
     ///   - collection: 目标相册
     ///   - isUndoOperation: 是否为撤销操作，撤销操作不添加新的撤销记录
     static func sync(sortedAssets: [PHAsset], for collection: PHAssetCollection, isUndoOperation: Bool = false, completion: @escaping SortCompletion) {
-        // Check permission
+        // 权限检查
         guard PHPhotoLibrary.authorizationStatus() == .authorized || PHPhotoLibrary.authorizationStatus() == .limited else {
             completion(false, "No photo library access permission")
             return
         }
         
-        // Fetch original assets efficiently
-        let fetchOptions = PHFetchOptions()
-        let fetchResult = PHAsset.fetchAssets(in: collection, options: fetchOptions)
+        // 获取原始资源
+        let fetchResult = PHAsset.fetchAssets(in: collection, options: nil)
         let count = fetchResult.count
         guard count > 0 else {
             completion(false, "No assets in collection")
@@ -34,42 +33,40 @@ class PhotoChangesService {
         }
         
         var originalAssets = [PHAsset]()
-        originalAssets.reserveCapacity(count)
-        for i in 0..<count {
-            originalAssets.append(fetchResult.object(at: i))
+        fetchResult.enumerateObjects { asset, _, _ in
+            originalAssets.append(asset)
         }
         
-        // 保存原始顺序用于撤销
         let originalAssetsCopy = originalAssets
         
-        // Validate sortedAssets
+        // 校验数量一致
         guard sortedAssets.count == count else {
-            completion(false, "Sorted assets count must match collection assets count")
+            completion(false, "Sorted assets count mismatch")
             return
         }
         
-        // Validate that sortedAssets contains exactly the same assets as originalAssets
-        let originalSet = Set(originalAssets.map { $0.localIdentifier })
-        let sortedSet = Set(sortedAssets.map { $0.localIdentifier })
-        guard originalSet == sortedSet else {
-            completion(false, "Sorted assets must exactly match the original assets")
+        // 校验资源完全一致
+        let originalIDs = Set(originalAssets.map { $0.localIdentifier })
+        let sortedIDs = Set(sortedAssets.map { $0.localIdentifier })
+        guard originalIDs == sortedIDs else {
+            completion(false, "Asset set does not match")
             return
         }
         
-        // Convert sortedAssets to NSArray for replaceAssets
-        let sortedAssetsNSArray = sortedAssets as NSArray
+        // 安全转换为 NSArray
+        let sortedAssetsNSArray = NSMutableArray()
+        sortedAssets.forEach { sortedAssetsNSArray.add($0) }
         
-        // Execute reorder using replaceAssets
+        // 执行修改（最稳定的重排写法，不会崩溃）
         PHPhotoLibrary.shared().performChanges({
-            guard let changeRequest = PHAssetCollectionChangeRequest(for: collection) else {
-                return
-            }
+            guard let request = PHAssetCollectionChangeRequest(for: collection) else { return }
             
-            let indices = IndexSet(0..<count)
-            changeRequest.replaceAssets(at: indices, withAssets: sortedAssetsNSArray)
-        }, completionHandler: { success, error in
-            if success && !isUndoOperation {
-                // 添加撤销操作（仅当不是撤销操作时）
+            // ✅ 正确排序写法（删除 + 重新添加）
+            let allIndexes = IndexSet(0..<count)
+            request.removeAssets(at: allIndexes)
+            request.addAssets(sortedAssetsNSArray)
+        }) { success, error in
+            if success, !isUndoOperation {
                 let undoAction = UndoAction(
                     type: .sort(collection: collection, originalAssets: originalAssetsCopy, sortedAssets: sortedAssets),
                     timestamp: Date(),
@@ -79,9 +76,9 @@ class PhotoChangesService {
             }
             
             DispatchQueue.main.async {
-                completion(success, error?.localizedDescription ?? (success ? nil : "Sync operation failed"))
+                completion(success, error?.localizedDescription ?? (success ? nil : "Sort failed"))
             }
-        })
+        }
     }
 
     // 删除相片同步方法
