@@ -45,10 +45,18 @@ final class GalleryViewerViewController: UIViewController {
     let topBar = UIView()
     let bottomChromeContainer = UIView()
     let centerCapsule: UIVisualEffectView = {
-        let glass = UIGlassEffect(style: .regular)
-        glass.isInteractive = true
-        let view = UIVisualEffectView(effect: glass)
-        view.cornerConfiguration = .capsule()
+        let view: UIVisualEffectView
+        if #available(iOS 26.0, *) {
+            let glass = UIGlassEffect(style: .regular)
+            glass.isInteractive = true
+            view = UIVisualEffectView(effect: glass)
+            view.cornerConfiguration = .capsule()
+        } else {
+            let blur = UIBlurEffect(style: .systemThinMaterial)
+            view = UIVisualEffectView(effect: blur)
+            view.layer.cornerRadius = 22
+            view.layer.cornerCurve = .continuous
+        }
         view.clipsToBounds = true
         return view
     }()

@@ -6,10 +6,18 @@ final class VideoPlaybackControlsView: UIView {
     let muteButton = UIButton(type: .system)
     private let scrubInfoLabel = UILabel()
     private let glassView: UIVisualEffectView = {
-        let glass = UIGlassEffect(style: .regular)
-        glass.isInteractive = true
-        let v = UIVisualEffectView(effect: glass)
-        v.cornerConfiguration = .capsule()
+        let v: UIVisualEffectView
+        if #available(iOS 26.0, *) {
+            let glass = UIGlassEffect(style: .regular)
+            glass.isInteractive = true
+            v = UIVisualEffectView(effect: glass)
+            v.cornerConfiguration = .capsule()
+        } else {
+            let blur = UIBlurEffect(style: .systemThinMaterial)
+            v = UIVisualEffectView(effect: blur)
+            v.layer.cornerRadius = 22
+            v.layer.cornerCurve = .continuous
+        }
         v.clipsToBounds = true
         v.translatesAutoresizingMaskIntoConstraints = false
         return v
