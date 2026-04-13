@@ -321,8 +321,10 @@ private final class AssetLocationCardView: UIView {
     private let addressLabel = UILabel()
     private let adjustLabel = UILabel()
     private let location: CLLocation
-    private var reverseGeocodeRequest: MKReverseGeocodingRequest?
     private var geocodeToken = UUID()
+    private var legacyGeocoder: CLGeocoder?
+    /// Type-erased storage for MKReverseGeocodingRequest (iOS 26+)
+    private var _storedRequest: AnyObject?
     var onAdjustTapped: (() -> Void)?
 
     init(location: CLLocation) {
@@ -408,23 +410,35 @@ private final class AssetLocationCardView: UIView {
     }
 
     deinit {
-        reverseGeocodeRequest?.cancel()
+        if #available(iOS 26.0, *) {
+            (_storedRequest as? MKReverseGeocodingRequest)?.cancel()
+        }
+        legacyGeocoder?.cancelGeocode()
     }
 
     private func startReverseGeocode() {
         let token = UUID()
         geocodeToken = token
+        if #available(iOS 26.0, *) {
+            startReverseGeocodeModern(token: token)
+        } else {
+            startReverseGeocodeLegacy(token: token)
+        }
+    }
+
+    @available(iOS 26.0, *)
+    private func startReverseGeocodeModern(token: UUID) {
         guard let request = MKReverseGeocodingRequest(location: location) else {
             addressLabel.text = "未知地点"
             return
         }
-        reverseGeocodeRequest = request
+        _storedRequest = request
         request.getMapItems { [weak self] items, _ in
             guard let self else { return }
             DispatchQueue.main.async {
                 guard self.geocodeToken == token else { return }
                 if let item = items?.first {
-                    self.addressLabel.text = Self.format(item: item)
+                    self.addressLabel.text = Self.formatModern(item: item)
                 } else {
                     self.addressLabel.text = "未知地点"
                 }
@@ -432,7 +446,24 @@ private final class AssetLocationCardView: UIView {
         }
     }
 
-    private static func format(item: MKMapItem) -> String {
+    private func startReverseGeocodeLegacy(token: UUID) {
+        let geocoder = CLGeocoder()
+        legacyGeocoder = geocoder
+        geocoder.reverseGeocodeLocation(location) { [weak self] placemarks, _ in
+            guard let self else { return }
+            DispatchQueue.main.async {
+                guard self.geocodeToken == token else { return }
+                if let placemark = placemarks?.first {
+                    self.addressLabel.text = Self.formatLegacy(placemark: placemark)
+                } else {
+                    self.addressLabel.text = "未知地点"
+                }
+            }
+        }
+    }
+
+    @available(iOS 26.0, *)
+    private static func formatModern(item: MKMapItem) -> String {
         var parts: [String] = []
         if let address = item.address?.fullAddress, !address.isEmpty {
             parts.append(address)
@@ -441,6 +472,17 @@ private final class AssetLocationCardView: UIView {
             parts.append(name)
         }
         return parts.isEmpty ? "未知地点" : parts.joined(separator: " ")
+    }
+
+    private static func formatLegacy(placemark: CLPlacemark) -> String {
+        var components: [String] = []
+        if let country = placemark.country { components.append(country) }
+        if let state = placemark.administrativeArea { components.append(state) }
+        if let city = placemark.locality { components.append(city) }
+        if let subLocality = placemark.subLocality { components.append(subLocality) }
+        if let street = placemark.thoroughfare { components.append(street) }
+        if let subStreet = placemark.subThoroughfare { components.append(subStreet) }
+        return components.isEmpty ? "未知地点" : components.joined(separator: " ")
     }
     
     @objc private func handleAdjustTap() {
@@ -907,9 +949,11 @@ final class PhotoAssetInfoSheetViewController: UIViewController {
             return "LIVE"
         }
 
-        let contentType = asset.contentType
-        if let mapped = Self.badgeLabel(for: contentType) {
-            return mapped
+        if #available(iOS 26.0, *) {
+            let contentType = asset.contentType
+            if let mapped = Self.badgeLabel(for: contentType) {
+                return mapped
+            }
         }
 
         let resources = PHAssetResource.assetResources(for: asset)
