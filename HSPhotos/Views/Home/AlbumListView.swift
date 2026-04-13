@@ -97,7 +97,7 @@ class AlbumListView: UIView{
         // 移除了 preferredFocusEnvironments 的设置，因为它是不可变的
         
         // 优化滚动性能
-        collectionView.decelerationRate = .fast
+//        collectionView.decelerationRate = .fast
         collectionView.alwaysBounceVertical = true
         
         // 优化布局性能
