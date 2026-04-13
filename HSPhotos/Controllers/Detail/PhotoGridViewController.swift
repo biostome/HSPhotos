@@ -11,7 +11,13 @@ import Photos
 class PhotoGridViewController: BasePhotoViewController {
     
     private lazy var shareButton: UIButton = {
-        var config = UIButton.Configuration.glass()
+        var config: UIButton.Configuration
+        if #available(iOS 26.0, *) {
+            config = .glass()
+        } else {
+            config = .filled()
+            config.baseBackgroundColor = UIColor.systemGray5.withAlphaComponent(0.8)
+        }
         config.image = UIImage(systemName: "square.and.arrow.up")
         config.baseForegroundColor = UIColor.systemBlue
         config.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10)
@@ -26,8 +32,13 @@ class PhotoGridViewController: BasePhotoViewController {
     }()
     
     private lazy var menuButton: UIButton = {
-        // iOS 26 新增的 Glass 样式
-        var config = UIButton.Configuration.glass()
+        var config: UIButton.Configuration
+        if #available(iOS 26.0, *) {
+            config = .glass()
+        } else {
+            config = .filled()
+            config.baseBackgroundColor = UIColor.systemGray5.withAlphaComponent(0.8)
+        }
         config.image = UIImage(systemName: "ellipsis")
         config.baseForegroundColor = UIColor.systemBlue
         config.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10)
@@ -41,8 +52,13 @@ class PhotoGridViewController: BasePhotoViewController {
     }()
     
     private lazy var sortButton: UIButton = {
-        // iOS 26 新增的 Glass 样式
-        var config = UIButton.Configuration.glass()
+        var config: UIButton.Configuration
+        if #available(iOS 26.0, *) {
+            config = .glass()
+        } else {
+            config = .filled()
+            config.baseBackgroundColor = UIColor.systemGray5.withAlphaComponent(0.8)
+        }
         config.image = UIImage(systemName: "line.3.horizontal.decrease")
         config.baseForegroundColor = UIColor.systemBlue
         config.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10)

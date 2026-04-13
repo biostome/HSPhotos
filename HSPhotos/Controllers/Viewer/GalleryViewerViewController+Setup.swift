@@ -218,7 +218,13 @@ extension GalleryViewerViewController {
 
     func configureLiquidGlassToolButton(_ button: UIButton, systemName: String) {
         let metrics = GalleryViewerChromeMetrics.self
-        var config = UIButton.Configuration.glass()
+        var config: UIButton.Configuration
+        if #available(iOS 26.0, *) {
+            config = .glass()
+        } else {
+            config = .filled()
+            config.baseBackgroundColor = UIColor.white.withAlphaComponent(0.15)
+        }
         let symbol = UIImage.SymbolConfiguration(pointSize: metrics.sideGlassIconPointSize, weight: .medium)
         config.image = UIImage(systemName: systemName, withConfiguration: symbol)
         config.baseForegroundColor = .white

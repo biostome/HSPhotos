@@ -6,7 +6,13 @@ class GalleryViewController: BasePhotoViewController {
     private var shareButtonBottomConstraint: NSLayoutConstraint?
     
     private lazy var shareButton: UIButton = {
-        var config = UIButton.Configuration.glass()
+        var config: UIButton.Configuration
+        if #available(iOS 26.0, *) {
+            config = .glass()
+        } else {
+            config = .filled()
+            config.baseBackgroundColor = UIColor.systemGray5.withAlphaComponent(0.8)
+        }
         config.image = UIImage(systemName: "square.and.arrow.up")
         config.baseForegroundColor = UIColor.systemBlue
         config.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10)
