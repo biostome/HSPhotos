@@ -277,7 +277,14 @@ extension GalleryViewerViewController: UICollectionViewDataSource, UICollectionV
 
     func scrollViewDidScroll(_ scrollView: UIScrollView) {
         guard scrollView === collectionView else { return }
+        syncChromeWithCenteredPageDuringScroll()
         updateVisiblePageActivationDuringScroll()
+    }
+
+    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
+        guard scrollView === collectionView else { return }
+        guard !decelerate else { return }
+        syncCurrentIndexWithVisiblePage()
     }
 
     private func updateVisiblePageActivationDuringScroll() {
@@ -287,6 +294,14 @@ extension GalleryViewerViewController: UICollectionViewDataSource, UICollectionV
                 cell.isPageActive = indexPath.item == targetIndex
             }
         }
+    }
+
+    private func syncChromeWithCenteredPageDuringScroll() {
+        let targetIndex = centeredIndex()
+        guard targetIndex != currentIndex else { return }
+        guard targetIndex >= 0, targetIndex < assets.count else { return }
+        currentIndex = targetIndex
+        updateTitleAndFavorite()
     }
 
     private func syncCurrentIndexWithVisiblePage() {

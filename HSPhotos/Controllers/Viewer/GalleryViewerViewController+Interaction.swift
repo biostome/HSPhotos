@@ -59,16 +59,20 @@ extension GalleryViewerViewController {
     }
 
     @objc func favoriteTapped() {
+        guard !isFavoriteActionInFlight else { return }
         guard currentIndex >= 0, currentIndex < assets.count else { return }
         let asset = assets[currentIndex]
+        let assetIdentifier = asset.localIdentifier
+        isFavoriteActionInFlight = true
+        favoriteButton.isEnabled = false
         animateFavoriteButtonTap()
         mediaActionService.toggleFavorite(asset: asset) { [weak self] result in
             guard let self else { return }
+            self.isFavoriteActionInFlight = false
+            self.favoriteButton.isEnabled = true
             switch result {
             case .success(let updatedAsset):
-                self.assets[self.currentIndex] = updatedAsset
-                self.updateVisibleCellIfNeeded(with: updatedAsset)
-                self.updateTitleAndFavorite()
+                self.applyUpdatedFavoriteAsset(updatedAsset, originalIdentifier: assetIdentifier)
                 self.thumbnailStripView.assets = self.assets
                 self.thumbnailStripView.syncSelection(self.currentIndex, animated: false)
             case .failure(let error):
@@ -76,6 +80,17 @@ extension GalleryViewerViewController {
                 self.presentAlert(title: "操作失败", message: msg)
             }
         }
+    }
+
+    private func applyUpdatedFavoriteAsset(_ updatedAsset: PHAsset, originalIdentifier: String) {
+        guard let updatedIndex = assets.firstIndex(where: { $0.localIdentifier == originalIdentifier }) else { return }
+
+        assets[updatedIndex] = updatedAsset
+
+        guard currentIndex == updatedIndex else { return }
+
+        updateVisibleCellIfNeeded(with: updatedAsset)
+        updateTitleAndFavorite()
     }
 
     private func updateVisibleCellIfNeeded(with asset: PHAsset) {
@@ -178,7 +193,7 @@ extension GalleryViewerViewController {
         let metrics = GalleryViewerChromeMetrics.self
         let symbol = UIImage.SymbolConfiguration(pointSize: metrics.capsuleInnerIconPointSize, weight: metrics.capsuleIconWeight)
         favConfig.image = UIImage(systemName: heartName, withConfiguration: symbol)
-        favConfig.baseForegroundColor = .white
+        favConfig.baseForegroundColor = asset.isFavorite ? .systemPink : .white
         favoriteButton.configuration = favConfig
 
         pageIndicator.text = "\(currentIndex + 1)/\(assets.count)"

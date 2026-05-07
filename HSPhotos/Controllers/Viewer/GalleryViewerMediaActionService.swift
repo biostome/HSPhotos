@@ -70,18 +70,48 @@ final class GalleryViewerMediaActionService: GalleryViewerMediaActionHandling {
                     )))
                     return
                 }
-
-                let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: [asset.localIdentifier], options: nil)
-                guard let updatedAsset = fetchResult.firstObject else {
-                    completion(.failure(NSError(
-                        domain: "GalleryViewerMediaActionService",
-                        code: -3,
-                        userInfo: [NSLocalizedDescriptionKey: "收藏状态更新后无法读取最新资产"]
-                    )))
-                    return
-                }
-                completion(.success(updatedAsset))
+                self.fetchUpdatedAssetAfterFavoriteToggle(
+                    localIdentifier: asset.localIdentifier,
+                    expectedIsFavorite: !asset.isFavorite,
+                    retriesLeft: 5,
+                    completion: completion
+                )
             }
+        }
+    }
+
+    private func fetchUpdatedAssetAfterFavoriteToggle(
+        localIdentifier: String,
+        expectedIsFavorite: Bool,
+        retriesLeft: Int,
+        completion: @escaping (Result<PHAsset, Error>) -> Void
+    ) {
+        let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: [localIdentifier], options: nil)
+        if let updatedAsset = fetchResult.firstObject, updatedAsset.isFavorite == expectedIsFavorite {
+            completion(.success(updatedAsset))
+            return
+        }
+
+        guard retriesLeft > 0 else {
+            if let updatedAsset = fetchResult.firstObject {
+                completion(.success(updatedAsset))
+            } else {
+                completion(.failure(NSError(
+                    domain: "GalleryViewerMediaActionService",
+                    code: -3,
+                    userInfo: [NSLocalizedDescriptionKey: "收藏状态更新后无法读取最新资产"]
+                )))
+            }
+            return
+        }
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in
+            self?.fetchUpdatedAssetAfterFavoriteToggle(
+                localIdentifier: localIdentifier,
+                expectedIsFavorite: expectedIsFavorite,
+                retriesLeft: retriesLeft - 1,
+                completion: completion
+            )
         }
     }
 

@@ -67,6 +67,7 @@ final class GalleryViewerViewController: UIViewController {
     var currentIndex: Int
     var isPagingDrivenByThumbnailStrip = false
     var isChromeHidden = false
+    var isFavoriteActionInFlight = false
 
     let dismissPan = UIPanGestureRecognizer()
     var isDismissing = false
@@ -138,6 +139,7 @@ final class GalleryViewerViewController: UIViewController {
         super.viewDidLoad()
         view.backgroundColor = .black
 
+        refreshAssetsFromPhotoLibrary()
         setupCollectionView()
         setupTopBar()
         setupBottomBar()
@@ -220,6 +222,22 @@ extension GalleryViewerViewController {
         for case let cell as PhotoCellBase in collectionView.visibleCells {
             cell.isPageActive = isActive && collectionView.indexPath(for: cell)?.item == currentIndex
         }
+    }
+
+    func refreshAssetsFromPhotoLibrary() {
+        let identifiers = assets.map(\.localIdentifier)
+        guard !identifiers.isEmpty else { return }
+
+        let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: identifiers, options: nil)
+        var refreshedByIdentifier: [String: PHAsset] = [:]
+        fetchResult.enumerateObjects { asset, _, _ in
+            refreshedByIdentifier[asset.localIdentifier] = asset
+        }
+
+        assets = assets.compactMap { asset in
+            refreshedByIdentifier[asset.localIdentifier] ?? asset
+        }
+        currentIndex = min(max(0, currentIndex), max(0, assets.count - 1))
     }
 
     var currentDismissTransformView: UIView? {

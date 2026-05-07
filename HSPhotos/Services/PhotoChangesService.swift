@@ -373,7 +373,8 @@ class PhotoChangesService {
     ///   - isUndoOperation: 是否为撤销操作，撤销操作不添加新的撤销记录
     static func toggleFavorite(asset: PHAsset, isUndoOperation: Bool = false, completion: @escaping SortCompletion) {
         // Check permission
-        guard PHPhotoLibrary.authorizationStatus() == .authorized || PHPhotoLibrary.authorizationStatus() == .limited else {
+        let authorizationStatus = PHPhotoLibrary.authorizationStatus(for: .readWrite)
+        guard authorizationStatus == .authorized || authorizationStatus == .limited else {
             completion(false, "No photo library access permission")
             return
         }
