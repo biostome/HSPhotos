@@ -72,7 +72,7 @@ class GalleryViewController: BasePhotoViewController {
             tabBarController?.tabBar.isHidden = false
             additionalSafeAreaInsets.bottom = 0
         } else {
-            // 选择模式：取消 + 范围选择 + 更多
+            // 选择模式：取消 + 范围选择 + 更多（快速定位在底部工具条）
             navigationItem.setRightBarButtonItems([cancelSelectBarButton, rangeSwitchItem, menuBarButton], animated: true)
             // 进入选择模式时，显示全选/取消全选按钮
             updateSelectAllButton()
@@ -82,6 +82,8 @@ class GalleryViewController: BasePhotoViewController {
         }
         view.layoutIfNeeded()
         updateShareButtonState()
+        updateSelectionQuickNavToolbar()
+        syncSelectionQuickNavBarButtonsEnabled()
     }
     
     override func createSortMenu() -> UIMenu {

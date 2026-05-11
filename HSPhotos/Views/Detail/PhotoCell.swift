@@ -243,6 +243,28 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
     // MARK: - 布局
     private var overlaysInstalled = false
     private var labelsInstalled = false
+    private var quickNavFlashOverlayConstraintsInstalled = false
+
+    private enum QuickNavHighlightStyle {
+        static let fillAlpha: CGFloat = 0.62
+        static let borderWidth: CGFloat = 4
+        static let keyframeDuration: TimeInterval = 0.55
+        static let peakRelativeStart: Double = 0
+        static let peakRelativeLength: Double = 0.22
+    }
+
+    /// 选择模式「快速定位」专用高对比度高亮层（橙底 + 白边，与蓝色选中区分）。
+    private lazy var quickNavFlashOverlay: UIView = {
+        let v = UIView()
+        v.translatesAutoresizingMaskIntoConstraints = false
+        v.isUserInteractionEnabled = false
+        v.backgroundColor = UIColor.systemOrange.withAlphaComponent(QuickNavHighlightStyle.fillAlpha)
+        v.layer.borderWidth = QuickNavHighlightStyle.borderWidth
+        v.layer.borderColor = UIColor.white.cgColor
+        v.isHidden = true
+        v.alpha = 0
+        return v
+    }()
     
     private func setupUI() {
         contentView.backgroundColor = .white
@@ -509,6 +531,11 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         currentAsset = nil
         lastHierarchyText = nil
         lastIsHierarchyCollapsed = nil
+        if quickNavFlashOverlayConstraintsInstalled {
+            quickNavFlashOverlay.layer.removeAllAnimations()
+            quickNavFlashOverlay.isHidden = true
+            quickNavFlashOverlay.alpha = 0
+        }
         if let rid = requestID {
             Self.cachingManager.cancelImageRequest(rid)
         }
@@ -536,6 +563,40 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
             } completion: { finish in
                 self.highlightOverlay.isHidden = true
             }
+        }
+    }
+
+    private func installQuickNavFlashOverlayIfNeeded() {
+        guard !quickNavFlashOverlayConstraintsInstalled else { return }
+        quickNavFlashOverlayConstraintsInstalled = true
+        contentView.addSubview(quickNavFlashOverlay)
+        NSLayoutConstraint.activate([
+            quickNavFlashOverlay.topAnchor.constraint(equalTo: contentView.topAnchor),
+            quickNavFlashOverlay.leadingAnchor.constraint(equalTo: contentView.leadingAnchor),
+            quickNavFlashOverlay.trailingAnchor.constraint(equalTo: contentView.trailingAnchor),
+            quickNavFlashOverlay.bottomAnchor.constraint(equalTo: contentView.bottomAnchor),
+        ])
+    }
+
+    /// 快速定位到某一格时的醒目闪烁。
+    func performQuickNavigationHighlightAnimation() {
+        installQuickNavFlashOverlayIfNeeded()
+        contentView.bringSubviewToFront(quickNavFlashOverlay)
+        quickNavFlashOverlay.layer.removeAllAnimations()
+        quickNavFlashOverlay.isHidden = false
+        quickNavFlashOverlay.alpha = 0
+        let d = QuickNavHighlightStyle.keyframeDuration
+        let p0 = QuickNavHighlightStyle.peakRelativeStart
+        let pLen = QuickNavHighlightStyle.peakRelativeLength
+        UIView.animateKeyframes(withDuration: d, delay: 0, options: [.calculationModeCubic]) {
+            UIView.addKeyframe(withRelativeStartTime: p0, relativeDuration: pLen) {
+                self.quickNavFlashOverlay.alpha = 1
+            }
+            UIView.addKeyframe(withRelativeStartTime: p0 + pLen, relativeDuration: 1 - pLen - p0) {
+                self.quickNavFlashOverlay.alpha = 0
+            }
+        } completion: { _ in
+            self.quickNavFlashOverlay.isHidden = true
         }
     }
 }

@@ -242,14 +242,7 @@ class PhotoGridViewController: BasePhotoViewController {
     }
     
     override func updateSelectAllButton() {
-        let isAllSelected = isAllAssetsSelected()
-        if isAllSelected {
-            // 已全选，显示取消全选按钮
-            navigationItem.setLeftBarButtonItems([deselectAllBarButton], animated: true)
-        } else {
-            // 未全选，显示全选按钮
-            navigationItem.setLeftBarButtonItems([selectAllBarButton], animated: true)
-        }
+        super.updateSelectAllButton()
         updateBottomActionButtons()
     }
     

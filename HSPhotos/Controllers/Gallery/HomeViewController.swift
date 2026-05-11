@@ -75,14 +75,11 @@ class HomeViewController: GalleryViewController {
         }
         view.layoutIfNeeded()
         updateShareButtonState()
+        updateSelectionQuickNavToolbar()
+        syncSelectionQuickNavBarButtonsEnabled()
     }
     
     override func updateSelectAllButton() {
-        let isAllSelected = isAllAssetsSelected()
-        if isAllSelected {
-            navigationItem.setLeftBarButtonItems([deselectAllBarButton], animated: true)
-        } else {
-            navigationItem.setLeftBarButtonItems([selectAllBarButton], animated: true)
-        }
+        super.updateSelectAllButton()
     }
 }

@@ -98,6 +98,29 @@ class BasePhotoViewController: UIViewController {
         return button
     }()
 
+    /// 底部工具条：在可见连续选区间的头/尾之间跳转（`chevron.up` = 上一处，`chevron.down` = 下一处）。
+    internal lazy var selectionQuickNavPreviousBarButton: UIBarButtonItem = {
+        let button = UIBarButtonItem(
+            image: UIImage(systemName: "chevron.up"),
+            style: .plain,
+            target: self,
+            action: #selector(didTapSelectionQuickNavPrevious)
+        )
+        button.accessibilityLabel = "上一处"
+        return button
+    }()
+
+    internal lazy var selectionQuickNavNextBarButton: UIBarButtonItem = {
+        let button = UIBarButtonItem(
+            image: UIImage(systemName: "chevron.down"),
+            style: .plain,
+            target: self,
+            action: #selector(didTapSelectionQuickNavNext)
+        )
+        button.accessibilityLabel = "下一处"
+        return button
+    }()
+
     private lazy var fetchOptions: PHFetchOptions = {
         let options = PHFetchOptions()
         options.sortDescriptors = sortDescriptors(for: sortPreference)
@@ -172,8 +195,32 @@ class BasePhotoViewController: UIViewController {
         gridView.currentCollection = collection
         gridView.supportsHierarchyNumbering = supportsHierarchyNumbering
 
+        gridView.onSelectionQuickNavToolbarRefresh = { [weak self] in
+            self?.syncSelectionQuickNavBarButtonsEnabled()
+        }
+
         loadPhoto()
         setupUndoManager()
+    }
+
+    @objc private func didTapSelectionQuickNavPrevious() {
+        selectionQuickNavPerform { $0.performSelectionQuickNavPrevious() }
+    }
+
+    @objc private func didTapSelectionQuickNavNext() {
+        selectionQuickNavPerform { $0.performSelectionQuickNavNext() }
+    }
+
+    private func selectionQuickNavPerform(_ action: (PhotoGridView) -> Void) {
+        action(gridView)
+        syncSelectionQuickNavBarButtonsEnabled()
+    }
+
+    internal func syncSelectionQuickNavBarButtonsEnabled() {
+        gridView.syncSelectionQuickNavBarButtons(
+            previous: selectionQuickNavPreviousBarButton,
+            next: selectionQuickNavNextBarButton
+        )
     }
 
     private func setupUI() {
@@ -263,6 +310,11 @@ class BasePhotoViewController: UIViewController {
         // 离开相册时将数据持久化到 UserDefaults
         PhotoNumberingService.shared.saveForCollection(collection)
         PhotoHeaderService.shared.saveForCollection(collection)
+        // 离开本页时先收起底部工具条（含 push 出子页），返回时由 viewWillAppear 再按选择模式恢复
+        navigationController?.setToolbarHidden(true, animated: animated)
+        if isMovingFromParent || isBeingDismissed {
+            toolbarItems = nil
+        }
     }
 
     deinit {
@@ -704,11 +756,32 @@ class BasePhotoViewController: UIViewController {
             // 恢复默认的返回按钮
             navigationItem.leftBarButtonItem = nil
         } else {
-            // 选择模式：取消 + 范围选择 + 更多
+            // 选择模式：取消 + 范围选择 + 更多（快速定位在底部工具条）
             navigationItem.setRightBarButtonItems([cancelSelectBarButton, rangeSwitchItem, menuBarButton], animated: true)
             // 根据当前选择状态显示全选或取消全选按钮
             updateSelectAllButton()
         }
+        updateSelectionQuickNavToolbar()
+        syncSelectionQuickNavBarButtonsEnabled()
+    }
+
+    /// 选择模式下在导航控制器底部工具条显示「上一处 / 下一处」。
+    internal func updateSelectionQuickNavToolbar() {
+        guard let nav = navigationController else { return }
+        if selectionMode == .none {
+            nav.setToolbarHidden(true, animated: true)
+            toolbarItems = nil
+            return
+        }
+        let flexLeading = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
+        let flexTrailing = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
+        toolbarItems = [flexLeading, selectionQuickNavPreviousBarButton, selectionQuickNavNextBarButton, flexTrailing]
+        nav.setToolbarHidden(false, animated: true)
+    }
+
+    override func viewWillAppear(_ animated: Bool) {
+        super.viewWillAppear(animated)
+        updateSelectionQuickNavToolbar()
     }
 
     /// 更新全选/取消全选按钮的显示状态
@@ -720,6 +793,9 @@ class BasePhotoViewController: UIViewController {
         } else {
             // 未全选，显示全选按钮
             navigationItem.setLeftBarButtonItems([selectAllBarButton], animated: true)
+        }
+        if selectionMode != .none {
+            syncSelectionQuickNavBarButtonsEnabled()
         }
     }
 
@@ -1323,8 +1399,11 @@ extension BasePhotoViewController: PhotoGridViewDelegate {
             guard let self else { return }
             self.updateOperationMenu()
             self.updateUndoRedoButtons()
-            if self.selectionMode != .none {
+            if self.selectionMode == .none {
+                self.syncSelectionQuickNavBarButtonsEnabled()
+            } else {
                 self.updateSelectAllButton()
+                self.gridView.syncSelectionQuickNavCurrentVisibleIndexToLastSelectedAsset()
             }
         }
     }
