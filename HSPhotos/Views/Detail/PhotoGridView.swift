@@ -119,6 +119,8 @@ class PhotoGridView: UIView {
             collectionView.allowsMultipleSelection = selectionMode == .multiple || selectionMode == .range
             collectionView.reloadData()
             if oldValue != selectionMode {
+                hierarchyKeyNodeJumpIndex = nil
+                onHierarchyKeyNodeNavToolbarRefresh?()
                 syncSelectionQuickNavCurrentVisibleIndexToLastSelectedAsset()
             }
         }
@@ -163,6 +165,11 @@ class PhotoGridView: UIView {
     /// 由控制器注入：锚点或选中集变化时刷新底部工具条上按钮的 `isEnabled`。
     var onSelectionQuickNavToolbarRefresh: (() -> Void)?
 
+    /// 非选择模式：层级关键节点（有后代）链式跳转锚点；列表或模式变化时置 `nil`。
+    private var hierarchyKeyNodeJumpIndex: Int?
+    /// 由控制器注入：关键节点列表或视口变化时刷新底部工具条按钮状态。
+    var onHierarchyKeyNodeNavToolbarRefresh: (() -> Void)?
+
     // 当前锚点照片
     private var anchorPhoto: PHAsset?
 
@@ -173,6 +180,8 @@ class PhotoGridView: UIView {
         didSet {
             if oldValue != sortPreference {
                 hierarchyCache.removeAll()
+                hierarchyKeyNodeJumpIndex = nil
+                onHierarchyKeyNodeNavToolbarRefresh?()
             }
         }
     }
@@ -700,6 +709,8 @@ class PhotoGridView: UIView {
                 prewarmHierarchyCache(for: newVisibleAssets)
             }
             collectionView.reloadData()
+            hierarchyKeyNodeJumpIndex = nil
+            onHierarchyKeyNodeNavToolbarRefresh?()
             syncSelectionQuickNavCurrentVisibleIndexToLastSelectedAsset()
         }
     }
@@ -1155,13 +1166,19 @@ extension PhotoGridView: UICollectionViewDelegateFlowLayout {
             scrollView.isScrollEnabled = true
         }
         scrollDelegate?.scrollViewDidEndDragging?(scrollView, willDecelerate: decelerate)
+        if !decelerate {
+            postHierarchyKeyNodeNavToolbarRefreshIfNeeded()
+        }
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        postHierarchyKeyNodeNavToolbarRefreshIfNeeded()
+        scrollDelegate?.scrollViewDidEndDecelerating?(scrollView)
     }
 
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
-
+        postHierarchyKeyNodeNavToolbarRefreshIfNeeded()
+        scrollDelegate?.scrollViewDidEndScrollingAnimation?(scrollView)
     }
 }
 
@@ -1582,6 +1599,118 @@ extension PhotoGridView {
 
     private func selectionQuickNavAvailability(targets: [Int], vmin: Int, vmax: Int) -> (canPrev: Bool, canNext: Bool) {
         if let last = selectionQuickNavJumpIndex {
+            return (targets.contains { $0 < last }, targets.contains { $0 > last })
+        }
+        return (targets.contains { $0 < vmax }, targets.contains { $0 > vmin })
+    }
+}
+
+// MARK: - 非选择模式：层级关键节点（有后代）快速跳转
+
+extension PhotoGridView {
+
+    /// 在「有后代的层级节点」对应格之间跳转；与 `PhotoNumberingService.hasDescendants` 语义一致（基于全序 `assets`）。
+    func syncHierarchyKeyNodeNavBarButtons(previous: UIBarButtonItem, next: UIBarButtonItem) {
+        guard hierarchyKeyNodeNavIsActive else {
+            hierarchyKeyNodeNavSetBarButtons(previous: previous, next: next, canPrev: false, canNext: false)
+            return
+        }
+        let targets = hierarchyKeyNodeSortedTargetIndices()
+        guard !targets.isEmpty else {
+            hierarchyKeyNodeNavSetBarButtons(previous: previous, next: next, canPrev: false, canNext: false)
+            return
+        }
+        let (vmin, vmax) = hierarchyKeyNodeNavVisibleItemBounds()
+        let (canPrev, canNext) = hierarchyKeyNodeNavAvailability(targets: targets, vmin: vmin, vmax: vmax)
+        hierarchyKeyNodeNavSetBarButtons(previous: previous, next: next, canPrev: canPrev, canNext: canNext)
+    }
+
+    func performHierarchyKeyNodeNavPrevious() {
+        performHierarchyKeyNodeNav(step: .towardLowerIndex)
+    }
+
+    func performHierarchyKeyNodeNavNext() {
+        performHierarchyKeyNodeNav(step: .towardHigherIndex)
+    }
+
+    private func postHierarchyKeyNodeNavToolbarRefreshIfNeeded() {
+        guard hierarchyKeyNodeNavIsActive else { return }
+        onHierarchyKeyNodeNavToolbarRefresh?()
+    }
+
+    private enum HierarchyKeyNodeNavStep {
+        case towardLowerIndex
+        case towardHigherIndex
+    }
+
+    private var hierarchyKeyNodeNavIsActive: Bool {
+        selectionMode == .none && supportsHierarchyNumbering && sortPreference == .custom && currentCollection != nil
+    }
+
+    private func hierarchyKeyNodeSortedTargetIndices() -> [Int] {
+        guard hierarchyKeyNodeNavIsActive, let collection = currentCollection else { return [] }
+        return visibleAssets.enumerated().compactMap { index, asset in
+            numberingService.hasDescendants(asset, in: assets, collection: collection) ? index : nil
+        }
+    }
+
+    private func performHierarchyKeyNodeNav(step: HierarchyKeyNodeNavStep) {
+        guard hierarchyKeyNodeNavIsActive else { return }
+        let targets = hierarchyKeyNodeSortedTargetIndices()
+        guard !targets.isEmpty else { return }
+
+        let (vmin, vmax) = hierarchyKeyNodeNavVisibleItemBounds()
+        guard let index = hierarchyKeyNodeNavDestination(targets: targets, step: step, vmin: vmin, vmax: vmax) else { return }
+
+        let indexPath = IndexPath(item: index, section: 0)
+        collectionView.scrollToItem(at: indexPath, at: .centeredVertically, animated: true)
+        hierarchyKeyNodeJumpIndex = index
+        hierarchyKeyNodeNormalizeJumpIndexIfStuck(targets: targets)
+        onHierarchyKeyNodeNavToolbarRefresh?()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.selectionQuickNavHighlightDelay) { [weak self] in
+            guard let self else { return }
+            guard let cell = self.collectionView.cellForItem(at: indexPath) as? PhotoCell else { return }
+            cell.performQuickNavigationHighlightAnimation()
+        }
+    }
+
+    /// 唯一关键节点且锚点与目标重合时清空锚点，避免两键同时不可用。
+    private func hierarchyKeyNodeNormalizeJumpIndexIfStuck(targets: [Int]) {
+        guard let j = hierarchyKeyNodeJumpIndex else { return }
+        let canMove = targets.contains { $0 < j } || targets.contains { $0 > j }
+        if !canMove {
+            hierarchyKeyNodeJumpIndex = nil
+        }
+    }
+
+    private func hierarchyKeyNodeNavVisibleItemBounds() -> (min: Int, max: Int) {
+        let items = collectionView.indexPathsForVisibleItems.map(\.item)
+        return (items.min() ?? 0, items.max() ?? 0)
+    }
+
+    private func hierarchyKeyNodeNavSetBarButtons(previous: UIBarButtonItem, next: UIBarButtonItem, canPrev: Bool, canNext: Bool) {
+        previous.isEnabled = canPrev
+        next.isEnabled = canNext
+    }
+
+    private func hierarchyKeyNodeNavDestination(targets: [Int], step: HierarchyKeyNodeNavStep, vmin: Int, vmax: Int) -> Int? {
+        switch step {
+        case .towardLowerIndex:
+            if let last = hierarchyKeyNodeJumpIndex {
+                return targets.last { $0 < last }
+            }
+            return targets.last { $0 < vmax }
+        case .towardHigherIndex:
+            if let last = hierarchyKeyNodeJumpIndex {
+                return targets.first { $0 > last }
+            }
+            return targets.first { $0 > vmin }
+        }
+    }
+
+    private func hierarchyKeyNodeNavAvailability(targets: [Int], vmin: Int, vmax: Int) -> (canPrev: Bool, canNext: Bool) {
+        if let last = hierarchyKeyNodeJumpIndex {
             return (targets.contains { $0 < last }, targets.contains { $0 > last })
         }
         return (targets.contains { $0 < vmax }, targets.contains { $0 > vmin })
