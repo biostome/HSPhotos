@@ -222,7 +222,9 @@ class BasePhotoViewController: UIViewController {
             self?.syncSelectionQuickNavBarButtonsEnabled()
         }
         gridView.onHierarchyKeyNodeNavToolbarRefresh = { [weak self] in
-            self?.syncSelectionQuickNavBarButtonsEnabled()
+            guard let self else { return }
+            self.updateSelectionQuickNavToolbar()
+            self.syncSelectionQuickNavBarButtonsEnabled()
         }
 
         loadPhoto()
@@ -813,7 +815,7 @@ class BasePhotoViewController: UIViewController {
         syncSelectionQuickNavBarButtonsEnabled()
     }
 
-    /// 选择模式：连续选区头/尾跳转；非选择且自定义排序并支持层级时：有关键节点则显示「上一/下一关键节点」。
+    /// 选择模式：连续选区头/尾跳转；非选择、自定义排序且支持层级时，仅当存在至少一个关键节点时显示底部工具条。
     internal func updateSelectionQuickNavToolbar() {
         guard let nav = navigationController else { return }
         if selectionMode != .none {
@@ -823,7 +825,7 @@ class BasePhotoViewController: UIViewController {
             nav.setToolbarHidden(false, animated: true)
             return
         }
-        if supportsHierarchyNumbering, sortPreference == .custom {
+        if supportsHierarchyNumbering, sortPreference == .custom, gridView.hasHierarchyKeyNodesForToolbar {
             let flexLeading = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
             let flexTrailing = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
             toolbarItems = [flexLeading, hierarchyKeyNodePreviousBarButton, hierarchyKeyNodeNextBarButton, flexTrailing]

@@ -1609,6 +1609,11 @@ extension PhotoGridView {
 
 extension PhotoGridView {
 
+    /// 当前是否存在至少一个可跳转的关键节点（用于非选择模式下是否显示底部工具条）。
+    var hasHierarchyKeyNodesForToolbar: Bool {
+        !hierarchyKeyNodeSortedTargetIndices().isEmpty
+    }
+
     /// 在「有后代的层级节点」对应格之间跳转；与 `PhotoNumberingService.hasDescendants` 语义一致（基于全序 `assets`）。
     func syncHierarchyKeyNodeNavBarButtons(previous: UIBarButtonItem, next: UIBarButtonItem) {
         guard hierarchyKeyNodeNavIsActive else {
@@ -1635,6 +1640,7 @@ extension PhotoGridView {
 
     private func postHierarchyKeyNodeNavToolbarRefreshIfNeeded() {
         guard hierarchyKeyNodeNavIsActive else { return }
+        guard !hierarchyKeyNodeSortedTargetIndices().isEmpty else { return }
         onHierarchyKeyNodeNavToolbarRefresh?()
     }
 
