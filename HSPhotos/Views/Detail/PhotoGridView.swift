@@ -1605,18 +1605,18 @@ extension PhotoGridView {
     }
 }
 
-// MARK: - 非选择模式：层级关键节点（有后代）快速跳转
+// MARK: - 层级关键节点（有后代）快速跳转（浏览 / 选择模式下均可用）
 
 extension PhotoGridView {
 
-    /// 当前是否存在至少一个可跳转的关键节点（用于非选择模式下是否显示底部工具条）。
+    /// 当前是否存在至少一个可跳转的关键节点（用于底栏是否显示关键节点按钮组）。
     var hasHierarchyKeyNodesForToolbar: Bool {
         !hierarchyKeyNodeSortedTargetIndices().isEmpty
     }
 
     /// 在「有后代的层级节点」对应格之间跳转；与 `PhotoNumberingService.hasDescendants` 语义一致（基于全序 `assets`）。
     func syncHierarchyKeyNodeNavBarButtons(previous: UIBarButtonItem, next: UIBarButtonItem) {
-        guard hierarchyKeyNodeNavIsActive else {
+        guard hierarchyKeyNodeNavAvailable else {
             hierarchyKeyNodeNavSetBarButtons(previous: previous, next: next, canPrev: false, canNext: false)
             return
         }
@@ -1639,7 +1639,7 @@ extension PhotoGridView {
     }
 
     private func postHierarchyKeyNodeNavToolbarRefreshIfNeeded() {
-        guard hierarchyKeyNodeNavIsActive else { return }
+        guard hierarchyKeyNodeNavAvailable else { return }
         guard !hierarchyKeyNodeSortedTargetIndices().isEmpty else { return }
         onHierarchyKeyNodeNavToolbarRefresh?()
     }
@@ -1649,19 +1649,20 @@ extension PhotoGridView {
         case towardHigherIndex
     }
 
-    private var hierarchyKeyNodeNavIsActive: Bool {
-        selectionMode == .none && supportsHierarchyNumbering && sortPreference == .custom && currentCollection != nil
+    /// 自定义排序、支持层级且已绑定相册时，允许关键节点跳转（与选择模式无关）。
+    private var hierarchyKeyNodeNavAvailable: Bool {
+        supportsHierarchyNumbering && sortPreference == .custom && currentCollection != nil
     }
 
     private func hierarchyKeyNodeSortedTargetIndices() -> [Int] {
-        guard hierarchyKeyNodeNavIsActive, let collection = currentCollection else { return [] }
+        guard hierarchyKeyNodeNavAvailable, let collection = currentCollection else { return [] }
         return visibleAssets.enumerated().compactMap { index, asset in
             numberingService.hasDescendants(asset, in: assets, collection: collection) ? index : nil
         }
     }
 
     private func performHierarchyKeyNodeNav(step: HierarchyKeyNodeNavStep) {
-        guard hierarchyKeyNodeNavIsActive else { return }
+        guard hierarchyKeyNodeNavAvailable else { return }
         let targets = hierarchyKeyNodeSortedTargetIndices()
         guard !targets.isEmpty else { return }
 

@@ -107,6 +107,7 @@ class BasePhotoViewController: UIViewController {
             action: #selector(didTapSelectionQuickNavPrevious)
         )
         button.accessibilityLabel = "上一处"
+        button.accessibilityHint = "在选中区域之间跳转"
         return button
     }()
 
@@ -118,10 +119,11 @@ class BasePhotoViewController: UIViewController {
             action: #selector(didTapSelectionQuickNavNext)
         )
         button.accessibilityLabel = "下一处"
+        button.accessibilityHint = "在选中区域之间跳转"
         return button
     }()
 
-    /// 非选择模式：在「有后代的层级节点」之间跳转（`arrowtriangle.up.circle` / `arrowtriangle.down.circle`）。
+    /// 层级关键节点跳转（`arrowtriangle.up.circle` / `arrowtriangle.down.circle`）；非选择时单独显示，选择模式下可与选区跳转并排。
     internal lazy var hierarchyKeyNodePreviousBarButton: UIBarButtonItem = {
         let button = UIBarButtonItem(
             image: UIImage(systemName: "arrowtriangle.up.circle"),
@@ -130,6 +132,7 @@ class BasePhotoViewController: UIViewController {
             action: #selector(didTapHierarchyKeyNodeNavPrevious)
         )
         button.accessibilityLabel = "上一关键节点"
+        button.accessibilityHint = "跳到有子层级的节点照片，不改变当前选中"
         return button
     }()
 
@@ -141,6 +144,7 @@ class BasePhotoViewController: UIViewController {
             action: #selector(didTapHierarchyKeyNodeNavNext)
         )
         button.accessibilityLabel = "下一关键节点"
+        button.accessibilityHint = "跳到有子层级的节点照片，不改变当前选中"
         return button
     }()
 
@@ -219,7 +223,9 @@ class BasePhotoViewController: UIViewController {
         gridView.supportsHierarchyNumbering = supportsHierarchyNumbering
 
         gridView.onSelectionQuickNavToolbarRefresh = { [weak self] in
-            self?.syncSelectionQuickNavBarButtonsEnabled()
+            guard let self else { return }
+            self.updateSelectionQuickNavToolbar()
+            self.syncSelectionQuickNavBarButtonsEnabled()
         }
         gridView.onHierarchyKeyNodeNavToolbarRefresh = { [weak self] in
             guard let self else { return }
@@ -268,6 +274,15 @@ class BasePhotoViewController: UIViewController {
                 previous: selectionQuickNavPreviousBarButton,
                 next: selectionQuickNavNextBarButton
             )
+            if supportsHierarchyNumbering, sortPreference == .custom, gridView.hasHierarchyKeyNodesForToolbar {
+                gridView.syncHierarchyKeyNodeNavBarButtons(
+                    previous: hierarchyKeyNodePreviousBarButton,
+                    next: hierarchyKeyNodeNextBarButton
+                )
+            } else {
+                hierarchyKeyNodePreviousBarButton.isEnabled = false
+                hierarchyKeyNodeNextBarButton.isEnabled = false
+            }
         }
     }
 
@@ -815,13 +830,25 @@ class BasePhotoViewController: UIViewController {
         syncSelectionQuickNavBarButtonsEnabled()
     }
 
-    /// 选择模式：连续选区头/尾跳转；非选择、自定义排序且支持层级时，仅当存在至少一个关键节点时显示底部工具条。
+    /// 选择模式：选区头/尾跳转；若同时存在层级关键节点则并排多一对按钮。非选择且自定义排序+层级时，仅有关键节点时显示底栏。
     internal func updateSelectionQuickNavToolbar() {
         guard let nav = navigationController else { return }
         if selectionMode != .none {
             let flexLeading = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
             let flexTrailing = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
-            toolbarItems = [flexLeading, selectionQuickNavPreviousBarButton, selectionQuickNavNextBarButton, flexTrailing]
+            if supportsHierarchyNumbering, sortPreference == .custom, gridView.hasHierarchyKeyNodesForToolbar {
+                let gap = UIBarButtonItem(barButtonSystemItem: .fixedSpace, target: nil, action: nil)
+                gap.width = 20
+                toolbarItems = [
+                    flexLeading,
+                    selectionQuickNavPreviousBarButton, selectionQuickNavNextBarButton,
+                    gap,
+                    hierarchyKeyNodePreviousBarButton, hierarchyKeyNodeNextBarButton,
+                    flexTrailing
+                ]
+            } else {
+                toolbarItems = [flexLeading, selectionQuickNavPreviousBarButton, selectionQuickNavNextBarButton, flexTrailing]
+            }
             nav.setToolbarHidden(false, animated: true)
             return
         }
@@ -839,6 +866,7 @@ class BasePhotoViewController: UIViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         updateSelectionQuickNavToolbar()
+        syncSelectionQuickNavBarButtonsEnabled()
     }
 
     /// 更新全选/取消全选按钮的显示状态
