@@ -274,7 +274,7 @@ class BasePhotoViewController: UIViewController {
                 previous: selectionQuickNavPreviousBarButton,
                 next: selectionQuickNavNextBarButton
             )
-            if supportsHierarchyNumbering, sortPreference == .custom, gridView.hasHierarchyKeyNodesForToolbar {
+            if showsHierarchyKeyNodeToolbarControls {
                 gridView.syncHierarchyKeyNodeNavBarButtons(
                     previous: hierarchyKeyNodePreviousBarButton,
                     next: hierarchyKeyNodeNextBarButton
@@ -284,6 +284,11 @@ class BasePhotoViewController: UIViewController {
                 hierarchyKeyNodeNextBarButton.isEnabled = false
             }
         }
+    }
+
+    /// 底栏是否展示「层级关键节点」按钮：仅 **自定义排序** + 支持层级 + 至少一个目标（与选区跳转条件独立）。
+    private var showsHierarchyKeyNodeToolbarControls: Bool {
+        supportsHierarchyNumbering && gridView.sortPreference == .custom && gridView.hasHierarchyKeyNodesForToolbar
     }
 
     private func setupUI() {
@@ -830,13 +835,13 @@ class BasePhotoViewController: UIViewController {
         syncSelectionQuickNavBarButtonsEnabled()
     }
 
-    /// 选择模式：选区头/尾跳转；若同时存在层级关键节点则并排多一对按钮。非选择且自定义排序+层级时，仅有关键节点时显示底栏。
+    /// 选择模式：选区头/尾跳转（任意排序）；若同时满足层级关键节点条件则并排多一对按钮。非选择时仅自定义排序+层级+有关键节点时显示底栏。
     internal func updateSelectionQuickNavToolbar() {
         guard let nav = navigationController else { return }
         if selectionMode != .none {
             let flexLeading = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
             let flexTrailing = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
-            if supportsHierarchyNumbering, sortPreference == .custom, gridView.hasHierarchyKeyNodesForToolbar {
+            if showsHierarchyKeyNodeToolbarControls {
                 let gap = UIBarButtonItem(barButtonSystemItem: .fixedSpace, target: nil, action: nil)
                 gap.width = 20
                 toolbarItems = [
@@ -852,7 +857,7 @@ class BasePhotoViewController: UIViewController {
             nav.setToolbarHidden(false, animated: true)
             return
         }
-        if supportsHierarchyNumbering, sortPreference == .custom, gridView.hasHierarchyKeyNodesForToolbar {
+        if showsHierarchyKeyNodeToolbarControls {
             let flexLeading = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
             let flexTrailing = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
             toolbarItems = [flexLeading, hierarchyKeyNodePreviousBarButton, hierarchyKeyNodeNextBarButton, flexTrailing]

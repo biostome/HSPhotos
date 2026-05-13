@@ -1459,6 +1459,7 @@ extension PhotoGridView: CustomVerticalScrollIndicatorDelegate {
 
 // MARK: - 选择模式快速定位（连续块头 / 尾）
 
+/// 选区「上一处 / 下一处」：沿当前 `visibleAssets` 顺序在连续选中块的头/尾之间跳转，**与 `sortPreference` 无关**（任意排序均可）。
 extension PhotoGridView {
 
     /// 将链式锚点对齐到「选中序号最大」（最近选入）的格；无选中或非选择模式时清空。
@@ -1564,6 +1565,7 @@ extension PhotoGridView {
 
     private static let selectionQuickNavHighlightDelay: TimeInterval = 0.32
 
+    /// 多选或范围选择时启用选区跳转逻辑；**不**检查排序方式。
     private var selectionQuickNavIsActive: Bool {
         selectionMode == .multiple || selectionMode == .range
     }
@@ -1605,8 +1607,9 @@ extension PhotoGridView {
     }
 }
 
-// MARK: - 层级关键节点（有后代）快速跳转（浏览 / 选择模式下均可用）
+// MARK: - 层级关键节点（有后代）快速跳转
 
+/// 仅在 **自定义排序** 且支持层级编号时可用；浏览与选择模式下均可与选区跳转并存。
 extension PhotoGridView {
 
     /// 当前是否存在至少一个可跳转的关键节点（用于底栏是否显示关键节点按钮组）。
@@ -1649,7 +1652,7 @@ extension PhotoGridView {
         case towardHigherIndex
     }
 
-    /// 自定义排序、支持层级且已绑定相册时，允许关键节点跳转（与选择模式无关）。
+    /// 自定义排序、支持层级且已绑定相册时，允许关键节点跳转（**非自定义排序下不启用**，与选择模式无关）。
     private var hierarchyKeyNodeNavAvailable: Bool {
         supportsHierarchyNumbering && sortPreference == .custom && currentCollection != nil
     }
