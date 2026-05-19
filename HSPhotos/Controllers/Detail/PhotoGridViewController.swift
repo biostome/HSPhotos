@@ -9,6 +9,8 @@ import UIKit
 import Photos
 
 class PhotoGridViewController: BasePhotoViewController {
+    private var hierarchyShortcutAnchorAssetID: String?
+    private var hierarchyShortcutLastShouldCollapse: Bool?
     
     private lazy var shareButton: UIButton = {
         var config: UIButton.Configuration
@@ -334,7 +336,9 @@ class PhotoGridViewController: BasePhotoViewController {
 
     private func performHierarchyCollapseShortcut(shouldCollapse: Bool) {
         guard sortPreference == .custom, supportsHierarchyNumbering else { return }
-        guard let centerAsset = gridView.centerVisibleAsset else { return }
+        let isContinuingSameAction = hierarchyShortcutLastShouldCollapse == shouldCollapse
+        let anchorAsset = isContinuingSameAction ? assetForHierarchyShortcutAnchor() : nil
+        guard let centerAsset = anchorAsset ?? gridView.centerVisibleAsset else { return }
         guard let target = PhotoNumberingService.shared.nearestCollapsibleAncestor(
             from: centerAsset,
             in: assets,
@@ -343,8 +347,32 @@ class PhotoGridViewController: BasePhotoViewController {
         ) else { return }
 
         PhotoNumberingService.shared.toggleCollapse(target, in: collection)
+        hierarchyShortcutAnchorAssetID = target.localIdentifier
+        hierarchyShortcutLastShouldCollapse = shouldCollapse
         gridView.refreshParagraphDisplay()
         updateOperationMenu()
+    }
+
+    private func assetForHierarchyShortcutAnchor() -> PHAsset? {
+        guard let id = hierarchyShortcutAnchorAssetID else { return nil }
+        return assets.first { $0.localIdentifier == id }
+    }
+
+    private func resetHierarchyShortcutAnchor() {
+        hierarchyShortcutAnchorAssetID = nil
+        hierarchyShortcutLastShouldCollapse = nil
+    }
+
+    override func onChanged(sort preference: PhotoSortPreference) {
+        resetHierarchyShortcutAnchor()
+        super.onChanged(sort: preference)
+    }
+
+    @objc override internal func scrollViewDidScroll(_ scrollView: UIScrollView) {
+        if scrollView.isDragging {
+            resetHierarchyShortcutAnchor()
+        }
+        super.scrollViewDidScroll(scrollView)
     }
     
     private func makeSharePlaceholderText(for count: Int) -> String {
