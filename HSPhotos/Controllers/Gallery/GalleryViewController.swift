@@ -125,9 +125,9 @@ class GalleryViewController: BasePhotoViewController {
         // 更新排序按钮菜单
         sortBarButton.menu = createSortMenu()
     }
-    
-    @objc(photoGridView:didPasteAssets:after:) override func photoGridView(_ photoGridView: PhotoGridView, didPasteAssets assets: [PHAsset], after: PHAsset) {
-        // 实现粘贴功能
+
+    override func refreshSortUIAfterPasteIfNeeded() {
+        sortBarButton.menu = createSortMenu()
     }
     
     @objc(photoGridView:didSelectItemAtAsset:) override func photoGridView(_ photoGridView: PhotoGridView, didSelectItemAt asset: PHAsset) {

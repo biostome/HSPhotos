@@ -344,6 +344,15 @@ class PhotoChangesService {
     ///   - at: 插入位置
     ///   - isUndoOperation: 是否为撤销操作，撤销操作不添加新的撤销记录
     static func paste(assets: [PHAsset], into destinationCollection: PHAssetCollection, at insertIndex: Int, isUndoOperation: Bool = false, completion: @escaping SortCompletion) {
+        guard PHPhotoLibrary.authorizationStatus() == .authorized || PHPhotoLibrary.authorizationStatus() == .limited else {
+            completion(false, "没有照片库访问权限")
+            return
+        }
+        guard !assets.isEmpty else {
+            completion(false, "没有可粘贴的资源")
+            return
+        }
+
         PHPhotoLibrary.shared().performChanges({
             guard let changeRequest = PHAssetCollectionChangeRequest(for: destinationCollection) else {
                 return

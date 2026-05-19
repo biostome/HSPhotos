@@ -15,21 +15,6 @@ enum PhotoSelectionMode {
     case range
 }
 
-// 定义排序逻辑的自定义错误
-enum PhotoSortError: Error, LocalizedError {
-    case notEnoughPhotosSelected
-    case anchorPhotoMissing
-
-    var errorDescription: String? {
-        switch self {
-        case .notEnoughPhotosSelected:
-            return "至少需要选择两张照片才能进行排序。"
-        case .anchorPhotoMissing:
-            return "内部错误：无法在照片数组中找到作为排序基准的锚点照片。"
-        }
-    }
-}
-
 protocol PhotoGridViewDelegate {
     func photoGridView(_ photoGridView: PhotoGridView, didSelectItemAt indexPath: IndexPath)
     func photoGridView(_ photoGridView: PhotoGridView, didSelectItemAt asset: PHAsset)
@@ -654,32 +639,11 @@ class PhotoGridView: UIView {
     }
 
     func sort() throws -> [PHAsset] {
-        guard selectedPhotos.count > 1 else {
-            throw PhotoSortError.notEnoughPhotosSelected
-        }
-
-        // 确定排序基准照片：优先使用锚点，如果没有锚点则使用第一张选中的照片
-        let currentAnchorPhoto: PHAsset
-        if let anchorPhoto = anchorPhoto {
-            // 锚点照片即使没有被选中也可以作为排序基准
-            currentAnchorPhoto = anchorPhoto
-        } else {
-            // 没有锚点时，使用第一张选中的照片作为基准
-            currentAnchorPhoto = selectedPhotos.first!
-        }
-
-        // 获取要移动的照片（除了基准照片之外的所有选中照片）
-        let photosToMove = selectedPhotos.filter { $0.localIdentifier != currentAnchorPhoto.localIdentifier }
-        let identifiersToMove = Set(photosToMove.map { $0.localIdentifier })
-        var temporaryAssets = self.assets.filter { !identifiersToMove.contains($0.localIdentifier) }
-
-        guard let anchorIndex = temporaryAssets.firstIndex(of: currentAnchorPhoto) else {
-            throw PhotoSortError.anchorPhotoMissing
-        }
-
-        // 按选中顺序插入照片（基准照片始终在首位，其余按选中顺序跟随）
-        temporaryAssets.insert(contentsOf: photosToMove, at: anchorIndex + 1)
-        return temporaryAssets
+        try PhotoAnchorSortLogic.sortedAssets(
+            in: assets,
+            selectedPhotos: selectedPhotos,
+            anchorPhoto: anchorPhoto
+        )
     }
 
     func clearSelected() {

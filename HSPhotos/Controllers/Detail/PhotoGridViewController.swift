@@ -211,67 +211,10 @@ class PhotoGridViewController: BasePhotoViewController {
         navigationItem.rightBarButtonItems = current
     }
     
-    @objc(photoGridView:didPasteAssets:after:) override func photoGridView(_ photoGridView: PhotoGridView, didPasteAssets assets: [PHAsset], after: PHAsset) {
-        guard let index = self.assets.firstIndex(of: after) else {
-            showAlert(title: "粘贴失败", message: "无法找到目标照片")
-            return
-        }
-        
-        let insertIndex = index + 1
-        
-        let loadingAlert = UIAlertController(title: "粘贴中", message: "正在粘贴照片...", preferredStyle: .alert)
-        present(loadingAlert, animated: true)
-        
-        // 先更新本地数据和自定义排序
-        var newAssets = self.assets
-        newAssets.insert(contentsOf: assets, at: insertIndex)
-
-        // 提交到系统相册
-        PHPhotoLibrary.shared().performChanges({
-            guard let changeRequest = PHAssetCollectionChangeRequest(for: self.collection) else {
-                return
-            }
-            changeRequest.insertAssets(assets as NSArray, at: IndexSet(integer: insertIndex))
-        }, completionHandler: { [weak self] success, error in
-            DispatchQueue.main.async {
-                loadingAlert.dismiss(animated: true)
-                
-                guard let self = self else { return }
-                
-                if success {
-                    // 直接使用我们维护的顺序，不重新加载
-                    self.assets = newAssets
-                    
-                    // 记录撤销操作
-                    let undoAction = UndoAction.paste(assets: assets, into: self.collection, at: insertIndex)
-                    self.addAction(undoAction)
-                    
-                    // 清除选中状态
-                    self.gridView.clearSelected()
-                    
-                    // 重要：粘贴操作后，自动切换到自定义排序模式
-                    if self.sortPreference != .custom {
-                        self.sortPreference = .custom
-                        // 同步排序偏好到 PhotoGridView
-                        self.gridView.sortPreference = .custom
-                        // 保存排序偏好
-                        PhotoSortPreference.custom.set(preference: self.collection)
-                        self.refreshFetchOptionsForCurrentSortPreference()
-                        // 更新排序按钮菜单
-                        self.sortButton.menu = self.createSortMenu()
-                    }
-                    
-                    self.showAlert(title: "粘贴成功", message: "已成功粘贴 \(assets.count) 张照片")
-                } else {
-                    self.showAlert(title: "粘贴失败", message: error?.localizedDescription ?? "无法粘贴照片")
-                }
-                
-                self.updateUndoRedoButtons()
-                self.updateOperationMenu()
-            }
-        })
+    override func refreshSortUIAfterPasteIfNeeded() {
+        sortButton.menu = createSortMenu()
     }
-    
+
     override func updateSelectAllButton() {
         super.updateSelectAllButton()
         updateBottomActionButtons()
