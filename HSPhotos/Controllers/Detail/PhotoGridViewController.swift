@@ -71,6 +71,22 @@ class PhotoGridViewController: BasePhotoViewController {
         return button
     }()
 
+    private lazy var hierarchyCollapseButton: UIButton = {
+        makeBottomIconButton(
+            systemImageName: "rectangle.compress.vertical",
+            accessibilityLabel: "折叠中心层级",
+            action: #selector(didTapHierarchyCollapseButton)
+        )
+    }()
+
+    private lazy var hierarchyExpandButton: UIButton = {
+        makeBottomIconButton(
+            systemImageName: "rectangle.expand.vertical",
+            accessibilityLabel: "展开中心层级",
+            action: #selector(didTapHierarchyExpandButton)
+        )
+    }()
+
     private lazy var overlaySettingsBarButton: UIBarButtonItem = {
         UIBarButtonItem(
             image: UIImage(systemName: "gearshape"),
@@ -96,12 +112,24 @@ class PhotoGridViewController: BasePhotoViewController {
         
         // 添加底部排序按钮
         view.addSubview(sortButton)
+        view.addSubview(hierarchyCollapseButton)
+        view.addSubview(hierarchyExpandButton)
         view.addSubview(shareButton)
         NSLayoutConstraint.activate([
             sortButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
             sortButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
             sortButton.heightAnchor.constraint(equalToConstant: 44),
             sortButton.widthAnchor.constraint(equalToConstant: 44),
+
+            hierarchyCollapseButton.bottomAnchor.constraint(equalTo: sortButton.bottomAnchor),
+            hierarchyCollapseButton.leadingAnchor.constraint(equalTo: sortButton.trailingAnchor, constant: 12),
+            hierarchyCollapseButton.heightAnchor.constraint(equalToConstant: 44),
+            hierarchyCollapseButton.widthAnchor.constraint(equalToConstant: 44),
+
+            hierarchyExpandButton.bottomAnchor.constraint(equalTo: sortButton.bottomAnchor),
+            hierarchyExpandButton.leadingAnchor.constraint(equalTo: hierarchyCollapseButton.trailingAnchor, constant: 12),
+            hierarchyExpandButton.heightAnchor.constraint(equalToConstant: 44),
+            hierarchyExpandButton.widthAnchor.constraint(equalToConstant: 44),
             
             shareButton.bottomAnchor.constraint(equalTo: view.safeAreaLayoutGuide.bottomAnchor, constant: -20),
             shareButton.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
@@ -152,6 +180,7 @@ class PhotoGridViewController: BasePhotoViewController {
     override func updateOperationMenu() {
         menuButton.menu = createOperationMenu()
         menuBarButton.menu = createOperationMenu()
+        updateBottomActionButtons()
     }
     
     override func updateNavigationBar() {
@@ -266,10 +295,56 @@ class PhotoGridViewController: BasePhotoViewController {
     private func updateBottomActionButtons() {
         let inSelectionMode = selectionMode != .none
         let hasSelectedAssets = gridView.hasSelectedAssets
+        let canUseHierarchyShortcuts = sortPreference == .custom && supportsHierarchyNumbering
         
         sortButton.isHidden = inSelectionMode
+        hierarchyCollapseButton.isHidden = inSelectionMode || !canUseHierarchyShortcuts
+        hierarchyExpandButton.isHidden = inSelectionMode || !canUseHierarchyShortcuts
         shareButton.isHidden = !inSelectionMode
         shareButton.isEnabled = hasSelectedAssets
+    }
+
+    private func makeBottomIconButton(systemImageName: String, accessibilityLabel: String, action: Selector) -> UIButton {
+        var config: UIButton.Configuration
+        if #available(iOS 26.0, *) {
+            config = .glass()
+        } else {
+            config = .filled()
+            config.baseBackgroundColor = UIColor.systemGray5.withAlphaComponent(0.8)
+        }
+        config.image = UIImage(systemName: systemImageName)
+        config.baseForegroundColor = UIColor.systemBlue
+        config.contentInsets = NSDirectionalEdgeInsets(top: 10, leading: 10, bottom: 10, trailing: 10)
+
+        let button = UIButton(type: .custom)
+        button.configuration = config
+        button.translatesAutoresizingMaskIntoConstraints = false
+        button.addTarget(self, action: action, for: .touchUpInside)
+        button.accessibilityLabel = accessibilityLabel
+        return button
+    }
+
+    @objc private func didTapHierarchyCollapseButton() {
+        performHierarchyCollapseShortcut(shouldCollapse: true)
+    }
+
+    @objc private func didTapHierarchyExpandButton() {
+        performHierarchyCollapseShortcut(shouldCollapse: false)
+    }
+
+    private func performHierarchyCollapseShortcut(shouldCollapse: Bool) {
+        guard sortPreference == .custom, supportsHierarchyNumbering else { return }
+        guard let centerAsset = gridView.centerVisibleAsset else { return }
+        guard let target = PhotoNumberingService.shared.nearestCollapsibleAncestor(
+            from: centerAsset,
+            in: assets,
+            collection: collection,
+            shouldBecomeCollapsed: shouldCollapse
+        ) else { return }
+
+        PhotoNumberingService.shared.toggleCollapse(target, in: collection)
+        gridView.refreshParagraphDisplay()
+        updateOperationMenu()
     }
     
     private func makeSharePlaceholderText(for count: Int) -> String {

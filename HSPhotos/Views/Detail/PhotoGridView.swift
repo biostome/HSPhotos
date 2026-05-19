@@ -114,6 +114,21 @@ class PhotoGridView: UIView {
     // 获取所有资产（包括隐藏的）
     public var allAssets: [PHAsset] { assets }
 
+    /// 当前屏幕中心区域对应的可见照片，用于模糊快捷操作定位目标。
+    public var centerVisibleAsset: PHAsset? {
+        layoutIfNeeded()
+        collectionView.layoutIfNeeded()
+
+        let centerInGrid = CGPoint(x: bounds.midX, y: bounds.midY)
+        let centerInCollection = convert(centerInGrid, to: collectionView)
+        if let indexPath = collectionView.indexPathForItem(at: centerInCollection),
+           indexPath.item < visibleAssets.count {
+            return visibleAssets[indexPath.item]
+        }
+
+        return nearestVisibleAsset(to: centerInCollection)
+    }
+
     public var selectionMode: PhotoSelectionMode = .none {
         didSet {
             collectionView.allowsMultipleSelection = selectionMode == .multiple || selectionMode == .range
@@ -510,6 +525,19 @@ class PhotoGridView: UIView {
     private func getAsset(at indexPath: IndexPath) -> PHAsset? {
         guard indexPath.item < visibleAssets.count else { return nil }
         return visibleAssets[indexPath.item]
+    }
+
+    private func nearestVisibleAsset(to point: CGPoint) -> PHAsset? {
+        guard !visibleAssets.isEmpty else { return nil }
+        guard let layout = collectionView.collectionViewLayout as? UICollectionViewFlowLayout else { return nil }
+
+        let itemHeight = max(1, layout.itemSize.height + layout.minimumLineSpacing)
+        let itemWidth = max(1, layout.itemSize.width + layout.minimumInteritemSpacing)
+        let approximateRow = max(0, Int((point.y - layout.sectionInset.top) / itemHeight))
+        let approximateColumn = max(0, min(columns - 1, Int((point.x - layout.sectionInset.left) / itemWidth)))
+        let approximateIndex = approximateRow * columns + approximateColumn
+        let clampedIndex = max(0, min(approximateIndex, visibleAssets.count - 1))
+        return visibleAssets[clampedIndex]
     }
 
     /// 合并「必须刷的 indexPath」与「当前屏幕上且序号可能已变的 cell」，避免对整表做 O(n×m) 的 `contains` 与上万次 `reloadItems`。
@@ -1340,7 +1368,7 @@ extension PhotoGridView {
                 if hasHierarchyDescendants || isCurrentHierarchyCollapsed {
                     let collapseAction = UIAction(
                         title: isCurrentHierarchyCollapsed ? "展开" : "折叠",
-                        image: UIImage(systemName: isCurrentHierarchyCollapsed ? "chevron.down" : "chevron.up")
+                        image: UIImage(systemName: isCurrentHierarchyCollapsed ? "rectangle.expand.vertical" : "rectangle.compress.vertical")
                     ) { [weak self] _ in
                         guard let self = self else { return }
                         self.numberingService.toggleCollapse(asset, in: collection)
