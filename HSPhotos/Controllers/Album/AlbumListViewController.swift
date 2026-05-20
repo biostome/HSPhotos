@@ -12,22 +12,14 @@ import PhotosUI
 
 class AlbumListViewController: UIViewController {
 
-    private var albumListItems: [AlbumListItem] = []
     private var displayedItems: [AlbumListItem] = []
-    private var expandedFolderIDs: Set<String> = []
     private var targetAlbumForAddingPhotos: PHAssetCollection?
     private let backgroundGradientLayer = CAGradientLayer()
     private let collectionList: PHCollectionList?
-    
-    // 排序类型
-    enum SortType {
-        case modificationDate
-        case name
-        case custom
-    }
-    
-    // 当前排序类型
-    private var currentSortType: SortType = .custom
+    private let collectionOperations = AlbumCollectionOperations()
+    private lazy var viewModel = AlbumListViewModel(parentList: collectionList)
+    private lazy var router = AlbumListRouter(isPickerMode: isPickerMode, onAlbumPicked: onAlbumPicked)
+
     private let isPickerMode: Bool
     private let onAlbumPicked: ((PHAssetCollection) -> Void)?
     private lazy var addButton: UIBarButtonItem = {
@@ -98,6 +90,9 @@ class AlbumListViewController: UIViewController {
         setupNavigationBar()
         setupTraitChangeObserver()
         registerPhotoLibraryObserver()
+        viewModel.onDidUpdate = { [weak self] in
+            self?.applyCurrentDisplayData(animated: false)
+        }
         loadAlbums()
     }
     
@@ -215,13 +210,10 @@ class AlbumListViewController: UIViewController {
 
     /// 当前选中项里可展开的文件夹 ID（用于选择模式下的展开/收起）
     private func selectedExpandableFolderIDs() -> Set<String> {
-        let selected = albumListView.multiSelectedIdentifiers
-        var ids = Set<String>()
-        for item in displayedItems {
-            guard selected.contains(item.localIdentifier), item.isFolder, item.canExpand else { continue }
-            ids.insert(item.localIdentifier)
-        }
-        return ids
+        viewModel.selectedExpandableFolderIDs(
+            in: displayedItems,
+            selectedIdentifiers: albumListView.multiSelectedIdentifiers
+        )
     }
 
     
@@ -243,185 +235,43 @@ class AlbumListViewController: UIViewController {
     
     // 按修改日期排序
     private func sortByModificationDate() {
-        currentSortType = .modificationDate
-        loadAlbumsAsync()
+        viewModel.sortKind = .modificationDate
+        loadAlbums()
     }
-    
-    // 按名称排序
+
     private func sortByName() {
-        currentSortType = .name
-        loadAlbumsAsync()
+        viewModel.sortKind = .name
+        loadAlbums()
     }
-    
-    // 按自定义顺序排序
+
     private func sortByCustomOrder() {
-        currentSortType = .custom
-        loadAlbumsAsync()
-    }
-    
-    // 异步加载相册列表
-    private func loadAlbumsAsync() {
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
-            guard let self = self else { return }
-            var items: [AlbumListItem] = []
-            
-            if let collectionList = self.collectionList {
-                items = self.fetchItems(in: collectionList)
-            } else {
-                let folderOptions = self.getFetchOptions()
-                let allFolders = PHCollectionList.fetchCollectionLists(with: .folder, subtype: .any, options: folderOptions)
-                
-                let albumOptions = self.getFetchOptions()
-                let allAlbums = PHAssetCollection.fetchAssetCollections(with: .album, subtype: .any, options: albumOptions)
-                
-                // 一次遍历：收集「曾作为任意文件夹子项」出现的 localIdentifier，等价于原嵌套 O(n²) 判断「是否有父文件夹」
-                var childIDsContainedInSomeFolder = Set<String>()
-                allFolders.enumerateObjects { parentFolder, _, _ in
-                    let subCollections = PHCollection.fetchCollections(in: parentFolder, options: nil)
-                    subCollections.enumerateObjects { sub, _, _ in
-                        childIDsContainedInSomeFolder.insert(sub.localIdentifier)
-                    }
-                }
-                
-                var topLevelFolders: [PHCollectionList] = []
-                allFolders.enumerateObjects { folder, _, _ in
-                    if !childIDsContainedInSomeFolder.contains(folder.localIdentifier) {
-                        topLevelFolders.append(folder)
-                    }
-                }
-                
-                var topLevelAlbums: [PHAssetCollection] = []
-                allAlbums.enumerateObjects { album, _, _ in
-                    if !childIDsContainedInSomeFolder.contains(album.localIdentifier) {
-                        topLevelAlbums.append(album)
-                    }
-                }
-                
-                for folder in topLevelFolders {
-                    items.append(AlbumListItem(type: .folder(folder)))
-                }
-                for album in topLevelAlbums {
-                    items.append(AlbumListItem(type: .album(album)))
-                }
-            }
-            
-            let sortedItems = items
-            
-            DispatchQueue.main.async { [weak self] in
-                guard let self = self else { return }
-                self.albumListItems = sortedItems
-                self.applyCurrentDisplayData(animated: false)
-            }
-        }
+        viewModel.sortKind = .custom
+        loadAlbums()
     }
 
     private func applyCurrentDisplayData(animated: Bool = false) {
-        switch albumListView.layoutMode {
-        case .grid:
-            displayedItems = albumListItems
-        case .list:
-            var visitedFolderIDs = Set<String>()
-            displayedItems = buildVisibleItems(from: albumListItems, level: 0, visitedFolderIDs: &visitedFolderIDs)
-        }
+        displayedItems = viewModel.displayedItems(layoutMode: albumListView.layoutMode)
         albumListView.setCollections(displayedItems, animated: animated)
         updateToggleExpandCollapseButtonState()
     }
-    
-    private func buildVisibleItems(from items: [AlbumListItem], level: Int, visitedFolderIDs: inout Set<String>) -> [AlbumListItem] {
-        var visibleItems: [AlbumListItem] = []
-        
-        for item in items {
-            if item.isFolder, let folder = item.collectionList {
-                if visitedFolderIDs.contains(item.localIdentifier) {
-                    continue
-                }
-                visitedFolderIDs.insert(item.localIdentifier)
-                
-                let childItems = fetchItems(in: folder)
-                let canExpand = !childItems.isEmpty
-                let isExpanded = canExpand && expandedFolderIDs.contains(item.localIdentifier)
-                
-                let displayItem = makeDisplayItem(from: item, level: level, canExpand: canExpand, isExpanded: isExpanded)
-                visibleItems.append(displayItem)
-                
-                if isExpanded {
-                    let childVisibleItems = buildVisibleItems(from: childItems, level: level + 1, visitedFolderIDs: &visitedFolderIDs)
-                    visibleItems.append(contentsOf: childVisibleItems)
-                }
-            } else {
-                let displayItem = makeDisplayItem(from: item, level: level, canExpand: false, isExpanded: false)
-                visibleItems.append(displayItem)
-            }
-        }
-        
-        return visibleItems
-    }
-    
-    private func makeDisplayItem(from item: AlbumListItem, level: Int, canExpand: Bool, isExpanded: Bool) -> AlbumListItem {
-        let displayItem = AlbumListItem(type: item.type)
-        displayItem.hierarchyLevel = level
-        displayItem.canExpand = canExpand
-        displayItem.isExpanded = isExpanded
-        return displayItem
-    }
-    
-    private func fetchItems(in collectionList: PHCollectionList) -> [AlbumListItem] {
-        var items: [AlbumListItem] = []
-        let options = getFetchOptions()
-        let collections = PHCollection.fetchCollections(in: collectionList, options: options)
-        
-        collections.enumerateObjects { collection, _, _ in
-            if let subFolder = collection as? PHCollectionList {
-                items.append(AlbumListItem(type: .folder(subFolder)))
-            } else if let subAlbum = collection as? PHAssetCollection {
-                items.append(AlbumListItem(type: .album(subAlbum)))
-            }
-        }
-        
-        return items
-    }
-    
+
     @objc private func toggleExpandCollapse() {
         guard albumListView.layoutMode == .list else { return }
 
         if albumListView.isMultiSelectMode {
             let ids = selectedExpandableFolderIDs()
-            guard !ids.isEmpty else { return }
-            var changed = false
-            if ids.isSubset(of: expandedFolderIDs) {
-                for id in ids where expandedFolderIDs.contains(id) {
-                    expandedFolderIDs.remove(id)
-                    changed = true
-                }
-            } else {
-                for id in ids where !expandedFolderIDs.contains(id) {
-                    expandedFolderIDs.insert(id)
-                    changed = true
-                }
-            }
-            if changed { applyCurrentDisplayData(animated: true) }
+            guard viewModel.toggleExpansion(forSelectedFolderIDs: ids) else { return }
+            applyCurrentDisplayData(animated: true)
             updateToggleExpandCollapseButtonState()
             return
         }
 
-        let expandableFolderIDs = allExpandableFolderIDs()
-        guard !expandableFolderIDs.isEmpty else { return }
-
-        if expandableFolderIDs.isSubset(of: expandedFolderIDs) {
-            expandedFolderIDs.subtract(expandableFolderIDs)
-        } else {
-            expandedFolderIDs.formUnion(expandableFolderIDs)
-        }
-
+        viewModel.toggleExpandAllFolders()
         applyCurrentDisplayData(animated: true)
     }
-    
+
     @objc private func cancelPicker() {
-        if let navigationController = navigationController, navigationController.presentingViewController != nil {
-            navigationController.dismiss(animated: true)
-        } else {
-            dismiss(animated: true)
-        }
+        router.dismissPicker(from: self)
     }
     
     private func updateToggleExpandCollapseButtonState() {
@@ -436,7 +286,7 @@ class AlbumListViewController: UIViewController {
             }
             let selectedExpandable = selectedExpandableFolderIDs()
             let hasTargets = !selectedExpandable.isEmpty
-            let allSelectedExpanded = hasTargets && selectedExpandable.isSubset(of: expandedFolderIDs)
+            let allSelectedExpanded = hasTargets && selectedExpandable.isSubset(of: viewModel.expandedFolderIDs)
             toggleExpandCollapseButton.image = allSelectedExpanded ? collapseImage : expandImage
             toggleExpandCollapseButton.accessibilityLabel = allSelectedExpanded ? "收起所选文件夹" : "展开所选文件夹"
             toggleExpandCollapseButton.isEnabled = hasTargets
@@ -444,9 +294,9 @@ class AlbumListViewController: UIViewController {
             return
         }
 
-        let expandableFolderIDs = allExpandableFolderIDs()
+        let expandableFolderIDs = viewModel.allExpandableFolderIDs()
         let hasExpandableFolders = !expandableFolderIDs.isEmpty
-        let allExpanded = hasExpandableFolders && expandableFolderIDs.isSubset(of: expandedFolderIDs)
+        let allExpanded = hasExpandableFolders && expandableFolderIDs.isSubset(of: viewModel.expandedFolderIDs)
         toggleExpandCollapseButton.image = allExpanded ? collapseImage : expandImage
         toggleExpandCollapseButton.accessibilityLabel = allExpanded ? "收起全部" : "展开全部"
         toggleExpandCollapseButton.isEnabled = isListMode && hasExpandableFolders
@@ -463,34 +313,6 @@ class AlbumListViewController: UIViewController {
 
         navigationItem.setRightBarButtonItems(rightItems, animated: true)
     }
-    
-    private func allExpandableFolderIDs() -> Set<String> {
-        var visitedFolderIDs = Set<String>()
-        return collectExpandableFolderIDs(from: albumListItems, visitedFolderIDs: &visitedFolderIDs)
-    }
-    
-    private func collectExpandableFolderIDs(from items: [AlbumListItem], visitedFolderIDs: inout Set<String>) -> Set<String> {
-        var folderIDs = Set<String>()
-        
-        for item in items {
-            guard item.isFolder, let folder = item.collectionList else { continue }
-            guard !visitedFolderIDs.contains(item.localIdentifier) else { continue }
-            visitedFolderIDs.insert(item.localIdentifier)
-            
-            let childItems = fetchItems(in: folder)
-            if !childItems.isEmpty {
-                folderIDs.insert(item.localIdentifier)
-            }
-            
-            folderIDs.formUnion(collectExpandableFolderIDs(from: childItems, visitedFolderIDs: &visitedFolderIDs))
-        }
-        
-        return folderIDs
-    }
-    
-
-    
-
     
     @objc private func createAlbum() {
         // 显示输入框让用户输入相册名称
@@ -517,117 +339,53 @@ class AlbumListViewController: UIViewController {
     }
     
     private func performCreateAlbum(with name: String) {
-        // 请求权限
-        PHPhotoLibrary.requestAuthorization { [weak self] status in
-            DispatchQueue.main.async {
-                guard let self = self, status == .authorized else {
-                    if let self = self {
-                        self.showPermissionViewController()
-                    }
-                    return
-                }
-                
-                // 创建相册
-                PHPhotoLibrary.shared().performChanges {
-                    // 创建新相册
-                    let createAlbumRequest = PHAssetCollectionChangeRequest.creationRequestForAssetCollection(withTitle: name)
-                    let albumPlaceholder = createAlbumRequest.placeholderForCreatedAssetCollection
-                    
-                    // 如果当前在文件夹内，将新相册添加到该文件夹
-                    if let collectionList = self.collectionList {
-                        if let collectionListChangeRequest = PHCollectionListChangeRequest(for: collectionList) {
-                            collectionListChangeRequest.addChildCollections([albumPlaceholder as Any] as NSArray)
-                        }
-                    }
-                } completionHandler: { [weak self] success, error in
-                    DispatchQueue.main.async {
-                        guard let self = self else { return }
-                        
-                        if success {
-                            // 重新加载相册列表
-                            self.albumListItems.removeAll()
-                            self.loadAlbums()
-                            
-                            // 延迟一下，确保相册列表已经加载完成
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                // 查找新创建的相册
-                                if let newAlbum = self.albumListItems.first(where: { $0.title == name }) {
-                                    // 找到新相册在当前可见数组中的索引
-                                    if let index = self.displayedItems.firstIndex(where: { $0.localIdentifier == newAlbum.localIdentifier }) {
-                                        // 滚动到新创建的相册位置
-                                        let indexPath = IndexPath(item: index, section: 0)
-                                        self.albumListView.scrollToItem(at: indexPath, at: .top, animated: true)
-                                    }
-                                }
-                            }
-                        } else {
-                            // 显示错误信息
-                            let errorMessage = error?.localizedDescription ?? "创建相册失败"
-                            let alertController = UIAlertController(title: "错误", message: errorMessage, preferredStyle: .alert)
-                            alertController.addAction(UIAlertAction(title: "确定", style: .default))
-                            self.present(alertController, animated: true)
-                        }
-                    }
-                }
-            }
+        collectionOperations.createAlbum(titled: name, inParent: collectionList) { [weak self] outcome in
+            self?.handleCollectionWriteOutcome(outcome, clearBeforeReload: true, scrollToTitle: name)
         }
     }
-    
+
     private func performCreateFolder(with name: String) {
-        // 请求权限
-        PHPhotoLibrary.requestAuthorization { [weak self] status in
-            DispatchQueue.main.async {
-                guard let self = self, status == .authorized else {
-                    if let self = self {
-                        self.showPermissionViewController()
-                    }
-                    return
-                }
-                
-                // 创建文件夹
-                PHPhotoLibrary.shared().performChanges {
-                    // 创建新文件夹
-                    let createFolderRequest = PHCollectionListChangeRequest.creationRequestForCollectionList(withTitle: name)
-                    let folderPlaceholder = createFolderRequest.placeholderForCreatedCollectionList
-                    
-                    // 如果当前在文件夹内，将新文件夹添加到该文件夹
-                    if let collectionList = self.collectionList {
-                        if let collectionListChangeRequest = PHCollectionListChangeRequest(for: collectionList) {
-                            collectionListChangeRequest.addChildCollections([folderPlaceholder as Any] as NSArray)
-                        }
-                    }
-                } completionHandler: { [weak self] success, error in
-                    DispatchQueue.main.async {
-                        guard let self = self else { return }
-                        
-                        if success {
-                            // 重新加载相册列表
-                            self.albumListItems.removeAll()
-                            self.loadAlbums()
-                            
-                            // 延迟一下，确保相册列表已经加载完成
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                // 查找新创建的文件夹
-                                if let newFolder = self.albumListItems.first(where: { $0.title == name }) {
-                                    // 找到新文件夹在当前可见数组中的索引
-                                    if let index = self.displayedItems.firstIndex(where: { $0.localIdentifier == newFolder.localIdentifier }) {
-                                        // 滚动到新创建的文件夹位置
-                                        let indexPath = IndexPath(item: index, section: 0)
-                                        self.albumListView.scrollToItem(at: indexPath, at: .top, animated: true)
-                                    }
-                                }
-                            }
-                        } else {
-                            // 显示错误信息
-                            let errorMessage = error?.localizedDescription ?? "创建文件夹失败"
-                            let alertController = UIAlertController(title: "错误", message: errorMessage, preferredStyle: .alert)
-                            alertController.addAction(UIAlertAction(title: "确定", style: .default))
-                            self.present(alertController, animated: true)
-                        }
-                    }
+        collectionOperations.createFolder(titled: name, inParent: collectionList) { [weak self] outcome in
+            self?.handleCollectionWriteOutcome(outcome, clearBeforeReload: true, scrollToTitle: name)
+        }
+    }
+
+    private func handleCollectionWriteOutcome(
+        _ outcome: AlbumCollectionOperationOutcome,
+        clearBeforeReload: Bool = false,
+        scrollToTitle: String? = nil
+    ) {
+        if outcome.isPermissionDenied {
+            showPermissionViewController()
+            return
+        }
+        if outcome.success {
+            if clearBeforeReload {
+                viewModel.clearAllItems()
+            }
+            loadAlbums()
+            if let title = scrollToTitle {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                    self?.scrollToItem(withTitle: title)
                 }
             }
+        } else if let message = outcome.message, !message.isEmpty {
+            presentSimpleAlert(title: "错误", message: message)
         }
+    }
+
+    private func scrollToItem(withTitle title: String) {
+        guard let item = viewModel.item(withTitle: title),
+              let index = displayedItems.firstIndex(where: { $0.localIdentifier == item.localIdentifier }) else {
+            return
+        }
+        albumListView.scrollToItem(at: IndexPath(item: index, section: 0), at: .top, animated: true)
+    }
+
+    private func presentSimpleAlert(title: String, message: String) {
+        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "确定", style: .default))
+        present(alert, animated: true)
     }
     
     @objc private func createFolder() {
@@ -701,29 +459,9 @@ class AlbumListViewController: UIViewController {
     }
     
     private func loadAlbums() {
-        // 调用异步加载方法
-        loadAlbumsAsync()
+        viewModel.reload()
     }
-    
-    // 根据当前排序类型获取PHFetchOptions
-    private func getFetchOptions() -> PHFetchOptions {
-        let options = PHFetchOptions()
-        
-        switch currentSortType {
-        case .modificationDate:
-            // 按修改日期排序（降序）
-            options.sortDescriptors = [NSSortDescriptor(key: "startDate", ascending: false)]
-        case .name:
-            // 按名称排序（升序）
-            options.sortDescriptors = [NSSortDescriptor(key: "localizedTitle", ascending: true)]
-        case .custom:
-            // 按自定义顺序排序（默认顺序）
-            options.sortDescriptors = nil
-        }
-        
-        return options
-    }
-    
+
     override func viewDidLayoutSubviews() {
         super.viewDidLayoutSubviews()
         // 更新渐变层的frame
@@ -760,12 +498,7 @@ extension AlbumListViewController: AlbumListViewDelegate {
         guard item.isFolder else { return }
         guard item.canExpand else { return }
         
-        if expandedFolderIDs.contains(item.localIdentifier) {
-            expandedFolderIDs.remove(item.localIdentifier)
-        } else {
-            expandedFolderIDs.insert(item.localIdentifier)
-        }
-        
+        viewModel.toggleFolderExpansion(identifier: item.localIdentifier)
         applyCurrentDisplayData(animated: true)
     }
     
@@ -784,28 +517,11 @@ extension AlbumListViewController: AlbumListViewDelegate {
     }
     
     func albumListView(_ albumListView: AlbumListView, didSelectItemAt collection: PHAssetCollection) {
-        if isPickerMode {
-            onAlbumPicked?(collection)
-            if let navigationController = navigationController, navigationController.presentingViewController != nil {
-                navigationController.dismiss(animated: true)
-            } else {
-                dismiss(animated: true)
-            }
-            return
-        }
-        
-        let photoVC = PhotoGridViewController(collection: collection)
-        navigationController?.pushViewController(photoVC, animated: true)
+        router.openAlbum(collection, from: self)
     }
-    
+
     func albumListView(_ albumListView: AlbumListView, didSelectFolder collectionList: PHCollectionList) {
-        // 显示文件夹内的子相册列表
-        let folderVC = AlbumListViewController(
-            collectionList: collectionList,
-            isPickerMode: isPickerMode,
-            onAlbumPicked: onAlbumPicked
-        )
-        navigationController?.pushViewController(folderVC, animated: true)
+        router.openFolder(collectionList, from: self)
     }
     
     func albumListView(_ albumListView: AlbumListView, didTapEditTitleFor item: AlbumListItem) {
@@ -849,116 +565,14 @@ extension AlbumListViewController: AlbumListViewDelegate {
     }
     
     private func performEditTitle(for item: AlbumListItem, newTitle: String) {
-        // 请求权限
-        PHPhotoLibrary.requestAuthorization { [weak self] status in
-            DispatchQueue.main.async { 
-                guard let self = self, status == .authorized else {
-                    self?.showPermissionViewController()
-                    return
-                }
-                
-                // 根据类型更新标题
-                switch item.type {
-                case .album(let collection):
-                    // 更新相册标题
-                    PHPhotoLibrary.shared().performChanges { 
-                        let changeRequest = PHAssetCollectionChangeRequest(for: collection)
-                        changeRequest?.title = newTitle
-                    } completionHandler: { [weak self] success, error in
-                        DispatchQueue.main.async { 
-                            guard let self = self else { return }
-                            
-                            if success {
-                                // 重新加载相册列表
-                                self.loadAlbums()
-                            } else {
-                                // 显示错误信息
-                                let errorMessage = error?.localizedDescription ?? "更新标题失败"
-                                let alertController = UIAlertController(title: "错误", message: errorMessage, preferredStyle: .alert)
-                                alertController.addAction(UIAlertAction(title: "确定", style: .default))
-                                self.present(alertController, animated: true)
-                            }
-                        }
-                    }
-                case .folder(let collectionList):
-                    // 更新文件夹标题
-                    PHPhotoLibrary.shared().performChanges { 
-                        let changeRequest = PHCollectionListChangeRequest(for: collectionList)
-                        changeRequest?.title = newTitle
-                    } completionHandler: { [weak self] success, error in
-                        DispatchQueue.main.async { 
-                            guard let self = self else { return }
-                            
-                            if success {
-                                // 重新加载相册列表
-                                self.loadAlbums()
-                            } else {
-                                // 显示错误信息
-                                let errorMessage = error?.localizedDescription ?? "更新标题失败"
-                                let alertController = UIAlertController(title: "错误", message: errorMessage, preferredStyle: .alert)
-                                alertController.addAction(UIAlertAction(title: "确定", style: .default))
-                                self.present(alertController, animated: true)
-                            }
-                        }
-                    }
-                }
-            }
+        collectionOperations.rename(item: item, to: newTitle) { [weak self] outcome in
+            self?.handleCollectionWriteOutcome(outcome)
         }
     }
-    
+
     private func performDelete(for item: AlbumListItem) {
-        // 请求权限
-        PHPhotoLibrary.requestAuthorization { [weak self] status in
-            DispatchQueue.main.async { 
-                guard let self = self, status == .authorized else {
-                    self?.showPermissionViewController()
-                    return
-                }
-                
-                // 根据类型删除
-                switch item.type {
-                case .album(let collection):
-                    // 删除相册
-                    PHPhotoLibrary.shared().performChanges { 
-                        PHAssetCollectionChangeRequest.deleteAssetCollections([collection] as NSArray)
-                    } completionHandler: { [weak self] success, error in
-                        DispatchQueue.main.async { 
-                            guard let self = self else { return }
-                            
-                            if success {
-                                // 重新加载相册列表
-                                self.loadAlbums()
-                            } else {
-                                // 显示错误信息
-                                let errorMessage = error?.localizedDescription ?? "删除相册失败"
-                                let alertController = UIAlertController(title: "错误", message: errorMessage, preferredStyle: .alert)
-                                alertController.addAction(UIAlertAction(title: "确定", style: .default))
-                                self.present(alertController, animated: true)
-                            }
-                        }
-                    }
-                case .folder(let collectionList):
-                    // 删除文件夹
-                    PHPhotoLibrary.shared().performChanges { 
-                        PHCollectionListChangeRequest.deleteCollectionLists([collectionList] as NSArray)
-                    } completionHandler: { [weak self] success, error in
-                        DispatchQueue.main.async { 
-                            guard let self = self else { return }
-                            
-                            if success {
-                                // 重新加载相册列表
-                                self.loadAlbums()
-                            } else {
-                                // 显示错误信息
-                                let errorMessage = error?.localizedDescription ?? "删除文件夹失败"
-                                let alertController = UIAlertController(title: "错误", message: errorMessage, preferredStyle: .alert)
-                                alertController.addAction(UIAlertAction(title: "确定", style: .default))
-                                self.present(alertController, animated: true)
-                            }
-                        }
-                    }
-                }
-            }
+        collectionOperations.delete(item: item) { [weak self] outcome in
+            self?.handleCollectionWriteOutcome(outcome)
         }
     }
 }
@@ -980,87 +594,43 @@ extension AlbumListViewController: PHPickerViewControllerDelegate {
     }
     
     private func addPickedPhotos(_ results: [PHPickerResult], to targetAlbum: PHAssetCollection) {
-        let selectedIdentifiers = results.compactMap { $0.assetIdentifier }
-        guard !selectedIdentifiers.isEmpty else { return }
-        
-        let fetchResult = PHAsset.fetchAssets(withLocalIdentifiers: selectedIdentifiers, options: nil)
-        var selectedAssets: [PHAsset] = []
-        fetchResult.enumerateObjects { asset, _, _ in
-            selectedAssets.append(asset)
+        guard !results.isEmpty else { return }
+
+        let loadingAlert = UIAlertController(title: "添加中", message: "正在将照片添加到相簿...", preferredStyle: .alert)
+        present(loadingAlert, animated: true)
+
+        var finished = false
+        let finish: (Bool, String, String) -> Void = { [weak self] showAlert, title, message in
+            guard !finished else { return }
+            finished = true
+            loadingAlert.dismiss(animated: true) {
+                guard let self, showAlert else { return }
+                self.presentSimpleAlert(title: title, message: message)
+            }
         }
-        guard !selectedAssets.isEmpty else { return }
-        
-        let existingAssets = PHAsset.fetchAssets(in: targetAlbum, options: nil)
-        var existingAssetIDs = Set<String>()
-        existingAssets.enumerateObjects { asset, _, _ in
-            existingAssetIDs.insert(asset.localIdentifier)
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) {
+            finish(true, "添加失败", "操作超时，请稍后重试")
         }
-        
-        let assetsToAdd = selectedAssets.filter { !existingAssetIDs.contains($0.localIdentifier) }
-        if assetsToAdd.isEmpty {
-            let alert = UIAlertController(title: "提示", message: "所选照片已在该相簿中", preferredStyle: .alert)
-            alert.addAction(UIAlertAction(title: "确定", style: .default))
-            present(alert, animated: true)
-            return
-        }
-        
-        ensureReadWritePermission { [weak self] granted in
-            guard let self = self else { return }
-            guard granted else {
-                let alert = UIAlertController(title: "权限不足", message: "请允许照片读写权限后重试", preferredStyle: .alert)
-                alert.addAction(UIAlertAction(title: "确定", style: .default))
-                self.present(alert, animated: true)
+
+        collectionOperations.addPickerResults(results, to: targetAlbum) { [weak self] outcome in
+            guard let self else { return }
+            if outcome.message == PhotoChangesService.permissionDeniedMessage {
+                loadingAlert.dismiss(animated: true) {
+                    finished = true
+                    self.showPermissionViewController()
+                }
                 return
             }
-            
-            let loadingAlert = UIAlertController(title: "添加中", message: "正在将照片添加到相簿...", preferredStyle: .alert)
-            self.present(loadingAlert, animated: true)
-            
-            var finished = false
-            let finish: (String, String, Bool) -> Void = { title, message, shouldShowAlert in
-                guard !finished else { return }
-                finished = true
-                loadingAlert.dismiss(animated: true) {
-                    if shouldShowAlert {
-                        let alert = UIAlertController(title: title, message: message, preferredStyle: .alert)
-                        alert.addAction(UIAlertAction(title: "确定", style: .default))
-                        self.present(alert, animated: true)
-                    }
-                }
+            if outcome.message == "所选照片已在该相簿中" {
+                finish(true, "提示", outcome.message ?? "所选照片已在该相簿中")
+                return
             }
-            
-            DispatchQueue.main.asyncAfter(deadline: .now() + 15) {
-                finish("添加失败", "操作超时，请稍后重试", true)
+            if outcome.success {
+                finish(false, "", "")
+            } else {
+                finish(true, "添加失败", outcome.message ?? "添加失败，请稍后重试")
             }
-            
-            PHPhotoLibrary.shared().performChanges({
-                guard let request = PHAssetCollectionChangeRequest(for: targetAlbum) else { return }
-                request.addAssets(assetsToAdd as NSArray)
-            }, completionHandler: { success, error in
-                DispatchQueue.main.async {
-                    if success {
-                        finish("添加成功", "已添加 \(assetsToAdd.count) 张照片", false)
-                    } else {
-                        finish("添加失败", error?.localizedDescription ?? "添加失败，请稍后重试", true)
-                    }
-                }
-            })
-        }
-    }
-    
-    private func ensureReadWritePermission(_ completion: @escaping (Bool) -> Void) {
-        let status = PHPhotoLibrary.authorizationStatus(for: .readWrite)
-        switch status {
-        case .authorized, .limited:
-            completion(true)
-        case .notDetermined:
-            PHPhotoLibrary.requestAuthorization(for: .readWrite) { newStatus in
-                DispatchQueue.main.async {
-                    completion(newStatus == .authorized || newStatus == .limited)
-                }
-            }
-        default:
-            completion(false)
         }
     }
 }

@@ -2,7 +2,8 @@
 //  PhotoAlbumOperations.swift
 //  HSPhotos
 //
-//  相簿内写操作编排：统一调用 PhotoChangesService，并产出撤销动作与 UI 侧效应标记。
+//  相簿内写库 Service 门面（Apple MVC：Model 层之上的 Service，非 Web UseCase）。
+//  新代码可使用类型别名 PhotoAlbumEditingService。
 //
 
 import Foundation
@@ -17,6 +18,8 @@ struct PhotoAlbumOperationOutcome {
     var shouldApplyCustomSort: Bool = false
     var undoAction: UndoAction?
 }
+
+typealias PhotoAlbumEditingService = PhotoAlbumOperations
 
 final class PhotoAlbumOperations {
     typealias Completion = (PhotoAlbumOperationOutcome) -> Void
@@ -45,6 +48,45 @@ final class PhotoAlbumOperations {
                 )
             }
             completion(outcome)
+        }
+    }
+
+    // MARK: - 粘贴 / 副本
+
+    /// 按索引插入相簿；撤销由 `PhotoChangesService.paste` 记录。
+    func paste(assets: [PHAsset], at insertIndex: Int, completion: @escaping Completion) {
+        guard !assets.isEmpty else {
+            completion(PhotoAlbumOperationOutcome(success: false, message: "没有可粘贴的资源"))
+            return
+        }
+
+        PhotoChangesService.paste(assets: assets, into: collection, at: insertIndex) { success, message in
+            completion(
+                PhotoAlbumOperationOutcome(
+                    success: success,
+                    message: message,
+                    shouldClearSelection: success,
+                    shouldApplyCustomSort: success
+                )
+            )
+        }
+    }
+
+    /// 创建副本并加入当前相簿；撤销由 `PhotoChangesService.duplicate` 记录。
+    func duplicate(assets: [PHAsset], completion: @escaping Completion) {
+        guard !assets.isEmpty else {
+            completion(PhotoAlbumOperationOutcome(success: false, message: "没有可复制的资源"))
+            return
+        }
+
+        PhotoChangesService.duplicate(assets: assets, to: collection) { success, message in
+            completion(
+                PhotoAlbumOperationOutcome(
+                    success: success,
+                    message: message,
+                    shouldReloadAssets: success
+                )
+            )
         }
     }
 

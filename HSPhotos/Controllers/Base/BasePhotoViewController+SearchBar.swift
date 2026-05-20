@@ -13,7 +13,7 @@ extension BasePhotoViewController: SearchBarViewDelegate {
 
     func searchBarViewDidRemoveToken(_ searchBarView: SearchBarView, tagID: String) {
         filterState.selectedTagIDs.remove(tagID)
-        // filterState didSet 会触发 applyTagFilter + syncSearchTokens
+        // filterState didSet 会触发 refreshGridFromSession + syncSearchTokens
     }
 
     func searchBarViewDidTapFilter(_ searchBarView: SearchBarView) {

@@ -94,7 +94,7 @@ final class TagAssignViewController: UIViewController {
     }
 
     private func loadData() {
-        allTags = PhotoTagService.shared.loadTags()
+        allTags = PhotoTagOperations.shared.loadTags()
         let count = assetIdentifiers.count
         titleLabel.text = count == 1 ? "添加标签" : "为 \(count) 张照片添加标签"
         tableView.reloadData()
@@ -173,13 +173,13 @@ extension TagAssignViewController: UITableViewDataSource, UITableViewDelegate {
 
         if taggedCount == assetIdentifiers.count {
             // 全部已有 → 全部移除
-            PhotoTagService.shared.removeAssets(assetIdentifiers, fromTag: tag.id)
+            PhotoTagOperations.shared.removeAssets(assetIdentifiers, fromTag: tag.id)
         } else {
             // 部分或全无 → 全部添加
-            PhotoTagService.shared.addAssets(assetIdentifiers, toTag: tag.id)
+            PhotoTagOperations.shared.addAssets(assetIdentifiers, toTag: tag.id)
         }
 
-        allTags = PhotoTagService.shared.loadTags()
+        allTags = PhotoTagOperations.shared.loadTags()
         tableView.reloadRows(at: [indexPath], with: .automatic)
     }
 
@@ -191,8 +191,8 @@ extension TagAssignViewController: UITableViewDataSource, UITableViewDelegate {
             guard let self = self,
                   let name = alert?.textFields?.first?.text?.trimmingCharacters(in: .whitespaces),
                   !name.isEmpty else { return }
-            let newTag = PhotoTagService.shared.createTag(name: name)
-            PhotoTagService.shared.addAssets(self.assetIdentifiers, toTag: newTag.id)
+            let newTag = PhotoTagOperations.shared.createTag(name: name)
+            PhotoTagOperations.shared.addAssets(self.assetIdentifiers, toTag: newTag.id)
             self.loadData()
         })
         present(alert, animated: true)

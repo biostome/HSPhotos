@@ -192,8 +192,7 @@ class PhotoGridViewController: BasePhotoViewController {
     }
 
     @objc private func didTapOverlaySettings() {
-        let settingsVC = OverlaySettingsViewController()
-        navigationController?.pushViewController(settingsVC, animated: true)
+        gridRouter.pushOverlaySettings()
     }
 
     private func appendOverlaySettingsButtonIfNeeded() {
@@ -229,12 +228,12 @@ class PhotoGridViewController: BasePhotoViewController {
         }
         
         let activityItems: [Any] = [makeSharePlaceholderText(for: selectedAssets.count)]
-        let activityVC = UIActivityViewController(activityItems: activityItems, applicationActivities: [addToAlbumActivity])
-        if let popover = activityVC.popoverPresentationController {
-            popover.sourceView = shareButton
-            popover.sourceRect = shareButton.bounds
-        }
-        present(activityVC, animated: true)
+        gridRouter.presentShareSheet(
+            activityItems: activityItems,
+            applicationActivities: [addToAlbumActivity],
+            sourceView: shareButton,
+            sourceRect: shareButton.bounds
+        )
     }
     
     private func updateBottomActionButtons() {
@@ -282,14 +281,13 @@ class PhotoGridViewController: BasePhotoViewController {
         let isContinuingSameAction = hierarchyShortcutLastShouldCollapse == shouldCollapse
         let anchorAsset = isContinuingSameAction ? assetForHierarchyShortcutAnchor() : nil
         guard let centerAsset = anchorAsset ?? gridView.centerVisibleAsset else { return }
-        guard let target = PhotoNumberingService.shared.nearestCollapsibleAncestor(
+        guard let target = session.nearestCollapsibleAncestor(
             from: centerAsset,
             in: assets,
-            collection: collection,
             shouldBecomeCollapsed: shouldCollapse
         ) else { return }
 
-        PhotoNumberingService.shared.toggleCollapse(target, in: collection)
+        session.toggleCollapse(target)
         hierarchyShortcutAnchorAssetID = target.localIdentifier
         hierarchyShortcutLastShouldCollapse = shouldCollapse
         gridView.refreshParagraphDisplay()

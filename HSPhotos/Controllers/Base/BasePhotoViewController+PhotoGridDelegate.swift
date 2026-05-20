@@ -34,13 +34,12 @@ extension BasePhotoViewController: PhotoGridViewDelegate {
                     sourceImage = image
                 }
 
-                let nav = GalleryViewerViewController.makePresentingNavigationContainer(
+                self.gridRouter.presentGalleryViewer(
                     assets: self.assets,
                     initialIndex: index,
                     sourceFrame: sourceFrame,
                     sourceImage: sourceImage
                 )
-                present(nav, animated: true)
             }
         }
     }

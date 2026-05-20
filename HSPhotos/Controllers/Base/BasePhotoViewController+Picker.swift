@@ -16,8 +16,8 @@ extension BasePhotoViewController: PHPickerViewControllerDelegate {
     private func addPickedPhotosToCurrentAlbum(_ results: [PHPickerResult]) {
         guard !results.isEmpty else { return }
 
-        let loadingAlert = UIAlertController(title: "添加中", message: "正在将照片添加到相簿...", preferredStyle: .alert)
-        present(loadingAlert, animated: true)
+        let loadingAlert = gridRouter.makeLoadingAlert(title: "添加中", message: "正在将照片添加到相簿...")
+        gridRouter.present(loadingAlert)
 
         var finished = false
         let finish: (PhotoAlbumOperationOutcome) -> Void = { [weak self] outcome in

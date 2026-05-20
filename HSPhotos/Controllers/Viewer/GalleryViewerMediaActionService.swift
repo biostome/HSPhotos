@@ -46,17 +46,18 @@ final class GalleryViewerMediaActionService: GalleryViewerMediaActionHandling {
     }
 
     func delete(asset: PHAsset, completion: @escaping (Result<Void, Error>) -> Void) {
-        PHPhotoLibrary.shared().performChanges({
-            PHAssetChangeRequest.deleteAssets([asset] as NSArray)
-        }, completionHandler: { success, error in
-            DispatchQueue.main.async {
-                if success {
-                    completion(.success(()))
-                } else {
-                    completion(.failure(error ?? NSError(domain: "GalleryViewerMediaActionService", code: -1)))
-                }
+        PhotoChangesService.deleteFromLibrary(assets: [asset]) { success, message in
+            if success {
+                completion(.success(()))
+            } else {
+                let error = NSError(
+                    domain: "GalleryViewerMediaActionService",
+                    code: -1,
+                    userInfo: [NSLocalizedDescriptionKey: message ?? "删除失败"]
+                )
+                completion(.failure(error))
             }
-        })
+        }
     }
 
     func toggleFavorite(asset: PHAsset, completion: @escaping (Result<PHAsset, Error>) -> Void) {

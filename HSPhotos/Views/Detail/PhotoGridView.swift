@@ -53,27 +53,44 @@ struct PhotoGridConstants {
 
 class PhotoGridView: UIView {
     private let overlaySettings = OverlayDisplaySettings.shared
-    private var overlaySettingsObserver: NSObjectProtocol?
-    private var hierarchyCollapseSettingsObserver: NSObjectProtocol?
+    internal var overlaySettingsObserver: NSObjectProtocol?
+    internal var hierarchyCollapseSettingsObserver: NSObjectProtocol?
 
-    public var assets: [PHAsset] = [] {
-        didSet {
-            let idsChanged = oldValue.map(\.localIdentifier) != assets.map(\.localIdentifier)
-            invalidateCustomOrderCache()
-            invalidateDateTextCache()
-            if idsChanged {
-                hierarchyCache.removeAll()
-            }
-            updateVisibleAssets()
-            // 删除节点后存储层级已校正，但可见序列可能不变（例如删的是折叠分支内未展示的项），须强制刷新编号 overlay
-            if idsChanged, sortPreference == .custom, supportsHierarchyNumbering {
-                collectionView.reloadData()
-            }
+    /// 单相簿领域状态；绑定后 `assets` / 可见行由 Session 派生。
+    public weak var albumSession: AlbumSession?
+
+    internal var lastGridInputIdentifiers: [String] = []
+
+    /// 标签筛选后的网格输入行（绑定 Session 后由 Session 派生）。
+    public var assets: [PHAsset] {
+        albumSession?.tagFilteredMembers() ?? []
+    }
+
+    /// 将网格挂载到相簿 Session，并同步排序/层级配置与展示序列。
+    public func bind(to session: AlbumSession) {
+        albumSession = session
+        reloadFromSession()
+    }
+
+    /// Session 成员、筛选或排序变化后由控制器调用。
+    public func reloadFromSession() {
+        let newIds = assets.map(\.localIdentifier)
+        let idsChanged = lastGridInputIdentifiers != newIds
+        lastGridInputIdentifiers = newIds
+        invalidateCustomOrderCache()
+        invalidateDateTextCache()
+        if idsChanged {
+            hierarchyCache.removeAll()
+        }
+        updateVisibleAssets()
+        // 删除节点后存储层级已校正，但可见序列可能不变（例如删的是折叠分支内未展示的项），须强制刷新编号 overlay
+        if idsChanged, sortPreference == .custom, supportsHierarchyNumbering {
+            collectionView.reloadData()
         }
     }
 
     // 实际显示的照片（经过层级折叠过滤）
-    private var visibleAssets: [PHAsset] = []
+    internal var visibleAssets: [PHAsset] = []
 
     public var delegate: PhotoGridViewDelegate?
 
@@ -91,7 +108,7 @@ class PhotoGridView: UIView {
     private static let maxSelectedAssetsInDelegatePayload = 512
 
     /// 通知 delegate 时避免在数万选中下分配整表 `[PHAsset]`。
-    private var selectedAssetsForDelegateNotification: [PHAsset] {
+    internal var selectedAssetsForDelegateNotification: [PHAsset] {
         if selectionState.count > Self.maxSelectedAssetsInDelegatePayload { return [] }
         return selectedPhotos
     }
@@ -150,61 +167,53 @@ class PhotoGridView: UIView {
     internal var panInitialSelectionState: Bool = false
 
     // 选中照片（根据选中顺序排序的派生数组）
-    private var selectedPhotos: [PHAsset] {
+    internal var selectedPhotos: [PHAsset] {
         selectionState.orderedIDs.compactMap { selectedAssetByID[$0] }
     }
 
-    private var selectionState = PhotoGridSelectionState()
+    internal var selectionState = PhotoGridSelectionState()
     /// 仅缓存「当前在选中集中」的资源，供 `selectedPhotos` 与 delegate 使用。
-    private var selectedAssetByID: [String: PHAsset] = [:]
+    internal var selectedAssetByID: [String: PHAsset] = [:]
 
     /// 选择模式快速定位：链式「上一处/下一处」的锚点（可见下标）；`nil` 表示按当前视口边界取下一目标。
-    private var selectionQuickNavJumpIndex: Int?
+    internal var selectionQuickNavJumpIndex: Int?
     /// 由控制器注入：锚点或选中集变化时刷新底部工具条上按钮的 `isEnabled`。
     var onSelectionQuickNavToolbarRefresh: (() -> Void)?
 
     // 当前锚点照片
-    private var anchorPhoto: PHAsset?
+    internal var anchorPhoto: PHAsset?
 
     // 当前层级参照照片（用于“设为某项子级/插入到某级后面”）
 
-    // 当前排序方式
-    public var sortPreference: PhotoSortPreference = .custom {
-        didSet {
-            if oldValue != sortPreference {
-                hierarchyCache.removeAll()
-            }
-        }
+    /// 排序方式（绑定 Session 后只读 Session）。
+    public var sortPreference: PhotoSortPreference {
+        albumSession?.sortPreference ?? .custom
     }
 
-    // 当前相册引用，用于获取自定义排序数据
+    /// 当前相册（绑定 Session 后只读 Session）。
     public var currentCollection: PHAssetCollection? {
-        didSet {
-            hierarchyCache.removeAll()
-            customOrderIndexCache.removeAll()
-            dateTextCache.removeAll()
-        }
+        albumSession?.collection
     }
 
-    /// 是否支持层级编号功能。首页（图库）不支持，相册内支持。
-    public var supportsHierarchyNumbering: Bool = true
-
-    private let numberingService = PhotoNumberingService.shared
+    /// 是否支持层级编号（绑定 Session 后只读 Session）。
+    public var supportsHierarchyNumbering: Bool {
+        albumSession?.supportsHierarchyNumbering ?? false
+    }
 
     // 层级信息缓存，避免重复计算
-    private var hierarchyCache: [String: (text: String?, isCollapsed: Bool)] = [:]
+    internal var hierarchyCache: [String: (text: String?, isCollapsed: Bool)] = [:]
 
     // 自定义排序索引缓存：assetID -> index，O(1) 查找
-    private var customOrderIndexCache: [String: Int] = [:]
+    internal var customOrderIndexCache: [String: Int] = [:]
     // 日期文本缓存：assetID -> (creationText, modificationText)
-    private var dateTextCache: [String: (creation: String, modification: String)] = [:]
+    internal var dateTextCache: [String: (creation: String, modification: String)] = [:]
     private static let displayDateFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd HH:mm"
         return formatter
     }()
 
-    private var columns: Int = PhotoGridConstants.defaultColumns
+    internal var columns: Int = PhotoGridConstants.defaultColumns
 
     /// 获取指定资产的cell frame
     public func getCellFrame(for asset: PHAsset) -> CGRect? {
@@ -218,13 +227,13 @@ class PhotoGridView: UIView {
     }
 
 
-    private var lastScale: CGFloat = 3.0
+    internal var lastScale: CGFloat = 3.0
 
     // 缓存 Cell 尺寸，避免重复计算
-    private var cachedCellSize: CGSize?
-    private var lastCollectionViewWidth: CGFloat = 0
+    internal var cachedCellSize: CGSize?
+    internal var lastCollectionViewWidth: CGFloat = 0
 
-    private lazy var collectionView: UICollectionView = {
+    internal lazy var collectionView: UICollectionView = {
         let initialLayout = createLayout(for: columns)
         let collectionView = UICollectionView(frame: .zero, collectionViewLayout: initialLayout)
         collectionView.backgroundColor = .clear
@@ -273,7 +282,7 @@ class PhotoGridView: UIView {
         }
     }
 
-    private func observeOverlayAndHierarchySettings() {
+    internal func observeOverlayAndHierarchySettings() {
         overlaySettingsObserver = NotificationCenter.default.addObserver(
             forName: .overlayDisplaySettingsDidChange,
             object: nil,
@@ -292,7 +301,7 @@ class PhotoGridView: UIView {
         }
     }
 
-    private func setupUI() {
+    internal func setupUI() {
         backgroundColor = .clear
         collectionView.delegate = self
         collectionView.dataSource = self
@@ -319,7 +328,7 @@ class PhotoGridView: UIView {
     }
 
 
-    private func setupGestures() {
+    internal func setupGestures() {
         let pinchGesture = UIPinchGestureRecognizer(target: self, action: #selector(handlePinchGesture(_:)))
         collectionView.addGestureRecognizer(pinchGesture)
 
@@ -329,7 +338,7 @@ class PhotoGridView: UIView {
         collectionView.addGestureRecognizer(panGesture)
     }
 
-    private func calculateNewColumns(for scaleDelta: CGFloat) -> Int {
+    internal func calculateNewColumns(for scaleDelta: CGFloat) -> Int {
         guard let currentIndex = PhotoGridConstants.allowedColumns.firstIndex(of: columns) else {
             return columns
         }
@@ -347,7 +356,7 @@ class PhotoGridView: UIView {
         return columns
     }
 
-    private func updateColumns(to newColumns: Int) {
+    internal func updateColumns(to newColumns: Int) {
         columns = newColumns
         cachedCellSize = nil
         lastCollectionViewWidth = 0
@@ -359,7 +368,7 @@ class PhotoGridView: UIView {
     }
 
     // MARK: - Gesture Handling
-    @objc private func handlePinchGesture(_ gesture: UIPinchGestureRecognizer) {
+    @objc internal func handlePinchGesture(_ gesture: UIPinchGestureRecognizer) {
         switch gesture.state {
         case .began:
             lastScale = gesture.scale
@@ -379,7 +388,7 @@ class PhotoGridView: UIView {
     }
 
     // 新增：处理滑动手势
-    @objc private func handlePanGesture(_ gesture: UIPanGestureRecognizer) {
+    @objc internal func handlePanGesture(_ gesture: UIPanGestureRecognizer) {
         // 只在多选模式或范围选择模式下启用滑动选择
         guard selectionMode == .multiple || selectionMode == .range else { return }
 
@@ -483,7 +492,7 @@ class PhotoGridView: UIView {
 
 
     // MARK: - Layout Methods
-    private func createLayout(for columns: Int) -> UICollectionViewFlowLayout {
+    internal func createLayout(for columns: Int) -> UICollectionViewFlowLayout {
         let layout = UICollectionViewFlowLayout()
 
         // 根据列数动态调整间距
@@ -507,12 +516,12 @@ class PhotoGridView: UIView {
     }
 
     /// 根据 collectionView 的 indexPath 获取对应资源（数据源为 visibleAssets）
-    private func getAsset(at indexPath: IndexPath) -> PHAsset? {
+    internal func getAsset(at indexPath: IndexPath) -> PHAsset? {
         guard indexPath.item < visibleAssets.count else { return nil }
         return visibleAssets[indexPath.item]
     }
 
-    private func nearestVisibleAsset(to point: CGPoint) -> PHAsset? {
+    internal func nearestVisibleAsset(to point: CGPoint) -> PHAsset? {
         guard !visibleAssets.isEmpty else { return nil }
         guard let layout = collectionView.collectionViewLayout as? UICollectionViewFlowLayout else { return nil }
 
@@ -526,7 +535,7 @@ class PhotoGridView: UIView {
     }
 
     /// 合并「必须刷的 indexPath」与「当前屏幕上且序号可能已变的 cell」，避免对整表做 O(n×m) 的 `contains` 与上万次 `reloadItems`。
-    private func indexPathsMergingExplicitAndVisibleRankChanges(
+    internal func indexPathsMergingExplicitAndVisibleRankChanges(
         rankChangedIDs: Set<String>,
         explicit indexPaths: [IndexPath]
     ) -> [IndexPath] {
@@ -541,7 +550,7 @@ class PhotoGridView: UIView {
     }
 
     /// 无动画批量 `reloadItems`，让大量选中下的点选更快结束一帧布局。
-    private func reloadItemsForSelectionChange(at indexPaths: [IndexPath], completion: @escaping (Bool) -> Void) {
+    internal func reloadItemsForSelectionChange(at indexPaths: [IndexPath], completion: @escaping (Bool) -> Void) {
         guard !indexPaths.isEmpty else {
             completion(true)
             return
@@ -554,7 +563,7 @@ class PhotoGridView: UIView {
     }
 
     /// 滑动手势等高频路径：无动画、无 batch，直接 `reloadItems`。
-    private func reloadSelectionCellsWithoutAnimation(at indexPaths: [IndexPath]) {
+    internal func reloadSelectionCellsWithoutAnimation(at indexPaths: [IndexPath]) {
         guard !indexPaths.isEmpty else { return }
         UIView.performWithoutAnimation {
             self.collectionView.reloadItems(at: indexPaths)
@@ -578,7 +587,7 @@ class PhotoGridView: UIView {
     }
 
     /// 选择指定范围的照片（根据方向分配顺序）
-    private func selectRange(from startIndex: Int, to endIndex: Int, reverse: Bool) {
+    internal func selectRange(from startIndex: Int, to endIndex: Int, reverse: Bool) {
         var indexPaths: [IndexPath] = []
         // 归一化范围并根据方向决定追加顺序
         let low = min(startIndex, endIndex)
@@ -605,7 +614,7 @@ class PhotoGridView: UIView {
     }
 
     /// 取消选择指定范围的照片（根据方向分配顺序）
-    private func deselectRange(from startIndex: Int, to endIndex: Int) {
+    internal func deselectRange(from startIndex: Int, to endIndex: Int) {
         var explicitIndexPaths: [IndexPath] = []
         var rankChangedIDs = Set<String>()
         // 根据方向决定追加顺序
@@ -634,13 +643,14 @@ class PhotoGridView: UIView {
     }
 
     /// O(1) 查找照片在自定义排序中的下标
-    private func getCustomOrderIndex(for photo: PHAsset) -> Int {
+    internal func getCustomOrderIndex(for photo: PHAsset) -> Int {
         return customOrderIndexCache[photo.localIdentifier] ?? -1
     }
 
     func sort() throws -> [PHAsset] {
-        try PhotoAnchorSortLogic.sortedAssets(
-            in: assets,
+        let input = albumSession?.tagFilteredMembers() ?? []
+        return try PhotoAnchorSortLogic.sortedAssets(
+            in: input,
             selectedPhotos: selectedPhotos,
             anchorPhoto: anchorPhoto
         )
@@ -673,13 +683,9 @@ class PhotoGridView: UIView {
     // MARK: - Public Methods
 
     /// 更新可见资产（仅自定义排序且支持层级时应用折叠过滤）
-    private func updateVisibleAssets() {
-        let newVisibleAssets: [PHAsset]
-        if sortPreference == .custom, supportsHierarchyNumbering, let collection = currentCollection {
-            newVisibleAssets = numberingService.visibleAssets(from: assets, in: collection)
-        } else {
-            newVisibleAssets = assets
-        }
+    internal func updateVisibleAssets() {
+        guard let session = albumSession else { return }
+        let newVisibleAssets = session.visibleRowsForGrid()
 
         // 只在数据真正变化时才更新
         if newVisibleAssets.count != visibleAssets.count ||
@@ -700,10 +706,10 @@ class PhotoGridView: UIView {
     func invalidateCustomOrderCache() {
         customOrderIndexCache.removeAll()
     }
-    private func invalidateDateTextCache() {
+    internal func invalidateDateTextCache() {
         dateTextCache.removeAll()
     }
-    private func preloadCustomOrderCache() {
+    internal func preloadCustomOrderCache() {
         guard customOrderIndexCache.isEmpty else { return }
         guard let collection = currentCollection else {
             var dict = [String: Int](minimumCapacity: assets.count)
@@ -728,7 +734,7 @@ class PhotoGridView: UIView {
             }
         }
     }
-    private func preloadDateTextCache() {
+    internal func preloadDateTextCache() {
         guard dateTextCache.isEmpty else { return }
         var dict = [String: (creation: String, modification: String)](minimumCapacity: assets.count)
         for asset in assets {
@@ -740,15 +746,16 @@ class PhotoGridView: UIView {
     }
 
     /// 批量预计算层级信息并写入缓存（一次计算整表，避免滚动时每 cell 重复 O(n) 计算）
-    private func prewarmHierarchyCache(for visible: [PHAsset]) {
-        guard supportsHierarchyNumbering, let collection = currentCollection else { return }
+    internal func prewarmHierarchyCache(for visible: [PHAsset]) {
+        guard supportsHierarchyNumbering, albumSession != nil else { return }
         guard !assets.isEmpty else {
             hierarchyCache.removeAll()
             return
         }
         // 不可再用「缓存条数 >= assets 条数」跳过：删除相片后 assets 变少但旧缓存仍多，会沿用错误编号
         hierarchyCache.removeAll()
-        let (numbers, collapsed) = numberingService.computeNumbersAndCollapsed(for: assets, in: collection)
+        guard let session = albumSession else { return }
+        let (numbers, collapsed) = session.computeNumbersAndCollapsed(for: assets)
         for asset in assets {
             let id = asset.localIdentifier
             let text = numbers[id]
@@ -785,51 +792,6 @@ class PhotoGridView: UIView {
         }
     }
 
-    // MARK: - Asset Management
-
-    /// 删除指定的资源项
-    /// - Parameters:
-    ///   - assetsToDelete: 要删除的资源数组
-    ///   - completion: 删除完成回调
-    func deleteAssets(assets assetsToDelete: [PHAsset], completion: @escaping (Bool) -> Void) {
-        guard !assetsToDelete.isEmpty else {
-            completion(true)
-            return
-        }
-
-        let assetsToDeleteSet = Set(assetsToDelete.map { $0.localIdentifier })
-
-        // CollectionView 数据源是 visibleAssets，必须用 visibleAssets 的索引
-        let indexPathsToDelete = visibleAssets.enumerated().compactMap { index, asset in
-            assetsToDeleteSet.contains(asset.localIdentifier) ? IndexPath(item: index, section: 0) : nil
-        }
-
-        collectionView.performBatchUpdates {
-            self.assets.removeAll { assetsToDeleteSet.contains($0.localIdentifier) }
-            invalidateCustomOrderCache()
-            if sortPreference == .custom, supportsHierarchyNumbering, let collection = currentCollection {
-                let valid = Set(self.assets.map(\.localIdentifier))
-                numberingService.cleanupInvalidNodes(validAssetIDs: valid, orderedAssets: self.assets, for: collection)
-                hierarchyCache.removeAll()
-                visibleAssets = numberingService.visibleAssets(from: assets, in: collection)
-            } else {
-                visibleAssets = assets
-            }
-
-            for asset in assetsToDelete {
-                let id = asset.localIdentifier
-                selectionState.removeIdentifierWithoutRankShift(id: id)
-                selectedAssetByID.removeValue(forKey: id)
-                if anchorPhoto?.localIdentifier == id {
-                    anchorPhoto = nil
-                }
-            }
-
-            collectionView.deleteItems(at: indexPathsToDelete)
-        } completion: { finished in
-            completion(finished)
-        }
-    }
 }
 
 // MARK: - UICollectionViewDataSource
@@ -868,8 +830,8 @@ extension PhotoGridView: UICollectionViewDataSource {
                     isHierarchyCollapsed = cached.isCollapsed
                 } else {
                     // 缓存未命中时一次性计算整表并填满缓存，避免每次 cell 都做 O(n) 计算
-                    if let collection = currentCollection {
-                        let (numbers, collapsed) = numberingService.computeNumbersAndCollapsed(for: assets, in: collection)
+                    if let session = albumSession {
+                        let (numbers, collapsed) = session.computeNumbersAndCollapsed(for: assets)
                         for a in assets {
                             let id = a.localIdentifier
                             hierarchyCache[id] = (numbers[id], collapsed[id] ?? false)
@@ -923,659 +885,3 @@ extension PhotoGridView: UICollectionViewDataSource {
     }
 }
 
-// MARK: - UICollectionViewDataSourcePrefetching
-extension PhotoGridView: UICollectionViewDataSourcePrefetching {
-    func collectionView(_ collectionView: UICollectionView, prefetchItemsAt indexPaths: [IndexPath]) {
-        let cellSize = effectiveCellSize(for: collectionView)
-        let scale = collectionView.window?.screen.scale ?? collectionView.traitCollection.displayScale
-        let targetSize = PhotoCell.thumbnailSize(for: cellSize, scale: scale)
-        let assets = indexPaths.compactMap { $0.item < visibleAssets.count ? visibleAssets[$0.item] : nil }
-        guard !assets.isEmpty else { return }
-        PhotoCell.cachingManager.startCachingImages(
-            for: assets,
-            targetSize: targetSize,
-            contentMode: .aspectFill,
-            options: PhotoCell.thumbnailOptionsFast
-        )
-    }
-
-    func collectionView(_ collectionView: UICollectionView, cancelPrefetchingForItemsAt indexPaths: [IndexPath]) {
-        let cellSize = effectiveCellSize(for: collectionView)
-        let scale = collectionView.window?.screen.scale ?? collectionView.traitCollection.displayScale
-        let targetSize = PhotoCell.thumbnailSize(for: cellSize, scale: scale)
-        let assets = indexPaths.compactMap { $0.item < visibleAssets.count ? visibleAssets[$0.item] : nil }
-        guard !assets.isEmpty else { return }
-        PhotoCell.cachingManager.stopCachingImages(
-            for: assets,
-            targetSize: targetSize,
-            contentMode: .aspectFill,
-            options: PhotoCell.thumbnailOptionsFast
-        )
-    }
-
-    private func effectiveCellSize(for collectionView: UICollectionView) -> CGSize {
-        if let cached = cachedCellSize, collectionView.bounds.width == lastCollectionViewWidth {
-            return cached
-        }
-        let sectionInset = (collectionView.collectionViewLayout as? UICollectionViewFlowLayout)?.sectionInset ?? .zero
-        let spacing = (collectionView.collectionViewLayout as? UICollectionViewFlowLayout)?.minimumInteritemSpacing ?? PhotoGridConstants.defaultSpacing
-        let totalSpacing = sectionInset.left + sectionInset.right + (CGFloat(columns - 1) * spacing)
-        let width = max(1, (collectionView.bounds.width - totalSpacing) / CGFloat(columns))
-        return CGSize(width: width, height: width)
-    }
-}
-
-// MARK: - UICollectionViewDelegate
-extension PhotoGridView: UICollectionViewDelegate {
-    func collectionView(_ collectionView: UICollectionView, didSelectItemAt indexPath: IndexPath) {
-         guard indexPath.item < visibleAssets.count else { return }
-         let photo = visibleAssets[indexPath.item]
-
-         switch selectionMode {
-         case .none:
-             // 调用代理方法
-             delegate?.photoGridView(self, didSelectItemAt: photo)
-         case .multiple:
-             handleMultipleSelection(at: indexPath, in: collectionView, with: photo)
-         case .range:
-             handleRangeSelection(at: indexPath, in: collectionView, with: photo)
-         }
-     }
-
-    func collectionView(_ collectionView: UICollectionView, didDeselectItemAt indexPath: IndexPath) {
-        guard (selectionMode == .multiple || selectionMode == .range), indexPath.item < visibleAssets.count else { return }
-        let photo = visibleAssets[indexPath.item]
-        handleDeselection(at: indexPath, in: collectionView, with: photo)
-    }
-
-}
-
-// MARK: - Helper Methods
-extension PhotoGridView {
-    private func handleMultipleSelection(at indexPath: IndexPath, in collectionView: UICollectionView, with photo: PHAsset) {
-        // 如果启用了滑动选择，则不处理点击选择
-        guard !isSlidingSelectionEnabled else { return }
-
-        let wasSelected = selectionState.contains(photo.localIdentifier)
-        let rankChanged = Set(toggle(photo: photo))
-        let reloadIndexPaths = indexPathsMergingExplicitAndVisibleRankChanges(
-            rankChangedIDs: rankChanged,
-            explicit: [indexPath]
-        )
-        reloadItemsForSelectionChange(at: reloadIndexPaths) { _ in
-            if wasSelected {
-                self.delegate?.photoGridView(self, didDeselectItemAt: indexPath)
-                self.delegate?.photoGridView(self, didDeselectItemAt: photo)
-            } else {
-                self.delegate?.photoGridView(self, didSelectItemAt: indexPath)
-                self.delegate?.photoGridView(self, didSelectItemAt: photo)
-            }
-            self.delegate?.photoGridView(self, didSelectedItems: self.selectedAssetsForDelegateNotification)
-        }
-    }
-
-    private func handleRangeSelection(at indexPath: IndexPath, in collectionView: UICollectionView, with photo: PHAsset) {
-        // 如果启用了滑动选择，则不处理点击选择
-        guard !isSlidingSelectionEnabled else { return }
-
-        let index = indexPath.item
-        let isSelected = selectionState.contains(photo.localIdentifier)
-
-        if isSelected {
-            let rankChanged = Set(toggle(photo: photo))
-            let reloadIndexPaths = indexPathsMergingExplicitAndVisibleRankChanges(
-                rankChangedIDs: rankChanged,
-                explicit: [indexPath]
-            )
-            reloadItemsForSelectionChange(at: reloadIndexPaths) { _ in
-                self.delegate?.photoGridView(self, didDeselectItemAt: indexPath)
-                self.delegate?.photoGridView(self, didDeselectItemAt: photo)
-                self.delegate?.photoGridView(self, didSelectedItems: self.selectedAssetsForDelegateNotification)
-            }
-            selectedStart = nil
-            selectedEnd = nil
-            return
-        }
-
-        if selectedStart == nil {
-            // 第一次点击：设置开始位置，选中单个
-            selectedStart = index
-            _ = toggle(photo: photo)
-            reloadItemsForSelectionChange(at: [indexPath]) { _ in
-                self.delegate?.photoGridView(self, didSelectItemAt: indexPath)
-                self.delegate?.photoGridView(self, didSelectItemAt: photo)
-                self.delegate?.photoGridView(self, didSelectedItems: self.selectedAssetsForDelegateNotification)
-            }
-        } else {
-            // 第二次点击：设置结束位置，选中范围，重设范围
-            selectedEnd = index
-
-            // 检查范围内是否所有照片都已选中，如果是则执行反选，否则执行选中
-            let startIndex = min(selectedStart!, selectedEnd!)
-            let endIndex = max(selectedStart!, selectedEnd!)
-            var allSelected = true
-
-            for i in startIndex...endIndex {
-                if i < visibleAssets.count {
-                    let asset = visibleAssets[i]
-                    if !selectionState.contains(asset.localIdentifier) {
-                        allSelected = false
-                        break
-                    }
-                }
-            }
-
-            if allSelected {
-                // 范围内所有照片都已选中，执行反选
-                deselectRange(from: startIndex, to: endIndex)
-            } else {
-                // 范围内有未选中的照片，执行选中
-                let reverse = selectedEnd! < selectedStart!
-                selectRange(from: startIndex, to: endIndex, reverse: reverse)
-            }
-
-            selectedStart = nil
-            selectedEnd = nil
-        }
-    }
-
-    private func handleDeselection(at indexPath: IndexPath, in collectionView: UICollectionView, with photo: PHAsset) {
-        // 如果启用了滑动选择，则不处理点击取消选择
-        guard !isSlidingSelectionEnabled else { return }
-
-        let rankChanged = Set(toggle(photo: photo))
-        let reloadIndexPaths = indexPathsMergingExplicitAndVisibleRankChanges(
-            rankChangedIDs: rankChanged,
-            explicit: [indexPath]
-        )
-        reloadItemsForSelectionChange(at: reloadIndexPaths) { _ in
-            self.delegate?.photoGridView(self, didDeselectItemAt: indexPath)
-            self.delegate?.photoGridView(self, didDeselectItemAt: photo)
-            self.delegate?.photoGridView(self, didSelectedItems: self.selectedAssetsForDelegateNotification)
-        }
-        selectedStart = nil
-        selectedEnd = nil
-    }
-}
-
-// MARK: - UICollectionViewDelegateFlowLayout
-extension PhotoGridView: UICollectionViewDelegateFlowLayout {
-
-    func collectionView(_ collectionView: UICollectionView, layout collectionViewLayout: UICollectionViewLayout, sizeForItemAt indexPath: IndexPath) -> CGSize {
-        // 如果 CollectionView 宽度和列数没有变化，直接返回缓存的尺寸
-        if collectionView.bounds.width == lastCollectionViewWidth,
-           let cachedSize = cachedCellSize {
-            return cachedSize
-        }
-
-        guard let flowLayout = collectionViewLayout as? UICollectionViewFlowLayout else { return .zero }
-        let sectionInset = flowLayout.sectionInset
-        let interItemSpacing = flowLayout.minimumInteritemSpacing
-
-        let totalSpacing = sectionInset.left + sectionInset.right + (CGFloat(columns - 1) * interItemSpacing)
-        let width = max(1, (collectionView.bounds.width - totalSpacing) / CGFloat(columns))
-        let size = CGSize(width: width, height: width)
-
-        // 缓存结果
-        cachedCellSize = size
-        lastCollectionViewWidth = collectionView.bounds.width
-
-        return size
-    }
-
-    // MARK: - UIScrollViewDelegate
-
-    func scrollViewDidScroll(_ scrollView: UIScrollView) {
-        if !isSlidingSelectionEnabled {
-            scrollDelegate?.scrollViewDidScroll?(scrollView)
-        }
-    }
-
-    // 新增：重写 scrollViewWillBeginDragging 方法来控制滚动
-    func scrollViewWillBeginDragging(_ scrollView: UIScrollView) {
-        // 如果正在滑动选择，则阻止滚动
-        if isSlidingSelectionEnabled {
-            scrollView.isScrollEnabled = false
-        }
-
-        scrollDelegate?.scrollViewWillBeginDragging?(scrollView)
-    }
-
-    // 新增：重写 scrollViewDidEndDragging 方法来恢复滚动
-    func scrollViewDidEndDragging(_ scrollView: UIScrollView, willDecelerate decelerate: Bool) {
-        if !isSlidingSelectionEnabled {
-            scrollView.isScrollEnabled = true
-        }
-        scrollDelegate?.scrollViewDidEndDragging?(scrollView, willDecelerate: decelerate)
-    }
-
-    func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
-    }
-
-    func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
-
-    }
-}
-
-// MARK: - UIGestureRecognizerDelegate
-extension PhotoGridView: UIGestureRecognizerDelegate {
-    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        // 不允许滑动手势和滚动同时进行
-        return false
-    }
-
-    // 新增：控制手势识别的条件
-    override func gestureRecognizerShouldBegin(_ gestureRecognizer: UIGestureRecognizer) -> Bool {
-        // 只处理pan手势
-        guard let panGesture = gestureRecognizer as? UIPanGestureRecognizer else { return true }
-
-        // 只有在选择模式下才考虑滑动选择
-        guard selectionMode == .multiple || selectionMode == .range else { return false }
-
-        // 检查手势的初始方向
-        let velocity = panGesture.velocity(in: collectionView)
-        let verticalVelocity = abs(velocity.y)
-        let horizontalVelocity = abs(velocity.x)
-
-        // 只有横向滑动才触发滑动选择，纵向滑动保持正常滚动
-        return horizontalVelocity > verticalVelocity
-    }
-
-    // 新增：控制手势是否应该被取消
-    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldBeRequiredToFailBy otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        // 让滚动手势在滑动选择手势开始后失败，优先处理滑动选择
-        if gestureRecognizer is UIPanGestureRecognizer,
-           otherGestureRecognizer is UIPanGestureRecognizer,
-           otherGestureRecognizer.view == collectionView {
-            // 检查是否在选择模式下
-            return selectionMode == .multiple || selectionMode == .range
-        }
-        return false
-    }
-
-    // 新增：控制手势是否应该取消其他手势
-    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldCancelOtherGestureRecognizer otherGestureRecognizer: UIGestureRecognizer) -> Bool {
-        // 当滑动选择手势开始时，取消滚动手势
-        if gestureRecognizer is UIPanGestureRecognizer,
-           otherGestureRecognizer is UIPanGestureRecognizer,
-           otherGestureRecognizer.view == collectionView {
-            // 检查是否在选择模式下
-            return selectionMode == .multiple || selectionMode == .range
-        }
-        return false
-    }
-}
-
-// MARK: - UICollectionView Context Menu
-extension PhotoGridView {
-    func collectionView(_ collectionView: UICollectionView, contextMenuConfigurationForItemAt indexPath: IndexPath, point: CGPoint) -> UIContextMenuConfiguration? {
-        guard indexPath.item < visibleAssets.count else { return nil }
-        let asset = visibleAssets[indexPath.item]
-        let isCurrentAnchor = anchorPhoto?.localIdentifier == asset.localIdentifier
-        let isCurrentHierarchyCollapsed = currentCollection != nil ? numberingService.isCollapsed(asset, in: currentCollection!) : false
-        let hasHierarchyDescendants = currentCollection != nil ? numberingService.hasDescendants(asset, in: assets, collection: currentCollection!) : false
-
-        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [self] _ in
-            var anchorGroup: [UIMenuElement] = []
-            var hierarchyGroup: [UIMenuElement] = []
-            var tailGroup: [UIMenuElement] = []
-
-            // 锚点相关操作
-            if isCurrentAnchor {
-                let removeAnchorAction = UIAction(title: "取消锚点", image: UIImage(systemName: "anchor.slash")) { [weak self] _ in
-                    self?.anchorPhoto = nil
-                    self?.collectionView.reloadData()
-                }
-                anchorGroup.append(removeAnchorAction)
-            } else {
-                let setAnchorAction = UIAction(title: "设为锚点", image: UIImage(systemName: "anchor")) { [weak self] _ in
-                    self?.anchorPhoto = asset
-                    self?.collectionView.reloadData()
-                    self?.delegate?.photoGridView(self!, didSetAnchor: asset)
-                }
-                anchorGroup.append(setAnchorAction)
-            }
-
-            // 情况 2 & 3: 层级操作 (由于层级必须连续且有根，这里根据上下文提供智能选项)
-            if sortPreference == .custom, supportsHierarchyNumbering, let collection = currentCollection {
-                let currLv = numberingService.level(for: asset, in: collection)
-
-                // 向上递归查找最近的一个层级节点作为参考点 (prevLevel)
-                var prevLv = 0
-                if let idx = visibleAssets.firstIndex(of: asset), idx > 0 {
-                    for i in (0..<idx).reversed() {
-                        let lv = numberingService.level(for: visibleAssets[i], in: collection)
-                        if lv > 0 {
-                            prevLv = lv
-                            break
-                        }
-                    }
-                }
-
-                if currLv == 0 {
-                    // --- 情况 1 & 2: 节点尚未进入层级系统 ---
-                    // 规则: 总是提供“设为主级”作为根入口
-                    let setMain = UIAction(title: "设为主级", image: UIImage(systemName: "list.number")) { [weak self] _ in
-                        guard let self = self else { return }
-                        self.numberingService.setLevel(1, for: asset, in: collection)
-                        self.refreshParagraphDisplay()
-                    }
-                    hierarchyGroup.append(setMain)
-
-                    if prevLv > 0 {
-                        // 规则: 如果上方有层级，则一并提供“设为同级”与“设为子级”选项
-                        let setSame = UIAction(title: "设为同级", image: UIImage(systemName: "arrow.right.to.line")) { [weak self] _ in
-                            guard let self = self else { return }
-                            self.numberingService.setLevel(prevLv, for: asset, in: collection)
-                            self.refreshParagraphDisplay()
-                        }
-                        let setSub = UIAction(title: "设为子级", image: UIImage(systemName: "list.bullet.indent")) { [weak self] _ in
-                            guard let self = self else { return }
-                            self.numberingService.setLevel(prevLv + 1, for: asset, in: collection)
-                            self.refreshParagraphDisplay()
-                        }
-                        hierarchyGroup.append(setSame)
-                        hierarchyGroup.append(setSub)
-                    }
-                } else {
-                    // --- 情况 3: 节点已在层级系统中，并列提供调整选项 ---
-
-                    // 1. 提升层级 (只有大于 1 级时可提升，符合“已经是主项则隐藏设为主项”的逻辑)
-                    if currLv > 1 {
-                        let promote = UIAction(title: "提升层级", image: UIImage(systemName: "arrow.left")) { [weak self] _ in
-                            guard let self = self else { return }
-                            self.numberingService.setLevel(currLv - 1, for: asset, in: collection)
-                            self.refreshParagraphDisplay()
-                        }
-                        hierarchyGroup.append(promote)
-                    }
-
-                    // 2. 下降层级 (层级连续性约束：当前深度不能超过 prev + 1)
-                    if currLv < prevLv + 1 {
-                        let demote = UIAction(title: "下降层级", image: UIImage(systemName: "arrow.right")) { [weak self] _ in
-                            guard let self = self else { return }
-                            self.numberingService.setLevel(currLv + 1, for: asset, in: collection)
-                            self.refreshParagraphDisplay()
-                        }
-                        hierarchyGroup.append(demote)
-                    }
-
-                    // 3. 设为同级 (如果当前深度与参考节点不同，则允许对齐)
-                    if currLv != prevLv && prevLv > 0 {
-                        let setSame = UIAction(title: "设为同级", image: UIImage(systemName: "arrow.right.to.line")) { [weak self] _ in
-                            guard let self = self else { return }
-                            self.numberingService.setLevel(prevLv, for: asset, in: collection)
-                            self.refreshParagraphDisplay()
-                        }
-                        hierarchyGroup.append(setSame)
-                    }
-
-                    // 选项：取消编号 (级联执行，清理下属子树)
-                    let clearAction = UIAction(title: "取消编号", image: UIImage(systemName: "xmark.circle"), attributes: .destructive) { [weak self] _ in
-                        guard let self = self, let idx = self.visibleAssets.firstIndex(of: asset) else { return }
-                        self.numberingService.beginBatchUpdates(for: collection)
-                        defer { self.numberingService.endBatchUpdates(for: collection) }
-                        self.numberingService.clearLevel(for: asset, in: collection)
-                        // 级联清除下属子节点
-                        for i in (idx + 1)..<self.visibleAssets.count {
-                            let next = self.visibleAssets[i]
-                            let nextLv = self.numberingService.level(for: next, in: collection)
-                            if nextLv == 0 || nextLv <= currLv { break }
-                            self.numberingService.clearLevel(for: next, in: collection)
-                        }
-                        self.refreshParagraphDisplay()
-                    }
-                    hierarchyGroup.append(clearAction)
-                }
-
-                // 节点折叠/展开操作
-                if hasHierarchyDescendants || isCurrentHierarchyCollapsed {
-                    let collapseAction = UIAction(
-                        title: isCurrentHierarchyCollapsed ? "展开" : "折叠",
-                        image: UIImage(systemName: isCurrentHierarchyCollapsed ? "rectangle.expand.vertical" : "rectangle.compress.vertical")
-                    ) { [weak self] _ in
-                        guard let self = self else { return }
-                        self.numberingService.toggleCollapse(asset, in: collection)
-                        self.refreshParagraphDisplay()
-                    }
-                    hierarchyGroup.append(collapseAction)
-                }
-            }
-
-            // 其他操作：添加标签 → 粘贴到此后方 → 删除（危险操作放最后）
-            let tagAction = UIAction(title: "添加标签", image: UIImage(systemName: "tag")) { [weak self] _ in
-                guard let self = self else { return }
-                self.delegate?.photoGridView(self, didRequestAddTagFor: asset)
-            }
-            tailGroup.append(tagAction)
-
-            let pasteAction = UIAction(title: "粘贴到此后方", image: UIImage(systemName: "doc.on.clipboard")) { [weak self] _ in
-                if let pasteAssets = AssetPasteboard.assetsFromPasteboard(), !pasteAssets.isEmpty {
-                    self?.handlePasteToAfter(asset: asset, assets: pasteAssets)
-                }
-            }
-            tailGroup.append(pasteAction)
-
-            let deleteAction = UIAction(title: "删除", image: UIImage(systemName: "trash"), attributes: .destructive) { [weak self] _ in
-                guard let self = self else { return }
-                self.delegate?.photoGridView(self, didRequestDelete: asset)
-            }
-            tailGroup.append(deleteAction)
-
-            var rootChildren: [UIMenuElement] = []
-            if !anchorGroup.isEmpty {
-                rootChildren.append(UIMenu(title: "锚点", image: UIImage(systemName: "anchor"), options: .displayInline, children: anchorGroup))
-            }
-            if !hierarchyGroup.isEmpty {
-                rootChildren.append(UIMenu(title: "层级", options: .displayInline, children: hierarchyGroup))
-            }
-            if !tailGroup.isEmpty {
-                rootChildren.append(UIMenu(title: "其他", options: .displayInline, children: tailGroup))
-            }
-            return UIMenu(title: "", children: rootChildren)
-        }
-    }
-
-    func collectionView(_ collectionView: UICollectionView, previewForHighlightingContextMenuWithConfiguration configuration: UIContextMenuConfiguration) -> UITargetedPreview? {
-        guard let identifier = configuration.identifier as? IndexPath,
-              let cell = collectionView.cellForItem(at: identifier) else { return nil }
-
-        return UITargetedPreview(view: cell)
-    }
-}
-
-// MARK: - CustomVerticalScrollIndicatorDelegate
-extension PhotoGridView: CustomVerticalScrollIndicatorDelegate {
-    func scrollIndicator(_ indicator: CustomVerticalScrollIndicator, textForScrollProgress scrollProgress: CGFloat) -> String? {
-        guard !visibleAssets.isEmpty else { return nil }
-
-        // 根据滚动进度计算当前显示的照片索引
-        let totalItems = visibleAssets.count
-        let currentIndex = Int(scrollProgress * CGFloat(totalItems - 1))
-        let clampedIndex = max(0, min(currentIndex, totalItems - 1))
-
-        let asset = visibleAssets[clampedIndex]
-
-        switch sortPreference {
-        case .creationDate, .modificationDate, .recentDate, .oldest, .newest:
-            // 日期排序：显示日期
-            return formatDate(for: asset)
-        case .custom:
-            // 自定义排序：显示下标（从1开始）
-            return "\(clampedIndex + 1)"
-        }
-    }
-
-    private static let dateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd HH:mm"
-        return f
-    }()
-    private func formatDate(for asset: PHAsset) -> String {
-        let date: Date
-        switch sortPreference {
-        case .creationDate,.oldest,.newest:
-            date = asset.creationDate ?? Date()
-        case .modificationDate, .recentDate:
-            date = asset.modificationDate ?? asset.creationDate ?? Date()
-        case .custom:
-            date = asset.creationDate ?? Date()
-        }
-
-        return Self.dateFormatter.string(from: date)
-    }
-
-    // MARK: - 粘贴到此后方处理
-    private func handlePasteToAfter(asset: PHAsset, assets: [PHAsset]) {
-        guard currentCollection != nil else { return }
-        self.delegate?.photoGridView(self, didPasteAssets: assets, after: asset)
-    }
-}
-
-// MARK: - 选择模式快速定位（连续块头 / 尾）
-
-extension PhotoGridView {
-
-    /// 将链式锚点对齐到「选中序号最大」（最近选入）的格；无选中或非选择模式时清空。
-    /// 若该格在头尾目标链上无法向两侧移动（如只选一张且唯一目标即自身），则置 `nil`，改用视口边界判断可用性，避免两键全灰。
-    func syncSelectionQuickNavCurrentVisibleIndexToLastSelectedAsset() {
-        var newJump: Int?
-        defer {
-            selectionQuickNavJumpIndex = newJump
-            postSelectionQuickNavToolbarRefresh()
-        }
-        guard selectionQuickNavIsActive, selectionState.count > 0,
-              let lastID = selectionState.orderedIDs.last,
-              let idx = visibleAssets.firstIndex(where: { $0.localIdentifier == lastID }) else {
-            return
-        }
-        let targets = selectionQuickNavSortedTargetIndices()
-        let canMoveAlongTargets = targets.contains { $0 < idx } || targets.contains { $0 > idx }
-        newJump = canMoveAlongTargets ? idx : nil
-    }
-
-    func syncSelectionQuickNavBarButtons(previous: UIBarButtonItem, next: UIBarButtonItem) {
-        guard selectionQuickNavIsActive else {
-            selectionQuickNavSetBarButtons(previous: previous, next: next, canPrev: false, canNext: false)
-            return
-        }
-        let targets = selectionQuickNavSortedTargetIndices()
-        guard !targets.isEmpty else {
-            selectionQuickNavSetBarButtons(previous: previous, next: next, canPrev: false, canNext: false)
-            return
-        }
-        let (vmin, vmax) = selectionQuickNavVisibleItemBounds()
-        let (canPrev, canNext) = selectionQuickNavAvailability(targets: targets, vmin: vmin, vmax: vmax)
-        selectionQuickNavSetBarButtons(previous: previous, next: next, canPrev: canPrev, canNext: canNext)
-    }
-
-    func performSelectionQuickNavPrevious() {
-        performSelectionQuickNav(step: .towardLowerIndex)
-    }
-
-    func performSelectionQuickNavNext() {
-        performSelectionQuickNav(step: .towardHigherIndex)
-    }
-
-    private enum SelectionQuickNavStep {
-        case towardLowerIndex
-        case towardHigherIndex
-    }
-
-    private func performSelectionQuickNav(step: SelectionQuickNavStep) {
-        guard selectionQuickNavIsActive else { return }
-        let targets = selectionQuickNavSortedTargetIndices()
-        guard !targets.isEmpty else { return }
-
-        let (vmin, vmax) = selectionQuickNavVisibleItemBounds()
-        guard let index = selectionQuickNavDestination(targets: targets, step: step, vmin: vmin, vmax: vmax) else { return }
-
-        let indexPath = IndexPath(item: index, section: 0)
-        collectionView.scrollToItem(at: indexPath, at: .centeredVertically, animated: true)
-        selectionQuickNavJumpIndex = index
-        postSelectionQuickNavToolbarRefresh()
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.selectionQuickNavHighlightDelay) { [weak self] in
-            guard let self else { return }
-            guard let cell = self.collectionView.cellForItem(at: indexPath) as? PhotoCell else { return }
-            cell.performQuickNavigationHighlightAnimation()
-        }
-    }
-
-    /// 所有连续选中块：每块贡献「头」；块内多于一张时再贡献「尾」。按可见顺序去重排序。
-    private func selectionQuickNavSortedTargetIndices() -> [Int] {
-        guard selectionQuickNavIsActive else { return [] }
-        let ids = selectionState.selectedIdentifierSet
-        guard !ids.isEmpty else { return [] }
-
-        var result = Set<Int>()
-        var i = 0
-        while i < visibleAssets.count {
-            guard ids.contains(visibleAssets[i].localIdentifier) else {
-                i += 1
-                continue
-            }
-            let range = selectionQuickNavExpandContiguousRange(from: i, selectedIDs: ids)
-            result.insert(range.lowerBound)
-            if range.lowerBound != range.upperBound {
-                result.insert(range.upperBound)
-            }
-            i = range.upperBound + 1
-        }
-        return Array(result).sorted()
-    }
-
-    private func selectionQuickNavExpandContiguousRange(from anchor: Int, selectedIDs: Set<String>) -> ClosedRange<Int> {
-        var lo = anchor
-        var hi = anchor
-        while lo > 0, selectedIDs.contains(visibleAssets[lo - 1].localIdentifier) {
-            lo -= 1
-        }
-        while hi + 1 < visibleAssets.count, selectedIDs.contains(visibleAssets[hi + 1].localIdentifier) {
-            hi += 1
-        }
-        return lo...hi
-    }
-
-    private static let selectionQuickNavHighlightDelay: TimeInterval = 0.32
-
-    private var selectionQuickNavIsActive: Bool {
-        selectionMode == .multiple || selectionMode == .range
-    }
-
-    private func postSelectionQuickNavToolbarRefresh() {
-        onSelectionQuickNavToolbarRefresh?()
-    }
-
-    private func selectionQuickNavVisibleItemBounds() -> (min: Int, max: Int) {
-        let items = collectionView.indexPathsForVisibleItems.map(\.item)
-        return (items.min() ?? 0, items.max() ?? 0)
-    }
-
-    private func selectionQuickNavSetBarButtons(previous: UIBarButtonItem, next: UIBarButtonItem, canPrev: Bool, canNext: Bool) {
-        previous.isEnabled = canPrev
-        next.isEnabled = canNext
-    }
-
-    private func selectionQuickNavDestination(targets: [Int], step: SelectionQuickNavStep, vmin: Int, vmax: Int) -> Int? {
-        switch step {
-        case .towardLowerIndex:
-            if let last = selectionQuickNavJumpIndex {
-                return targets.last { $0 < last }
-            }
-            return targets.last { $0 < vmax }
-        case .towardHigherIndex:
-            if let last = selectionQuickNavJumpIndex {
-                return targets.first { $0 > last }
-            }
-            return targets.first { $0 > vmin }
-        }
-    }
-
-    private func selectionQuickNavAvailability(targets: [Int], vmin: Int, vmax: Int) -> (canPrev: Bool, canNext: Bool) {
-        if let last = selectionQuickNavJumpIndex {
-            return (targets.contains { $0 < last }, targets.contains { $0 > last })
-        }
-        return (targets.contains { $0 < vmax }, targets.contains { $0 > vmin })
-    }
-}

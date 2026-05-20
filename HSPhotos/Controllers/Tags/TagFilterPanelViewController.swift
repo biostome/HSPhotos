@@ -169,8 +169,8 @@ final class TagFilterPanelViewController: UIViewController {
     // MARK: - Data
 
     private func loadTags() {
-        allTags = PhotoTagService.shared.loadTags()
-        recentTags = PhotoTagService.shared.recentlyUsedTags()
+        allTags = PhotoTagOperations.shared.loadTags()
+        recentTags = PhotoTagOperations.shared.recentlyUsedTags()
         rebuildChips()
     }
 
@@ -286,7 +286,7 @@ final class TagFilterPanelViewController: UIViewController {
     }
 
     private func updateApplyButton() {
-        let count = PhotoTagService.shared.previewCount(in: candidateIdentifiers, state: filterState)
+        let count = PhotoTagOperations.shared.previewCount(in: candidateIdentifiers, state: filterState)
         if filterState.isActive {
             applyButton.configuration?.title = "应用筛选（\(count) 张照片）"
         } else {
@@ -336,9 +336,9 @@ final class TagFilterPanelViewController: UIViewController {
             guard let self = self,
                   let name = alert?.textFields?.first?.text?.trimmingCharacters(in: .whitespaces),
                   !name.isEmpty else { return }
-            let newTag = PhotoTagService.shared.createTag(name: name)
-            self.allTags = PhotoTagService.shared.loadTags()
-            self.recentTags = PhotoTagService.shared.recentlyUsedTags()
+            let newTag = PhotoTagOperations.shared.createTag(name: name)
+            self.allTags = PhotoTagOperations.shared.loadTags()
+            self.recentTags = PhotoTagOperations.shared.recentlyUsedTags()
             // 自动选中新建标签
             self.filterState.selectedTagIDs.insert(newTag.id)
             self.rebuildChips()
@@ -355,7 +355,7 @@ final class TagFilterPanelViewController: UIViewController {
             self?.showRenameAlert(tagID: tagID, currentName: tag.name)
         })
         alert.addAction(UIAlertAction(title: "删除标签", style: .destructive) { [weak self] _ in
-            PhotoTagService.shared.deleteTag(id: tagID)
+            PhotoTagOperations.shared.deleteTag(id: tagID)
             self?.filterState.selectedTagIDs.remove(tagID)
             self?.loadTags()
             self?.updateApplyButton()
@@ -375,7 +375,7 @@ final class TagFilterPanelViewController: UIViewController {
             guard let self = self,
                   let newName = alert?.textFields?.first?.text?.trimmingCharacters(in: .whitespaces),
                   !newName.isEmpty else { return }
-            PhotoTagService.shared.renameTag(id: tagID, newName: newName)
+            PhotoTagOperations.shared.renameTag(id: tagID, newName: newName)
             self.loadTags()
         })
         present(alert, animated: true)

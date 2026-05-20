@@ -286,21 +286,16 @@ final class AssetLocationAdjustmentViewController: UIViewController {
     }
     
     private func applyLocation(_ location: CLLocation?) {
-        PHPhotoLibrary.shared().performChanges({
-            let request = PHAssetChangeRequest(for: self.asset)
-            request.location = location
-        }) { success, error in
-            DispatchQueue.main.async {
-                if success {
-                    let result = PHAsset.fetchAssets(withLocalIdentifiers: [self.asset.localIdentifier], options: nil)
-                    let updatedAsset = result.firstObject ?? self.asset
-                    self.onAssetLocationUpdated?(updatedAsset)
-                    self.dismiss(animated: true)
-                } else {
-                    let alert = UIAlertController(title: "操作失败", message: error?.localizedDescription, preferredStyle: .alert)
-                    alert.addAction(UIAlertAction(title: "好的", style: .default))
-                    self.present(alert, animated: true)
-                }
+        PhotoChangesService.updateLocation(asset: asset, location: location) { [weak self] success, message in
+            guard let self else { return }
+            if success {
+                let updated = PhotoChangesService.refetchAsset(localIdentifier: self.asset.localIdentifier) ?? self.asset
+                self.onAssetLocationUpdated?(updated)
+                self.dismiss(animated: true)
+            } else {
+                let alert = UIAlertController(title: "操作失败", message: message, preferredStyle: .alert)
+                alert.addAction(UIAlertAction(title: "好的", style: .default))
+                self.present(alert, animated: true)
             }
         }
     }

@@ -416,53 +416,28 @@ final class AssetDateAdjustmentViewController: UIViewController {
     // MARK: - Data Modification Methods
     
     private func applyAdjustedDate(_ date: Date) {
-        PHPhotoLibrary.shared().performChanges({
-            let request = PHAssetChangeRequest(for: self.asset)
-            request.creationDate = date
-        }) { success, error in
-            DispatchQueue.main.async {
-                if success {
-                    let result = PHAsset.fetchAssets(withLocalIdentifiers: [self.asset.localIdentifier], options: nil)
-                    let updatedAsset = result.firstObject ?? self.asset
-                    self.onAssetDateUpdated?(updatedAsset)
-                    self.dismiss(animated: true)
-                } else {
-                    let alert = UIAlertController(
-                        title: "调整失败",
-                        message: error?.localizedDescription ?? "未知错误",
-                        preferredStyle: .alert
-                    )
-                    alert.addAction(UIAlertAction(title: "好的", style: .default))
-                    self.present(alert, animated: true)
-                }
-            }
-        }
+        updateCreationDate(date, failureTitle: "调整失败")
     }
-    
+
     private func restoreOriginalDate() {
-        // 利用 Photos 的重置机制或将 modificationDate 置空等方式还原（这里使用 revert 接口或置空）
-        // 大多数情况下，直接给 creationDate 设为原始可能拿不到真正的原图时间，但是用户需求是“无需UserDefaults，用Photos自带API”，
-        // 这里可以直接清空 creationDate。或者根据业务场景如果单纯恢复原片，直接执行 revertAssetContentToOriginal。
-        // 不过最安全的办法是将 creationDate 设回 nil，Photos 系统底层会恢复原时间
-        PHPhotoLibrary.shared().performChanges({
-            let request = PHAssetChangeRequest(for: self.asset)
-            request.creationDate = nil
-        }) { success, error in
-            DispatchQueue.main.async {
-                if success {
-                    let result = PHAsset.fetchAssets(withLocalIdentifiers: [self.asset.localIdentifier], options: nil)
-                    let updatedAsset = result.firstObject ?? self.asset
-                    self.onAssetDateUpdated?(updatedAsset)
-                    self.dismiss(animated: true)
-                } else {
-                    let alert = UIAlertController(
-                        title: "恢复失败",
-                        message: error?.localizedDescription ?? "未知错误",
-                        preferredStyle: .alert
-                    )
-                    alert.addAction(UIAlertAction(title: "好的", style: .default))
-                    self.present(alert, animated: true)
-                }
+        updateCreationDate(nil, failureTitle: "恢复失败")
+    }
+
+    private func updateCreationDate(_ date: Date?, failureTitle: String) {
+        PhotoChangesService.updateCreationDate(asset: asset, date: date) { [weak self] success, message in
+            guard let self else { return }
+            if success {
+                let updated = PhotoChangesService.refetchAsset(localIdentifier: self.asset.localIdentifier) ?? self.asset
+                self.onAssetDateUpdated?(updated)
+                self.dismiss(animated: true)
+            } else {
+                let alert = UIAlertController(
+                    title: failureTitle,
+                    message: message ?? "未知错误",
+                    preferredStyle: .alert
+                )
+                alert.addAction(UIAlertAction(title: "好的", style: .default))
+                self.present(alert, animated: true)
             }
         }
     }
