@@ -121,6 +121,28 @@ class BasePhotoViewController: UIViewController {
         return button
     }()
 
+    internal lazy var hierarchyCollapseToolbarButton: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            image: UIImage(systemName: "rectangle.compress.vertical"),
+            style: .plain,
+            target: self,
+            action: #selector(didTapHierarchyCollapseToolbar)
+        )
+        item.accessibilityLabel = "折叠中心层级"
+        return item
+    }()
+
+    internal lazy var hierarchyExpandToolbarButton: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            image: UIImage(systemName: "rectangle.expand.vertical"),
+            style: .plain,
+            target: self,
+            action: #selector(didTapHierarchyExpandToolbar)
+        )
+        item.accessibilityLabel = "展开中心层级"
+        return item
+    }()
+
     private lazy var fetchOptions: PHFetchOptions = {
         let options = PHFetchOptions()
         options.sortDescriptors = sortDescriptors(for: sortPreference)
@@ -198,6 +220,9 @@ class BasePhotoViewController: UIViewController {
         gridView.onSelectionQuickNavToolbarRefresh = { [weak self] in
             self?.syncSelectionQuickNavBarButtonsEnabled()
         }
+        gridView.onHierarchyToolbarRefresh = { [weak self] in
+            self?.syncHierarchyToolbarButtonsEnabled()
+        }
 
         loadPhoto()
         setupUndoManager()
@@ -211,6 +236,28 @@ class BasePhotoViewController: UIViewController {
         selectionQuickNavPerform { $0.performSelectionQuickNavNext() }
     }
 
+    @objc private func didTapHierarchyCollapseToolbar() {
+        gridView.performVisibleHierarchyShortcut(expand: false)
+        syncHierarchyToolbarButtonsEnabled()
+    }
+
+    @objc private func didTapHierarchyExpandToolbar() {
+        gridView.performVisibleHierarchyShortcut(expand: true)
+        syncHierarchyToolbarButtonsEnabled()
+    }
+
+    private var showsHierarchyCollapseToolbar: Bool {
+        supportsHierarchyNumbering && sortPreference == .custom && selectionMode == .none
+    }
+
+    internal func syncHierarchyToolbarButtonsEnabled() {
+        guard showsHierarchyCollapseToolbar else { return }
+        gridView.syncHierarchyToolbarButtons(
+            collapse: hierarchyCollapseToolbarButton,
+            expand: hierarchyExpandToolbarButton
+        )
+    }
+
     private func selectionQuickNavPerform(_ action: (PhotoGridView) -> Void) {
         action(gridView)
         syncSelectionQuickNavBarButtonsEnabled()
@@ -221,6 +268,7 @@ class BasePhotoViewController: UIViewController {
             previous: selectionQuickNavPreviousBarButton,
             next: selectionQuickNavNextBarButton
         )
+        syncHierarchyToolbarButtonsEnabled()
     }
 
     private func setupUI() {
@@ -392,6 +440,7 @@ class BasePhotoViewController: UIViewController {
 
             DispatchQueue.main.async {
                 self.assets = newAssets
+                self.gridView.scheduleHierarchyToolbarRefresh()
             }
         }
     }
@@ -419,6 +468,8 @@ class BasePhotoViewController: UIViewController {
                 preference.set(preference: self.collection)
                 
                 self.updateOperationMenu()
+                self.updateSelectionQuickNavToolbar()
+                self.gridView.scheduleHierarchyToolbarRefresh()
             }
         }
     }
@@ -765,16 +816,27 @@ class BasePhotoViewController: UIViewController {
         syncSelectionQuickNavBarButtonsEnabled()
     }
 
-    /// 选择模式下在导航控制器底部工具条显示「上一处 / 下一处」。
+    /// 非选择模式：底栏层级展开/收起；选择模式：选区跳转。
     internal func updateSelectionQuickNavToolbar() {
         guard let nav = navigationController else { return }
-        if selectionMode == .none {
-            nav.setToolbarHidden(true, animated: true)
-            toolbarItems = nil
-            return
-        }
         let flexLeading = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
         let flexTrailing = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
+        if selectionMode == .none {
+            if showsHierarchyCollapseToolbar {
+                toolbarItems = [
+                    flexLeading,
+                    hierarchyCollapseToolbarButton,
+                    hierarchyExpandToolbarButton,
+                    flexTrailing
+                ]
+                nav.setToolbarHidden(false, animated: true)
+                syncHierarchyToolbarButtonsEnabled()
+            } else {
+                nav.setToolbarHidden(true, animated: true)
+                toolbarItems = nil
+            }
+            return
+        }
         toolbarItems = [flexLeading, selectionQuickNavPreviousBarButton, selectionQuickNavNextBarButton, flexTrailing]
         nav.setToolbarHidden(false, animated: true)
     }
@@ -782,6 +844,7 @@ class BasePhotoViewController: UIViewController {
     override func viewWillAppear(_ animated: Bool) {
         super.viewWillAppear(animated)
         updateSelectionQuickNavToolbar()
+        gridView.scheduleHierarchyToolbarRefresh()
     }
 
     /// 更新全选/取消全选按钮的显示状态

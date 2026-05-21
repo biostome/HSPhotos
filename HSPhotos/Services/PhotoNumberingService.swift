@@ -168,58 +168,62 @@ final class PhotoNumberingService {
         )
     }
 
-    /// 通过“屏幕中心命中的照片”查找应执行折叠/展开的目标层级节点。
-    /// 规则：
-    /// 1) 若 centerAsset 本身有子级，返回它；
-    /// 2) 否则沿它所在位置的层级父链向上回溯，找最近一个有子级的层级节点；
-    /// 3) 找不到返回 nil。
-    ///
-    /// - Parameters:
-    ///   - centerAsset: 屏幕中心命中的照片（可见序列中的某一项）
-    ///   - orderedAssets: 当前顺序（建议传入全量顺序 `assets`，保持与层级计算一致）
-    ///   - collection: 当前相册
-    ///   - shouldBecomeCollapsed: 若传入，则只返回当前折叠状态需要变化的节点；折叠传 true，展开传 false。
-    /// - Returns: 应作为折叠/展开目标的关键节点
-    func nearestCollapsibleAncestor(
-        from centerAsset: PHAsset,
-        in orderedAssets: [PHAsset],
-        collection: PHAssetCollection,
-        shouldBecomeCollapsed: Bool? = nil
+    func applyVisibleHierarchyStep(
+        expand: Bool,
+        visibleAssetIDs: Set<String>,
+        orderedAssets: [PHAsset],
+        in collection: PHAssetCollection
+    ) -> Bool {
+        let key = cacheKey(collection)
+        let levels = levelsCache[key] ?? [:]
+        let orderedIDs = orderedAssets.map(\.localIdentifier)
+        let spanMode = HierarchyCollapseSettings.shared.spanMode
+        guard let next = PhotoNumberingLogic.applyVisibleHierarchyStep(
+            expand: expand,
+            visibleIDs: visibleAssetIDs,
+            orderedAssetIDs: orderedIDs,
+            levels: levels,
+            collapsed: collapsedCache[key] ?? [:],
+            spanMode: spanMode
+        ) else { return false }
+        collapsedCache[key] = next
+        persistAfterMutation(for: collection)
+        return true
+    }
+
+    func canApplyVisibleHierarchyStep(
+        expand: Bool,
+        visibleAssetIDs: Set<String>,
+        orderedAssets: [PHAsset],
+        in collection: PHAssetCollection
+    ) -> Bool {
+        let key = cacheKey(collection)
+        return PhotoNumberingLogic.canApplyVisibleHierarchyStep(
+            expand: expand,
+            visibleIDs: visibleAssetIDs,
+            orderedAssetIDs: orderedAssets.map(\.localIdentifier),
+            levels: levelsCache[key] ?? [:],
+            collapsed: collapsedCache[key] ?? [:],
+            spanMode: HierarchyCollapseSettings.shared.spanMode
+        )
+    }
+
+    func nearestVisibleNumberedAncestorAsset(
+        of asset: PHAsset,
+        visibleAssetIDs: Set<String>,
+        orderedAssets: [PHAsset],
+        in collection: PHAssetCollection
     ) -> PHAsset? {
-        guard !orderedAssets.isEmpty else { return nil }
-        guard let centerIndex = orderedAssets.firstIndex(where: { $0.localIdentifier == centerAsset.localIdentifier }) else {
-            return nil
-        }
-
-        func canUseAsShortcutTarget(_ asset: PHAsset) -> Bool {
-            guard hasDescendants(asset, in: orderedAssets, collection: collection) else { return false }
-            guard let shouldBecomeCollapsed else { return true }
-            return isCollapsed(asset, in: collection) != shouldBecomeCollapsed
-        }
-
-        // 命中项本身可操作且状态需要变化时，直接返回；否则继续向父级链查找。
-        if canUseAsShortcutTarget(centerAsset) {
-            return centerAsset
-        }
-
-        let centerLevel = level(for: centerAsset, in: collection)
-        var requiredParentLevel = centerLevel > 0 ? centerLevel - 1 : Int.max
-
-        // 向上回溯最近父级层级节点；无编号照片则认作当前位置附近的间隙，先找最近的上方层级节点。
-        for i in stride(from: centerIndex - 1, through: 0, by: -1) {
-            let candidate = orderedAssets[i]
-            let candidateLevel = level(for: candidate, in: collection)
-            guard candidateLevel > 0 else { continue }
-
-            guard candidateLevel <= requiredParentLevel else { continue }
-            requiredParentLevel = candidateLevel - 1
-
-            if canUseAsShortcutTarget(candidate) {
-                return candidate
-            }
-        }
-
-        return nil
+        let orderedIDs = orderedAssets.map(\.localIdentifier)
+        let levels = levelsCache[cacheKey(collection)] ?? [:]
+        let effective = PhotoNumberingLogic.effectiveLevels(orderedAssetIDs: orderedIDs, levels: levels)
+        guard let ancestorID = PhotoNumberingLogic.nearestVisibleNumberedAncestor(
+            of: asset.localIdentifier,
+            visibleIDs: visibleAssetIDs,
+            orderedAssetIDs: orderedIDs,
+            effectiveLevels: effective
+        ) else { return nil }
+        return orderedAssets.first { $0.localIdentifier == ancestorID }
     }
 
     /// 根据折叠状态返回可见照片

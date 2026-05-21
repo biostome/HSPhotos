@@ -156,6 +156,23 @@ struct PhotoNumberingLogicTests {
 
     // MARK: - reconcileLevelsWithOrder
 
+    @Test func visibleHierarchyStep_expandsShallowestCollapsedLevel() {
+        let ordered = ["r1", "c1", "r2"]
+        let levels = ["r1": 1, "c1": 2, "r2": 1]
+        let collapsed = ["r1": true, "r2": true]
+        let visible: Set<String> = ["r1", "r2"]
+        let next = PhotoNumberingLogic.applyVisibleHierarchyStep(
+            expand: true,
+            visibleIDs: visible,
+            orderedAssetIDs: ordered,
+            levels: levels,
+            collapsed: collapsed,
+            spanMode: .breakAtUnnumbered
+        )
+        #expect(next?["r1"] == nil)
+        #expect(next?["r2"] == true)
+    }
+
     @Test func reconcile_correctsOvershoot_andPreservesValidChain() {
         let pulled = PhotoNumberingLogic.reconcileLevelsWithOrder(
             orderedAssetIDs: ["a", "b"],

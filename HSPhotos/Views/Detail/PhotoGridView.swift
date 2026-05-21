@@ -63,6 +63,9 @@ struct PhotoGridConstants {
     static let compactSpacing: CGFloat = 0
     static let sectionInset: CGFloat = 2
     static let zoomThreshold: (enlarge: CGFloat, shrink: CGFloat) = (1.3, 0.7)
+    /// 层级快捷展开/收起：与系统列表 batch 一致的时长与曲线
+    static let hierarchyBatchAnimationDuration: TimeInterval = 0.35
+    static let hierarchyLargeChangeReloadThreshold = 120
 }
 
 
@@ -70,6 +73,10 @@ class PhotoGridView: UIView {
     private let overlaySettings = OverlayDisplaySettings.shared
     private var overlaySettingsObserver: NSObjectProtocol?
     private var hierarchyCollapseSettingsObserver: NSObjectProtocol?
+    private var hierarchyToolbarRefreshPending = false
+    /// 层级快捷按钮：避免连续点击叠加重入 `performBatchUpdates`
+    private var isHierarchyShortcutVisibleAssetsAnimating = false
+    private var hierarchyShortcutNeedsVisibleRefresh = false
 
     public var assets: [PHAsset] = [] {
         didSet {
@@ -83,6 +90,9 @@ class PhotoGridView: UIView {
             // 删除节点后存储层级已校正，但可见序列可能不变（例如删的是折叠分支内未展示的项），须强制刷新编号 overlay
             if idsChanged, sortPreference == .custom, supportsHierarchyNumbering {
                 collectionView.reloadData()
+            }
+            if sortPreference == .custom, supportsHierarchyNumbering {
+                scheduleHierarchyToolbarRefresh()
             }
         }
     }
@@ -177,6 +187,8 @@ class PhotoGridView: UIView {
     private var selectionQuickNavJumpIndex: Int?
     /// 由控制器注入：锚点或选中集变化时刷新底部工具条上按钮的 `isEnabled`。
     var onSelectionQuickNavToolbarRefresh: (() -> Void)?
+    /// 由控制器注入：刷新底栏层级展开/收起按钮状态
+    var onHierarchyToolbarRefresh: (() -> Void)?
 
     // 当前锚点照片
     private var anchorPhoto: PHAsset?
@@ -303,7 +315,6 @@ class PhotoGridView: UIView {
         ) { [weak self] _ in
             guard let self = self else { return }
             self.updateVisibleAssets()
-            self.collectionView.reloadData()
         }
     }
 
@@ -709,27 +720,128 @@ class PhotoGridView: UIView {
     // MARK: - Public Methods
 
     /// 更新可见资产（仅自定义排序且支持层级时应用折叠过滤）
-    private func updateVisibleAssets() {
-        let newVisibleAssets: [PHAsset]
+    private func updateVisibleAssets(animated: Bool = false, completion: (() -> Void)? = nil) {
+        setVisibleAssets(computeVisibleAssets(), animated: animated, completion: completion)
+    }
+
+    private func computeVisibleAssets() -> [PHAsset] {
         if sortPreference == .custom, supportsHierarchyNumbering, let collection = currentCollection {
-            newVisibleAssets = numberingService.visibleAssets(from: assets, in: collection)
-        } else {
-            newVisibleAssets = assets
+            return numberingService.visibleAssets(from: assets, in: collection)
+        }
+        return assets
+    }
+
+    private func setVisibleAssets(
+        _ newVisibleAssets: [PHAsset],
+        animated: Bool,
+        completion: (() -> Void)? = nil
+    ) {
+        let unchanged = newVisibleAssets.count == visibleAssets.count
+            && newVisibleAssets.elementsEqual(visibleAssets, by: { $0.localIdentifier == $1.localIdentifier })
+        guard !unchanged else {
+            completion?()
+            return
         }
 
-        // 只在数据真正变化时才更新
-        if newVisibleAssets.count != visibleAssets.count ||
-           !newVisibleAssets.elementsEqual(visibleAssets, by: { $0.localIdentifier == $1.localIdentifier }) {
-            PhotoCell.cachingManager.stopCachingImagesForAllAssets()
+        PhotoCell.cachingManager.stopCachingImagesForAllAssets()
+        preloadCustomOrderCache()
+        preloadDateTextCache()
+        if sortPreference == .custom, supportsHierarchyNumbering {
+            prewarmHierarchyCache(for: newVisibleAssets)
+        }
+
+        guard animated else {
             visibleAssets = newVisibleAssets
-            preloadCustomOrderCache()
-            preloadDateTextCache()
-            if sortPreference == .custom, supportsHierarchyNumbering {
-                prewarmHierarchyCache(for: newVisibleAssets)
-            }
             collectionView.reloadData()
             syncSelectionQuickNavCurrentVisibleIndexToLastSelectedAsset()
+            scheduleHierarchyToolbarRefresh()
+            completion?()
+            return
         }
+
+        applyVisibleAssetsChangeAnimated(to: newVisibleAssets, completion: completion)
+    }
+
+    private func applyVisibleAssetsChangeAnimated(to newVisibleAssets: [PHAsset], completion: (() -> Void)?) {
+        let oldVisible = visibleAssets
+        let diff = visibleAssetsBatchChanges(from: oldVisible, to: newVisibleAssets)
+        let changeCount = diff.deletes.count + diff.inserts.count
+        let finish: () -> Void = { [weak self] in
+            guard let self else { return }
+            self.syncSelectionQuickNavCurrentVisibleIndexToLastSelectedAsset()
+            self.scheduleHierarchyToolbarRefresh()
+            completion?()
+        }
+
+        if changeCount > PhotoGridConstants.hierarchyLargeChangeReloadThreshold {
+            UIView.transition(
+                with: collectionView,
+                duration: PhotoGridConstants.hierarchyBatchAnimationDuration,
+                options: [.transitionCrossDissolve, .curveEaseInOut, .allowUserInteraction]
+            ) { [weak self] in
+                guard let self else { return }
+                self.visibleAssets = newVisibleAssets
+                self.collectionView.reloadData()
+            } completion: { _ in finish() }
+            return
+        }
+
+        CATransaction.begin()
+        CATransaction.setAnimationDuration(PhotoGridConstants.hierarchyBatchAnimationDuration)
+        CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeInEaseOut))
+        collectionView.performBatchUpdates { [weak self] in
+            guard let self else { return }
+            self.visibleAssets = newVisibleAssets
+            if !diff.deletes.isEmpty {
+                self.collectionView.deleteItems(at: diff.deletes)
+            }
+            if !diff.inserts.isEmpty {
+                self.collectionView.insertItems(at: diff.inserts)
+            }
+        } completion: { [weak self] _ in
+            guard let self else { return }
+            if !diff.reloads.isEmpty {
+                UIView.performWithoutAnimation {
+                    self.collectionView.reloadItems(at: diff.reloads)
+                }
+            }
+            finish()
+        }
+        CATransaction.commit()
+    }
+
+    /// 删除用旧下标；插入用「删除后、按最终顺序」的下标；刷新在 batch 外执行，避免与 delete 冲突
+    private func visibleAssetsBatchChanges(
+        from oldVisible: [PHAsset],
+        to newVisible: [PHAsset]
+    ) -> (deletes: [IndexPath], inserts: [IndexPath], reloads: [IndexPath]) {
+        let oldIDs = Set(oldVisible.map(\.localIdentifier))
+        let newIDs = Set(newVisible.map(\.localIdentifier))
+
+        let deletes = oldVisible.enumerated().compactMap { index, asset in
+            newIDs.contains(asset.localIdentifier) ? nil : IndexPath(item: index, section: 0)
+        }
+
+        let insertFinalIndices = newVisible.enumerated().compactMap { index, asset in
+            oldIDs.contains(asset.localIdentifier) ? nil : index
+        }
+
+        let inserts = insertFinalIndices.map { finalIndex in
+            let keptBefore = newVisible.prefix(finalIndex).filter { oldIDs.contains($0.localIdentifier) }.count
+            let insertsBefore = insertFinalIndices.filter { $0 < finalIndex }.count
+            return IndexPath(item: keptBefore + insertsBefore, section: 0)
+        }
+
+        let reloads = newVisible.enumerated().compactMap { index, asset in
+            oldIDs.contains(asset.localIdentifier) ? IndexPath(item: index, section: 0) : nil
+        }
+
+        return (deletes, inserts, reloads)
+    }
+
+    private func fullOrderIndex(for assetID: String) -> Int? {
+        if let cached = customOrderIndexCache[assetID] { return cached }
+        return assets.firstIndex(where: { $0.localIdentifier == assetID })
     }
 
     /// 预构建自定义排序索引字典，将 O(n) 线性搜索降为 O(1)
@@ -794,12 +906,9 @@ class PhotoGridView: UIView {
     }
 
     /// 刷新层级显示
-    func refreshParagraphDisplay() {
-        // 清除层级缓存，确保重新获取最新的层级信息
+    func refreshParagraphDisplay(animated: Bool = false, completion: (() -> Void)? = nil) {
         hierarchyCache.removeAll()
-        updateVisibleAssets()
-        // 强制刷新当前可见的Cell，确保层级信息更新
-        collectionView.reloadData()
+        updateVisibleAssets(animated: animated, completion: completion)
     }
 
     /// 定位到指定索引位置的照片
@@ -1183,13 +1292,17 @@ extension PhotoGridView: UICollectionViewDelegateFlowLayout {
             scrollView.isScrollEnabled = true
         }
         scrollDelegate?.scrollViewDidEndDragging?(scrollView, willDecelerate: decelerate)
+        if !decelerate { onHierarchyToolbarRefresh?() }
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
+        scrollDelegate?.scrollViewDidEndDecelerating?(scrollView)
+        onHierarchyToolbarRefresh?()
     }
 
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
-
+        scrollDelegate?.scrollViewDidEndScrollingAnimation?(scrollView)
+        onHierarchyToolbarRefresh?()
     }
 }
 
@@ -1613,5 +1726,172 @@ extension PhotoGridView {
             return (targets.contains { $0 < last }, targets.contains { $0 > last })
         }
         return (targets.contains { $0 < vmax }, targets.contains { $0 > vmin })
+    }
+}
+
+// MARK: - 底栏快捷层级（可见 Cell 逐级 ±1）
+
+extension PhotoGridView {
+
+    /// `reloadData` 后需等布局完成，`indexPathsForVisibleItems` 才有值；否则底栏按钮会一直禁用。
+    func scheduleHierarchyToolbarRefresh() {
+        guard !hierarchyToolbarRefreshPending else { return }
+        hierarchyToolbarRefreshPending = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.hierarchyToolbarRefreshPending = false
+            self.layoutIfNeeded()
+            self.collectionView.layoutIfNeeded()
+            self.onHierarchyToolbarRefresh?()
+        }
+    }
+
+    func visibleAssetIDsOnScreen() -> Set<String> {
+        layoutIfNeeded()
+        collectionView.layoutIfNeeded()
+        let fromCollectionView = Set(
+            collectionView.indexPathsForVisibleItems.compactMap { indexPath -> String? in
+                guard indexPath.item < visibleAssets.count else { return nil }
+                return visibleAssets[indexPath.item].localIdentifier
+            }
+        )
+        if !fromCollectionView.isEmpty { return fromCollectionView }
+        return approximateVisibleAssetIDsOnScreen()
+    }
+
+    /// `indexPathsForVisibleItems` 尚未就绪时，按 contentOffset 与格网估算视口内项
+    private func approximateVisibleAssetIDsOnScreen() -> Set<String> {
+        guard !visibleAssets.isEmpty,
+              let layout = collectionView.collectionViewLayout as? UICollectionViewFlowLayout else { return [] }
+        let rowStride = layout.itemSize.height + layout.minimumLineSpacing
+        let colStride = layout.itemSize.width + layout.minimumInteritemSpacing
+        guard rowStride > 0, colStride > 0, columns > 0 else { return [] }
+
+        let inset = collectionView.adjustedContentInset
+        let topY = collectionView.contentOffset.y + inset.top
+        let bottomY = collectionView.contentOffset.y + collectionView.bounds.height - inset.bottom
+        let firstRow = max(0, Int((topY - layout.sectionInset.top) / rowStride))
+        let lastRow = max(
+            firstRow,
+            Int(ceil((bottomY - layout.sectionInset.top) / rowStride))
+        )
+
+        var ids: Set<String> = []
+        ids.reserveCapacity((lastRow - firstRow + 1) * columns)
+        for row in firstRow...lastRow {
+            for column in 0..<columns {
+                let index = row * columns + column
+                guard index < visibleAssets.count else { continue }
+                ids.insert(visibleAssets[index].localIdentifier)
+            }
+        }
+        return ids
+    }
+
+    func syncHierarchyToolbarButtons(collapse: UIBarButtonItem, expand: UIBarButtonItem) {
+        guard supportsHierarchyNumbering, sortPreference == .custom, let collection = currentCollection else {
+            collapse.isEnabled = false
+            expand.isEnabled = false
+            return
+        }
+        let visibleIDs = visibleAssetIDsOnScreen()
+        collapse.isEnabled = numberingService.canApplyVisibleHierarchyStep(
+            expand: false, visibleAssetIDs: visibleIDs, orderedAssets: assets, in: collection
+        )
+        expand.isEnabled = numberingService.canApplyVisibleHierarchyStep(
+            expand: true, visibleAssetIDs: visibleIDs, orderedAssets: assets, in: collection
+        )
+    }
+
+    @discardableResult
+    func performVisibleHierarchyShortcut(expand: Bool) -> Bool {
+        guard supportsHierarchyNumbering, sortPreference == .custom, let collection = currentCollection else { return false }
+        // 试用：暂不依赖视口中心锚点（回中逻辑见 completion 内注释）
+        // guard let anchor = centerVisibleAsset else { return false }
+        // let anchorID = anchor.localIdentifier
+        let visibleIDs = visibleAssetIDsOnScreen()
+
+        numberingService.beginBatchUpdates(for: collection)
+        let changed = numberingService.applyVisibleHierarchyStep(
+            expand: expand,
+            visibleAssetIDs: visibleIDs,
+            orderedAssets: assets,
+            in: collection
+        )
+        numberingService.endBatchUpdates(for: collection)
+        guard changed else { return false }
+
+        if isHierarchyShortcutVisibleAssetsAnimating {
+            hierarchyShortcutNeedsVisibleRefresh = true
+            onHierarchyToolbarRefresh?()
+            return true
+        }
+        beginHierarchyShortcutVisibleRefresh()
+        return true
+    }
+
+    private func beginHierarchyShortcutVisibleRefresh() {
+        isHierarchyShortcutVisibleAssetsAnimating = true
+        refreshParagraphDisplay(animated: true) { [weak self] in
+            self?.finishHierarchyShortcutVisibleRefresh()
+        }
+    }
+
+    /// 动画结束后再合并刷新；连点多次只落到最终可见列表，避免动画互相打断
+    private func finishHierarchyShortcutVisibleRefresh() {
+        guard hierarchyShortcutNeedsVisibleRefresh else {
+            isHierarchyShortcutVisibleAssetsAnimating = false
+            // 试用：展开/收起后不滚动回视觉锚点
+            // recenterVisualAnchor(preferredAssetID: anchorID)
+            onHierarchyToolbarRefresh?()
+            return
+        }
+        hierarchyShortcutNeedsVisibleRefresh = false
+        let target = computeVisibleAssets()
+        let unchanged = target.count == visibleAssets.count
+            && target.elementsEqual(visibleAssets, by: { $0.localIdentifier == $1.localIdentifier })
+        if unchanged {
+            updateVisibleAssets(animated: false) { [weak self] in
+                self?.finishHierarchyShortcutVisibleRefresh()
+            }
+            return
+        }
+        hierarchyCache.removeAll()
+        if supportsHierarchyNumbering, let collection = currentCollection {
+            prewarmHierarchyCache(for: target)
+        }
+        refreshParagraphDisplay(animated: true) { [weak self] in
+            self?.finishHierarchyShortcutVisibleRefresh()
+        }
+    }
+
+    private func recenterVisualAnchor(preferredAssetID: String) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self, let collection = self.currentCollection else { return }
+            let visibleIDs = Set(self.visibleAssets.map(\.localIdentifier))
+            let targetID: String
+            if visibleIDs.contains(preferredAssetID) {
+                targetID = preferredAssetID
+            } else if let preferred = self.assets.first(where: { $0.localIdentifier == preferredAssetID }),
+                      let ancestor = self.numberingService.nearestVisibleNumberedAncestorAsset(
+                          of: preferred,
+                          visibleAssetIDs: visibleIDs,
+                          orderedAssets: self.assets,
+                          in: collection
+                      ) {
+                targetID = ancestor.localIdentifier
+            } else if let center = self.centerVisibleAsset {
+                targetID = center.localIdentifier
+            } else {
+                return
+            }
+            guard let index = self.visibleAssets.firstIndex(where: { $0.localIdentifier == targetID }) else { return }
+            self.collectionView.layoutIfNeeded()
+            self.collectionView.scrollToItem(
+                at: IndexPath(item: index, section: 0),
+                at: .centeredVertically,
+                animated: false
+            )
+        }
     }
 }

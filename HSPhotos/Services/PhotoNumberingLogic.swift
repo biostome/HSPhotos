@@ -133,6 +133,174 @@ enum PhotoNumberingLogic {
         return dict
     }
 
+    // MARK: - 快捷层级（可见 Cell 统一 ±1 层）
+
+    static func effectiveLevels(orderedAssetIDs: [String], levels: [String: Int]) -> [String: Int] {
+        var result: [String: Int] = [:]
+        var lastLevel = 0
+        for id in orderedAssetIDs {
+            guard let lv = levels[id], lv > 0 else { continue }
+            let corrected = min(lv, lastLevel + 1)
+            result[id] = corrected
+            lastLevel = corrected
+        }
+        return result
+    }
+
+    /// 全序中向上找直接父级有编号节点（有效层级）
+    static func parentNumberedAssetID(
+        at index: Int,
+        orderedAssetIDs: [String],
+        effectiveLevels: [String: Int]
+    ) -> String? {
+        guard index > 0, index < orderedAssetIDs.count else { return nil }
+        let childLevel = effectiveLevels[orderedAssetIDs[index]] ?? 0
+        for i in stride(from: index - 1, through: 0, by: -1) {
+            let id = orderedAssetIDs[i]
+            guard let lv = effectiveLevels[id], lv > 0 else { continue }
+            if childLevel > 0 {
+                if lv < childLevel { return id }
+            } else {
+                return id
+            }
+        }
+        return nil
+    }
+
+    /// 可见 Cell 统一展开/收起一层；无变化时返回 `nil`
+    static func applyVisibleHierarchyStep(
+        expand: Bool,
+        visibleIDs: Set<String>,
+        orderedAssetIDs: [String],
+        levels: [String: Int],
+        collapsed: [String: Bool],
+        spanMode: HierarchyCollapseSpanMode
+    ) -> [String: Bool]? {
+        guard !visibleIDs.isEmpty else { return nil }
+        let effective = effectiveLevels(orderedAssetIDs: orderedAssetIDs, levels: levels)
+        var controlTargets: Set<String> = []
+
+        for (index, id) in orderedAssetIDs.enumerated() where visibleIDs.contains(id) {
+            if let target = hierarchyControlTargetID(
+                at: index,
+                orderedAssetIDs: orderedAssetIDs,
+                levels: levels,
+                effectiveLevels: effective,
+                spanMode: spanMode
+            ) {
+                controlTargets.insert(target)
+            }
+        }
+        guard !controlTargets.isEmpty else { return nil }
+
+        var candidates: [(id: String, level: Int)] = []
+        for id in controlTargets {
+            guard let lv = effective[id] else { continue }
+            let isCollapsed = collapsed[id] == true
+            let hasKids = hasDescendants(
+                assetID: id, orderedAssetIDs: orderedAssetIDs, levels: levels, spanMode: spanMode
+            )
+            guard hasKids else { continue }
+            if expand {
+                if isCollapsed { candidates.append((id, lv)) }
+            } else if !isCollapsed {
+                candidates.append((id, lv))
+            }
+        }
+        guard !candidates.isEmpty else { return nil }
+
+        let targetLevel = expand
+            ? candidates.map(\.level).min()
+            : candidates.map(\.level).max()
+        guard let level = targetLevel else { return nil }
+
+        var next = collapsed
+        var changed = false
+        for (id, lv) in candidates where lv == level {
+            if expand {
+                if next[id] == true {
+                    next.removeValue(forKey: id)
+                    changed = true
+                }
+            } else if next[id] != true {
+                next[id] = true
+                changed = true
+            }
+        }
+        return changed ? next : nil
+    }
+
+    static func canApplyVisibleHierarchyStep(
+        expand: Bool,
+        visibleIDs: Set<String>,
+        orderedAssetIDs: [String],
+        levels: [String: Int],
+        collapsed: [String: Bool],
+        spanMode: HierarchyCollapseSpanMode
+    ) -> Bool {
+        applyVisibleHierarchyStep(
+            expand: expand,
+            visibleIDs: visibleIDs,
+            orderedAssetIDs: orderedAssetIDs,
+            levels: levels,
+            collapsed: collapsed,
+            spanMode: spanMode
+        ) != nil
+    }
+
+    /// 自 `assetID` 起向上找第一个在 `visibleIDs` 中的有编号祖先
+    static func nearestVisibleNumberedAncestor(
+        of assetID: String,
+        visibleIDs: Set<String>,
+        orderedAssetIDs: [String],
+        effectiveLevels: [String: Int]
+    ) -> String? {
+        guard let index = orderedAssetIDs.firstIndex(of: assetID) else { return nil }
+        if visibleIDs.contains(assetID), (effectiveLevels[assetID] ?? 0) > 0 {
+            return assetID
+        }
+        var requiredParent = effectiveLevels[assetID].map { $0 - 1 } ?? Int.max
+        for i in stride(from: index - 1, through: 0, by: -1) {
+            let id = orderedAssetIDs[i]
+            guard let lv = effectiveLevels[id], lv > 0 else { continue }
+            if visibleIDs.contains(id), lv <= requiredParent {
+                return id
+            }
+            requiredParent = lv - 1
+        }
+        return nil
+    }
+
+    private static func hierarchyControlTargetID(
+        at index: Int,
+        orderedAssetIDs: [String],
+        levels: [String: Int],
+        effectiveLevels: [String: Int],
+        spanMode: HierarchyCollapseSpanMode
+    ) -> String? {
+        let id = orderedAssetIDs[index]
+        let lv = effectiveLevels[id] ?? 0
+        if lv > 0 {
+            return hasDescendants(
+                assetID: id, orderedAssetIDs: orderedAssetIDs, levels: levels, spanMode: spanMode
+            ) ? id : parentNumberedAssetID(at: index, orderedAssetIDs: orderedAssetIDs, effectiveLevels: effectiveLevels)
+        }
+        if let parent = parentNumberedAssetID(at: index, orderedAssetIDs: orderedAssetIDs, effectiveLevels: effectiveLevels),
+           hasDescendants(assetID: parent, orderedAssetIDs: orderedAssetIDs, levels: levels, spanMode: spanMode) {
+            return parent
+        }
+        for i in (index + 1)..<orderedAssetIDs.count {
+            let nextID = orderedAssetIDs[i]
+            let nextLv = effectiveLevels[nextID] ?? 0
+            if nextLv > 0 {
+                return hasDescendants(
+                    assetID: nextID, orderedAssetIDs: orderedAssetIDs, levels: levels, spanMode: spanMode
+                ) ? nextID : nil
+            }
+        }
+        return nil
+    }
+
     // MARK: - Private
 
     private static func firstNumberedLevel(from startIndex: Int, orderedAssetIDs: [String], levels: [String: Int]) -> Int? {
