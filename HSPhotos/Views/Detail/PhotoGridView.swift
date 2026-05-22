@@ -1749,14 +1749,33 @@ extension PhotoGridView {
     func visibleAssetIDsOnScreen() -> Set<String> {
         layoutIfNeeded()
         collectionView.layoutIfNeeded()
-        let fromCollectionView = Set(
-            collectionView.indexPathsForVisibleItems.compactMap { indexPath -> String? in
-                guard indexPath.item < visibleAssets.count else { return nil }
-                return visibleAssets[indexPath.item].localIdentifier
-            }
+
+        var ids = Set<String>()
+        let visibleRect = CGRect(
+            x: collectionView.contentOffset.x,
+            y: collectionView.contentOffset.y,
+            width: collectionView.bounds.width,
+            height: collectionView.bounds.height
         )
-        if !fromCollectionView.isEmpty { return fromCollectionView }
-        return approximateVisibleAssetIDsOnScreen()
+        if let attributes = collectionView.collectionViewLayout.layoutAttributesForElements(in: visibleRect) {
+            for attribute in attributes where attribute.representedElementCategory == .cell {
+                let indexPath = attribute.indexPath
+                guard indexPath.section == 0, indexPath.item < visibleAssets.count else { continue }
+                ids.insert(visibleAssets[indexPath.item].localIdentifier)
+            }
+        }
+
+        if ids.isEmpty {
+            for indexPath in collectionView.indexPathsForVisibleItems {
+                guard indexPath.section == 0, indexPath.item < visibleAssets.count else { continue }
+                ids.insert(visibleAssets[indexPath.item].localIdentifier)
+            }
+        }
+
+        if ids.isEmpty {
+            return approximateVisibleAssetIDsOnScreen()
+        }
+        return ids
     }
 
     /// `indexPathsForVisibleItems` 尚未就绪时，按 contentOffset 与格网估算视口内项

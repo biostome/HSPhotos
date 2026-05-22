@@ -116,23 +116,6 @@ enum PhotoNumberingLogic {
         return visible
     }
 
-    // MARK: - 顺序校正（与 computeNumbers 的 correctedLv 规则一致）
-
-    static func reconcileLevelsWithOrder(orderedAssetIDs: [String], levels: [String: Int]) -> [String: Int] {
-        guard !levels.isEmpty else { return levels }
-        var dict = levels
-        var lastLevel = 0
-        for id in orderedAssetIDs {
-            guard let lv = dict[id], lv > 0 else { continue }
-            let corrected = min(lv, lastLevel + 1)
-            if corrected != lv {
-                dict[id] = corrected
-            }
-            lastLevel = corrected
-        }
-        return dict
-    }
-
     // MARK: - 快捷层级（可见 Cell 统一 ±1 层）
 
     static func effectiveLevels(orderedAssetIDs: [String], levels: [String: Int]) -> [String: Int] {
@@ -147,7 +130,6 @@ enum PhotoNumberingLogic {
         return result
     }
 
-    /// 全序中向上找直接父级有编号节点（有效层级）
     static func parentNumberedAssetID(
         at index: Int,
         orderedAssetIDs: [String],
@@ -167,7 +149,6 @@ enum PhotoNumberingLogic {
         return nil
     }
 
-    /// 可见 Cell 统一展开/收起一层；无变化时返回 `nil`
     static func applyVisibleHierarchyStep(
         expand: Bool,
         visibleIDs: Set<String>,
@@ -246,6 +227,23 @@ enum PhotoNumberingLogic {
             collapsed: collapsed,
             spanMode: spanMode
         ) != nil
+    }
+
+    // MARK: - 顺序校正（与 computeNumbers 的 correctedLv 规则一致）
+
+    static func reconcileLevelsWithOrder(orderedAssetIDs: [String], levels: [String: Int]) -> [String: Int] {
+        guard !levels.isEmpty else { return levels }
+        var dict = levels
+        var lastLevel = 0
+        for id in orderedAssetIDs {
+            guard let lv = dict[id], lv > 0 else { continue }
+            let corrected = min(lv, lastLevel + 1)
+            if corrected != lv {
+                dict[id] = corrected
+            }
+            lastLevel = corrected
+        }
+        return dict
     }
 
     /// 自 `assetID` 起向上找第一个在 `visibleIDs` 中的有编号祖先

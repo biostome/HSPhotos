@@ -154,7 +154,7 @@ struct PhotoNumberingLogicTests {
         #expect(has == false)
     }
 
-    // MARK: - reconcileLevelsWithOrder
+    // MARK: - visibleHierarchyStep
 
     @Test func visibleHierarchyStep_expandsShallowestCollapsedLevel() {
         let ordered = ["r1", "c1", "r2"]
@@ -172,6 +172,8 @@ struct PhotoNumberingLogicTests {
         #expect(next?["r1"] == nil)
         #expect(next?["r2"] == true)
     }
+
+    // MARK: - reconcileLevelsWithOrder
 
     @Test func reconcile_correctsOvershoot_andPreservesValidChain() {
         let pulled = PhotoNumberingLogic.reconcileLevelsWithOrder(

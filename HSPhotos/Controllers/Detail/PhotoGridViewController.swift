@@ -9,7 +9,7 @@ import UIKit
 import Photos
 
 class PhotoGridViewController: BasePhotoViewController {
-    
+
     private lazy var shareButton: UIButton = {
         var config: UIButton.Configuration
         if #available(iOS 26.0, *) {
@@ -271,7 +271,7 @@ class PhotoGridViewController: BasePhotoViewController {
         shareButton.isHidden = !inSelectionMode
         shareButton.isEnabled = hasSelectedAssets
     }
-    
+
     private func makeSharePlaceholderText(for count: Int) -> String {
         if count == 1 {
             return "已选择 1 张照片"

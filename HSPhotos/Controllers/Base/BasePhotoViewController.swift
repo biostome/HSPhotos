@@ -128,7 +128,7 @@ class BasePhotoViewController: UIViewController {
             target: self,
             action: #selector(didTapHierarchyCollapseToolbar)
         )
-        item.accessibilityLabel = "折叠中心层级"
+        item.accessibilityLabel = "折叠可见层级"
         return item
     }()
 
@@ -139,7 +139,7 @@ class BasePhotoViewController: UIViewController {
             target: self,
             action: #selector(didTapHierarchyExpandToolbar)
         )
-        item.accessibilityLabel = "展开中心层级"
+        item.accessibilityLabel = "展开可见层级"
         return item
     }()
 
