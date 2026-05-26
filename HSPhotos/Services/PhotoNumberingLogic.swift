@@ -157,47 +157,18 @@ enum PhotoNumberingLogic {
         collapsed: [String: Bool],
         spanMode: HierarchyCollapseSpanMode
     ) -> [String: Bool]? {
-        guard !visibleIDs.isEmpty else { return nil }
-        let effective = effectiveLevels(orderedAssetIDs: orderedAssetIDs, levels: levels)
-        var controlTargets: Set<String> = []
-
-        for (index, id) in orderedAssetIDs.enumerated() where visibleIDs.contains(id) {
-            if let target = hierarchyControlTargetID(
-                at: index,
-                orderedAssetIDs: orderedAssetIDs,
-                levels: levels,
-                effectiveLevels: effective,
-                spanMode: spanMode
-            ) {
-                controlTargets.insert(target)
-            }
-        }
-        guard !controlTargets.isEmpty else { return nil }
-
-        var candidates: [(id: String, level: Int)] = []
-        for id in controlTargets {
-            guard let lv = effective[id] else { continue }
-            let isCollapsed = collapsed[id] == true
-            let hasKids = hasDescendants(
-                assetID: id, orderedAssetIDs: orderedAssetIDs, levels: levels, spanMode: spanMode
-            )
-            guard hasKids else { continue }
-            if expand {
-                if isCollapsed { candidates.append((id, lv)) }
-            } else if !isCollapsed {
-                candidates.append((id, lv))
-            }
-        }
-        guard !candidates.isEmpty else { return nil }
-
-        let targetLevel = expand
-            ? candidates.map(\.level).min()
-            : candidates.map(\.level).max()
-        guard let level = targetLevel else { return nil }
+        guard let plan = visibleHierarchyStepPlan(
+            expand: expand,
+            visibleIDs: visibleIDs,
+            orderedAssetIDs: orderedAssetIDs,
+            levels: levels,
+            collapsed: collapsed,
+            spanMode: spanMode
+        ) else { return nil }
 
         var next = collapsed
         var changed = false
-        for (id, lv) in candidates where lv == level {
+        for (id, lv) in plan.candidates where lv == plan.targetLevel {
             if expand {
                 if next[id] == true {
                     next.removeValue(forKey: id)
@@ -219,7 +190,7 @@ enum PhotoNumberingLogic {
         collapsed: [String: Bool],
         spanMode: HierarchyCollapseSpanMode
     ) -> Bool {
-        applyVisibleHierarchyStep(
+        visibleHierarchyStepPlan(
             expand: expand,
             visibleIDs: visibleIDs,
             orderedAssetIDs: orderedAssetIDs,
@@ -227,6 +198,70 @@ enum PhotoNumberingLogic {
             collapsed: collapsed,
             spanMode: spanMode
         ) != nil
+    }
+
+    private struct VisibleHierarchyStepPlan {
+        let candidates: [(id: String, level: Int)]
+        let targetLevel: Int
+    }
+
+    /// 计算可见区域 ±1 层折叠步进；`hasDescendants` 按 assetID 记忆化，避免对同一父节点重复 O(n) 扫描
+    private static func visibleHierarchyStepPlan(
+        expand: Bool,
+        visibleIDs: Set<String>,
+        orderedAssetIDs: [String],
+        levels: [String: Int],
+        collapsed: [String: Bool],
+        spanMode: HierarchyCollapseSpanMode
+    ) -> VisibleHierarchyStepPlan? {
+        guard !visibleIDs.isEmpty else { return nil }
+        let effective = effectiveLevels(orderedAssetIDs: orderedAssetIDs, levels: levels)
+        var descendantsMemo: [String: Bool] = [:]
+        func hasDescendantsCached(_ assetID: String) -> Bool {
+            if let hit = descendantsMemo[assetID] { return hit }
+            let value = hasDescendants(
+                assetID: assetID,
+                orderedAssetIDs: orderedAssetIDs,
+                levels: levels,
+                spanMode: spanMode
+            )
+            descendantsMemo[assetID] = value
+            return value
+        }
+
+        var controlTargets: Set<String> = []
+        controlTargets.reserveCapacity(min(visibleIDs.count, orderedAssetIDs.count))
+        for (index, id) in orderedAssetIDs.enumerated() where visibleIDs.contains(id) {
+            if let target = hierarchyControlTargetID(
+                at: index,
+                orderedAssetIDs: orderedAssetIDs,
+                effectiveLevels: effective,
+                hasDescendants: hasDescendantsCached
+            ) {
+                controlTargets.insert(target)
+            }
+        }
+        guard !controlTargets.isEmpty else { return nil }
+
+        var candidates: [(id: String, level: Int)] = []
+        candidates.reserveCapacity(controlTargets.count)
+        for id in controlTargets {
+            guard let lv = effective[id] else { continue }
+            let isCollapsed = collapsed[id] == true
+            guard hasDescendantsCached(id) else { continue }
+            if expand {
+                if isCollapsed { candidates.append((id, lv)) }
+            } else if !isCollapsed {
+                candidates.append((id, lv))
+            }
+        }
+        guard !candidates.isEmpty else { return nil }
+
+        let targetLevel = expand
+            ? candidates.map(\.level).min()
+            : candidates.map(\.level).max()
+        guard let level = targetLevel else { return nil }
+        return VisibleHierarchyStepPlan(candidates: candidates, targetLevel: level)
     }
 
     // MARK: - 顺序校正（与 computeNumbers 的 correctedLv 规则一致）
@@ -272,28 +307,25 @@ enum PhotoNumberingLogic {
     private static func hierarchyControlTargetID(
         at index: Int,
         orderedAssetIDs: [String],
-        levels: [String: Int],
         effectiveLevels: [String: Int],
-        spanMode: HierarchyCollapseSpanMode
+        hasDescendants: (String) -> Bool
     ) -> String? {
         let id = orderedAssetIDs[index]
         let lv = effectiveLevels[id] ?? 0
         if lv > 0 {
-            return hasDescendants(
-                assetID: id, orderedAssetIDs: orderedAssetIDs, levels: levels, spanMode: spanMode
-            ) ? id : parentNumberedAssetID(at: index, orderedAssetIDs: orderedAssetIDs, effectiveLevels: effectiveLevels)
+            return hasDescendants(id)
+                ? id
+                : parentNumberedAssetID(at: index, orderedAssetIDs: orderedAssetIDs, effectiveLevels: effectiveLevels)
         }
         if let parent = parentNumberedAssetID(at: index, orderedAssetIDs: orderedAssetIDs, effectiveLevels: effectiveLevels),
-           hasDescendants(assetID: parent, orderedAssetIDs: orderedAssetIDs, levels: levels, spanMode: spanMode) {
+           hasDescendants(parent) {
             return parent
         }
         for i in (index + 1)..<orderedAssetIDs.count {
             let nextID = orderedAssetIDs[i]
             let nextLv = effectiveLevels[nextID] ?? 0
             if nextLv > 0 {
-                return hasDescendants(
-                    assetID: nextID, orderedAssetIDs: orderedAssetIDs, levels: levels, spanMode: spanMode
-                ) ? nextID : nil
+                return hasDescendants(nextID) ? nextID : nil
             }
         }
         return nil

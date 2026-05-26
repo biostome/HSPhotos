@@ -238,12 +238,10 @@ class BasePhotoViewController: UIViewController {
 
     @objc private func didTapHierarchyCollapseToolbar() {
         gridView.performVisibleHierarchyShortcut(expand: false)
-        syncHierarchyToolbarButtonsEnabled()
     }
 
     @objc private func didTapHierarchyExpandToolbar() {
         gridView.performVisibleHierarchyShortcut(expand: true)
-        syncHierarchyToolbarButtonsEnabled()
     }
 
     private var showsHierarchyCollapseToolbar: Bool {

@@ -45,11 +45,22 @@ final class PhotoNumberingService {
         collapsedCache[key] = (UserDefaults.standard.dictionary(forKey: collapseKey(collection)) as? [String: Bool]) ?? [:]
     }
 
-    /// 离开相册或数据变更时调用：从内存持久化到 UserDefaults
+    /// 离开相册或数据变更时调用：从内存持久化到 UserDefaults（后台写入，避免大表阻塞主线程）
     func saveForCollection(_ collection: PHAssetCollection) {
         let key = cacheKey(collection)
-        if let levels = levelsCache[key] { UserDefaults.standard.set(levels, forKey: levelsKey(collection)) }
-        if let collapsed = collapsedCache[key] { UserDefaults.standard.set(collapsed, forKey: collapseKey(collection)) }
+        let levels = levelsCache[key]
+        let collapsed = collapsedCache[key]
+        let levelsStorageKey = levelsKey(collection)
+        let collapseStorageKey = collapseKey(collection)
+        DispatchQueue.global(qos: .utility).async {
+            if let levels { UserDefaults.standard.set(levels, forKey: levelsStorageKey) }
+            if let collapsed { UserDefaults.standard.set(collapsed, forKey: collapseStorageKey) }
+        }
+    }
+
+    /// 当前相簿折叠状态快照（只读内存，供 UI 同步折叠角标）
+    func collapsedStates(in collection: PHAssetCollection) -> [String: Bool] {
+        collapsedCache[cacheKey(collection)] ?? [:]
     }
 
     /// 与 `endBatchUpdates` 成对使用，期间 `setLevel` / `toggleCollapse` / 内部 reconcile 不落盘，结束时写一次

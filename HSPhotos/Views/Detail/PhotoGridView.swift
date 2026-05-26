@@ -734,20 +734,33 @@ class PhotoGridView: UIView {
     private func setVisibleAssets(
         _ newVisibleAssets: [PHAsset],
         animated: Bool,
+        hierarchyNumbersUnchanged: Bool = false,
         completion: (() -> Void)? = nil
     ) {
         let unchanged = newVisibleAssets.count == visibleAssets.count
             && newVisibleAssets.elementsEqual(visibleAssets, by: { $0.localIdentifier == $1.localIdentifier })
         guard !unchanged else {
+            if hierarchyNumbersUnchanged {
+                syncHierarchyCacheCollapsedFlags()
+                UIView.performWithoutAnimation {
+                    collectionView.reloadData()
+                }
+            }
             completion?()
             return
         }
 
-        PhotoCell.cachingManager.stopCachingImagesForAllAssets()
-        preloadCustomOrderCache()
-        preloadDateTextCache()
+        if !hierarchyNumbersUnchanged {
+            PhotoCell.cachingManager.stopCachingImagesForAllAssets()
+            preloadCustomOrderCache()
+            preloadDateTextCache()
+        }
         if sortPreference == .custom, supportsHierarchyNumbering {
-            prewarmHierarchyCache(for: newVisibleAssets)
+            if hierarchyNumbersUnchanged {
+                syncHierarchyCacheCollapsedFlags()
+            } else {
+                prewarmHierarchyCache(for: newVisibleAssets)
+            }
         }
 
         guard animated else {
@@ -905,10 +918,33 @@ class PhotoGridView: UIView {
         }
     }
 
-    /// 刷新层级显示
+    /// 仅折叠状态变化时同步角标，编号字符串不变
+    private func syncHierarchyCacheCollapsedFlags() {
+        guard supportsHierarchyNumbering, let collection = currentCollection else { return }
+        if hierarchyCache.isEmpty {
+            prewarmHierarchyCache(for: visibleAssets)
+            return
+        }
+        let collapsed = numberingService.collapsedStates(in: collection)
+        for (id, entry) in hierarchyCache {
+            hierarchyCache[id] = (text: entry.text, isCollapsed: collapsed[id] ?? false)
+        }
+    }
+
+    /// 刷新层级显示（层级/顺序变更：重算编号与可见集）
     func refreshParagraphDisplay(animated: Bool = false, completion: (() -> Void)? = nil) {
         hierarchyCache.removeAll()
         updateVisibleAssets(animated: animated, completion: completion)
+    }
+
+    /// 底栏快捷折叠/展开：只更新可见集与折叠角标，不重算整表编号
+    private func applyHierarchyShortcutVisibilityChange(animated: Bool, completion: (() -> Void)? = nil) {
+        setVisibleAssets(
+            computeVisibleAssets(),
+            animated: animated,
+            hierarchyNumbersUnchanged: true,
+            completion: completion
+        )
     }
 
     /// 定位到指定索引位置的照片
@@ -1851,7 +1887,7 @@ extension PhotoGridView {
 
     private func beginHierarchyShortcutVisibleRefresh() {
         isHierarchyShortcutVisibleAssetsAnimating = true
-        refreshParagraphDisplay(animated: true) { [weak self] in
+        applyHierarchyShortcutVisibilityChange(animated: true) { [weak self] in
             self?.finishHierarchyShortcutVisibleRefresh()
         }
     }
@@ -1866,20 +1902,7 @@ extension PhotoGridView {
             return
         }
         hierarchyShortcutNeedsVisibleRefresh = false
-        let target = computeVisibleAssets()
-        let unchanged = target.count == visibleAssets.count
-            && target.elementsEqual(visibleAssets, by: { $0.localIdentifier == $1.localIdentifier })
-        if unchanged {
-            updateVisibleAssets(animated: false) { [weak self] in
-                self?.finishHierarchyShortcutVisibleRefresh()
-            }
-            return
-        }
-        hierarchyCache.removeAll()
-        if supportsHierarchyNumbering, let collection = currentCollection {
-            prewarmHierarchyCache(for: target)
-        }
-        refreshParagraphDisplay(animated: true) { [weak self] in
+        applyHierarchyShortcutVisibilityChange(animated: true) { [weak self] in
             self?.finishHierarchyShortcutVisibleRefresh()
         }
     }
