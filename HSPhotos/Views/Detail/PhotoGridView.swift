@@ -740,12 +740,18 @@ class PhotoGridView: UIView {
         let unchanged = newVisibleAssets.count == visibleAssets.count
             && newVisibleAssets.elementsEqual(visibleAssets, by: { $0.localIdentifier == $1.localIdentifier })
         guard !unchanged else {
-            if hierarchyNumbersUnchanged {
-                syncHierarchyCacheCollapsedFlags()
-                UIView.performWithoutAnimation {
-                    collectionView.reloadData()
+            if sortPreference == .custom, supportsHierarchyNumbering {
+                if hierarchyNumbersUnchanged {
+                    syncHierarchyCacheCollapsedFlags()
+                } else {
+                    prewarmHierarchyCache(for: newVisibleAssets)
                 }
             }
+            UIView.performWithoutAnimation {
+                collectionView.reloadData()
+            }
+            syncSelectionQuickNavCurrentVisibleIndexToLastSelectedAsset()
+            scheduleHierarchyToolbarRefresh()
             completion?()
             return
         }

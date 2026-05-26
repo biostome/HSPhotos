@@ -76,12 +76,16 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
     
     private lazy var hierarchyLabel: UILabel = {
         let label = UILabel()
-        label.textColor = UIColor.white
-        label.backgroundColor = UIColor.systemBlue
-        label.font = UIFont.systemFont(ofSize: 10, weight: .semibold)
+        label.font = UIFont.monospacedDigitSystemFont(ofSize: 11, weight: .semibold)
+        label.textColor = .white
         label.textAlignment = .center
-        label.layer.cornerRadius = 8
+        label.backgroundColor = UIColor(red: 0.52, green: 0.78, blue: 1.0, alpha: 0.58)
+        label.layer.cornerRadius = 10
+        label.layer.borderWidth = 0.5
+        label.layer.borderColor = UIColor.white.withAlphaComponent(0.28).cgColor
         label.clipsToBounds = true
+        label.lineBreakMode = .byClipping
+        label.adjustsFontSizeToFitWidth = false
         label.isHidden = true
         label.translatesAutoresizingMaskIntoConstraints = false
         return label
@@ -92,7 +96,7 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         stackView.axis = .horizontal
         stackView.spacing = 4
         stackView.alignment = .center
-        stackView.distribution = .fill
+        stackView.distribution = .fillProportionally
         stackView.translatesAutoresizingMaskIntoConstraints = false
         return stackView
     }()
@@ -183,6 +187,8 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
     // 层级信息缓存，避免重复计算
     private var lastHierarchyText: String?
     private var lastIsHierarchyCollapsed: Bool?
+    private var hierarchyLabelWidthConstraint: NSLayoutConstraint?
+    private let hierarchyLabelHorizontalPadding: CGFloat = 14
     
     // MARK: - 图片缓存
     private static let heartImage = UIImage(systemName: "heart")
@@ -313,6 +319,10 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         
         topLabelsStackView.addArrangedSubview(anchorLabel)
         topLabelsStackView.addArrangedSubview(hierarchyLabel)
+        anchorLabel.setContentHuggingPriority(.required, for: .horizontal)
+        anchorLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
+        hierarchyLabel.setContentHuggingPriority(.required, for: .horizontal)
+        hierarchyLabel.setContentCompressionResistancePriority(.required, for: .horizontal)
         
         bottomStackView.addArrangedSubview(mediaIconView)
         bottomStackView.addArrangedSubview(mediaDurationLabel)
@@ -325,6 +335,7 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         NSLayoutConstraint.activate([
             topLabelsStackView.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 6),
             topLabelsStackView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 6),
+            topLabelsStackView.trailingAnchor.constraint(lessThanOrEqualTo: contentView.trailingAnchor, constant: -6),
             
             bottomStackView.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 8),
             bottomStackView.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -8),
@@ -341,12 +352,40 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
             anchorLabel.widthAnchor.constraint(equalToConstant: 24),
             anchorLabel.heightAnchor.constraint(equalToConstant: 24),
             
-            hierarchyLabel.heightAnchor.constraint(equalToConstant: 24),
-            hierarchyLabel.widthAnchor.constraint(equalToConstant: 40)
+            hierarchyLabel.heightAnchor.constraint(equalToConstant: 20)
         ])
+        hierarchyLabelWidthConstraint = hierarchyLabel.widthAnchor.constraint(equalToConstant: 26)
+        hierarchyLabelWidthConstraint?.priority = .required
+        hierarchyLabelWidthConstraint?.isActive = true
     }
-    
-    
+
+    private func updateHierarchyLabelWidth(for displayText: String) {
+        guard let constraint = hierarchyLabelWidthConstraint else { return }
+        hierarchyLabel.text = displayText
+
+        let fitWidth = hierarchyLabel.sizeThatFits(
+            CGSize(width: CGFloat.greatestFiniteMagnitude, height: 20)
+        ).width
+        let borderInset = hierarchyLabel.layer.borderWidth * 2
+        let targetWidth = ceil(fitWidth) + hierarchyLabelHorizontalPadding + borderInset
+
+        let cellWidth = contentView.bounds.width
+        let anchorReserve: CGFloat = anchorLabel.isHidden ? 0 : (24 + topLabelsStackView.spacing)
+        let sideInset: CGFloat = 12
+        let maxWidth = cellWidth > 0
+            ? cellWidth - sideInset - anchorReserve
+            : CGFloat.greatestFiniteMagnitude
+
+        let minWidth: CGFloat = 20
+        if cellWidth > 0, targetWidth > maxWidth {
+            constraint.constant = max(minWidth, maxWidth)
+            hierarchyLabel.adjustsFontSizeToFitWidth = true
+            hierarchyLabel.minimumScaleFactor = 0.72
+        } else {
+            constraint.constant = max(minWidth, targetWidth)
+            hierarchyLabel.adjustsFontSizeToFitWidth = false
+        }
+    }
     
     lazy var requestOptions: PHImageRequestOptions = {
         let options = PHImageRequestOptions()
@@ -407,8 +446,10 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         if hierarchyText != lastHierarchyText || isHierarchyCollapsed != lastIsHierarchyCollapsed {
             if let hierarchyText, !hierarchyText.isEmpty {
                 let simplifiedText = hierarchyText.replacingOccurrences(of: "级", with: "")
-                hierarchyLabel.text = isHierarchyCollapsed ? "\(simplifiedText)折" : simplifiedText
+                let displayText = isHierarchyCollapsed ? "\(simplifiedText)折" : simplifiedText
+                hierarchyLabel.text = displayText
                 hierarchyLabel.isHidden = false
+                updateHierarchyLabelWidth(for: displayText)
             } else {
                 hierarchyLabel.text = nil
                 hierarchyLabel.isHidden = true
@@ -508,6 +549,13 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
                     }
                 }
             }
+        }
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        if labelsInstalled, !hierarchyLabel.isHidden, let text = hierarchyLabel.text, !text.isEmpty {
+            updateHierarchyLabelWidth(for: text)
         }
     }
 
