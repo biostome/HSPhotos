@@ -76,4 +76,25 @@ struct PhotoGridSelectionState: Equatable, Sendable {
     mutating func removeIdentifierWithoutRankShift(id: String) {
         rankByID.removeValue(forKey: id)
     }
+
+    /// 批量移除并一次性重编序号，避免逐项 toggle 导致的 O(n²) 压缩。
+    /// - Returns: 所有序号发生过变化的 id（不含被移除的 id）。
+    mutating func removeMultiple(ids: Set<String>) -> [String] {
+        let before = rankByID
+        for id in ids {
+            rankByID.removeValue(forKey: id)
+        }
+        let kept = rankByID.keys
+        let sorted = kept.sorted(by: { before[$0]! < before[$1]! })
+        var changed: [String] = []
+        var newRank = 1
+        for id in sorted {
+            if rankByID[id] != newRank {
+                changed.append(id)
+                rankByID[id] = newRank
+            }
+            newRank += 1
+        }
+        return changed
+    }
 }

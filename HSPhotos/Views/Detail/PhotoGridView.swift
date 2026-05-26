@@ -618,8 +618,6 @@ class PhotoGridView: UIView {
             if selectionState.insertIfAbsent(id: asset.localIdentifier) {
                 selectedAssetByID[asset.localIdentifier] = asset
                 indexPaths.append(IndexPath(item: index, section: 0))
-                delegate?.photoGridView(self, didSelectItemAt: IndexPath(item: index, section: 0))
-                delegate?.photoGridView(self, didSelectItemAt: asset)
             }
         }
 
@@ -630,32 +628,34 @@ class PhotoGridView: UIView {
         }
     }
 
-    /// 取消选择指定范围的照片（根据方向分配顺序）
+    /// 取消选择指定范围的照片
     private func deselectRange(from startIndex: Int, to endIndex: Int) {
         var explicitIndexPaths: [IndexPath] = []
-        var rankChangedIDs = Set<String>()
-        // 根据方向决定追加顺序
-        let indices = startIndex <= endIndex ? Array(startIndex...endIndex) : Array(endIndex...startIndex).reversed()
+        var idsToRemove = Set<String>()
 
-        for index in indices {
+        for index in min(startIndex, endIndex)...max(startIndex, endIndex) {
             guard index < visibleAssets.count else { continue }
             let asset = visibleAssets[index]
-            if selectionState.contains(asset.localIdentifier) {
-                rankChangedIDs.formUnion(toggle(photo: asset))
+            let id = asset.localIdentifier
+            if selectionState.contains(id) {
+                idsToRemove.insert(id)
+                selectedAssetByID.removeValue(forKey: id)
+                if anchorPhoto?.localIdentifier == id {
+                    anchorPhoto = nil
+                }
                 explicitIndexPaths.append(IndexPath(item: index, section: 0))
-                delegate?.photoGridView(self, didDeselectItemAt: IndexPath(item: index, section: 0))
-                delegate?.photoGridView(self, didDeselectItemAt: asset)
             }
         }
 
-        if !explicitIndexPaths.isEmpty {
-            let toReload = indexPathsMergingExplicitAndVisibleRankChanges(
-                rankChangedIDs: rankChangedIDs,
-                explicit: explicitIndexPaths
-            )
-            reloadItemsForSelectionChange(at: toReload) { _ in
-                self.delegate?.photoGridView(self, didSelectedItems: self.selectedAssetsForDelegateNotification)
-            }
+        guard !idsToRemove.isEmpty else { return }
+
+        let rankChangedIDs = Set(selectionState.removeMultiple(ids: idsToRemove))
+        let toReload = indexPathsMergingExplicitAndVisibleRankChanges(
+            rankChangedIDs: rankChangedIDs,
+            explicit: explicitIndexPaths
+        )
+        reloadItemsForSelectionChange(at: toReload) { _ in
+            self.delegate?.photoGridView(self, didSelectedItems: self.selectedAssetsForDelegateNotification)
         }
     }
 
