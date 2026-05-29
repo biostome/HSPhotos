@@ -219,6 +219,14 @@ class PhotoGridView: UIView {
     /// 是否支持层级编号功能。首页（图库）不支持，相册内支持。
     public var supportsHierarchyNumbering: Bool = true
 
+    /// 是否隐藏无层级照片（level == 0），仅对自定义排序相册生效
+    public var hideUnleveledAssets: Bool = false {
+        didSet {
+            guard oldValue != hideUnleveledAssets else { return }
+            setVisibleAssets(computeVisibleAssets(), animated: true, hierarchyNumbersUnchanged: true)
+        }
+    }
+
     private let numberingService = PhotoNumberingService.shared
 
     // 层级信息缓存，避免重复计算
@@ -730,10 +738,16 @@ class PhotoGridView: UIView {
     }
 
     private func computeVisibleAssets() -> [PHAsset] {
+        var result: [PHAsset]
         if sortPreference == .custom, supportsHierarchyNumbering, let collection = currentCollection {
-            return numberingService.visibleAssets(from: assets, in: collection)
+            result = numberingService.visibleAssets(from: assets, in: collection)
+            if hideUnleveledAssets {
+                result = result.filter { numberingService.level(for: $0, in: collection) > 0 }
+            }
+        } else {
+            result = assets
         }
-        return assets
+        return result
     }
 
     private func setVisibleAssets(
@@ -1003,7 +1017,7 @@ class PhotoGridView: UIView {
                 let valid = Set(self.assets.map(\.localIdentifier))
                 numberingService.cleanupInvalidNodes(validAssetIDs: valid, orderedAssets: self.assets, for: collection)
                 hierarchyCache.removeAll()
-                visibleAssets = numberingService.visibleAssets(from: assets, in: collection)
+                visibleAssets = computeVisibleAssets()
             } else {
                 visibleAssets = assets
             }

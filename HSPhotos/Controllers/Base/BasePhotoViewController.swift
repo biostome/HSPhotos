@@ -143,6 +143,17 @@ class BasePhotoViewController: UIViewController {
         return item
     }()
 
+    internal lazy var hideUnleveledAssetsToolbarButton: UIBarButtonItem = {
+        let item = UIBarButtonItem(
+            image: UIImage(systemName: "eye.slash"),
+            style: .plain,
+            target: self,
+            action: #selector(didTapHideUnleveledAssets)
+        )
+        item.accessibilityLabel = "隐藏无级照片"
+        return item
+    }()
+
     private lazy var fetchOptions: PHFetchOptions = {
         let options = PHFetchOptions()
         options.sortDescriptors = sortDescriptors(for: sortPreference)
@@ -243,6 +254,17 @@ class BasePhotoViewController: UIViewController {
 
     @objc private func didTapHierarchyExpandToolbar() {
         gridView.performVisibleHierarchyShortcut(expand: true)
+    }
+
+    @objc private func didTapHideUnleveledAssets() {
+        gridView.hideUnleveledAssets.toggle()
+        updateHideUnleveledAssetsButton()
+    }
+
+    private func updateHideUnleveledAssetsButton() {
+        let isHidden = gridView.hideUnleveledAssets
+        hideUnleveledAssetsToolbarButton.image = UIImage(systemName: isHidden ? "eye" : "eye.slash")
+        hideUnleveledAssetsToolbarButton.accessibilityLabel = isHidden ? "显示全部" : "隐藏无级照片"
     }
 
     private var showsHierarchyCollapseToolbar: Bool {
@@ -817,17 +839,19 @@ class BasePhotoViewController: UIViewController {
         syncSelectionQuickNavBarButtonsEnabled()
     }
 
-    /// 非选择模式：底栏层级展开/收起；选择模式：选区跳转 + 层级折叠/展开。
+    /// 非选择模式：底栏层级展开/收起 + 无级照片显示/隐藏；选择模式：选区跳转 + 层级折叠/展开 + 无级照片显示/隐藏。
     internal func updateSelectionQuickNavToolbar() {
         guard let nav = navigationController else { return }
         let flexLeading = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
         let flexTrailing = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
         if selectionMode == .none {
             if showsHierarchyCollapseToolbar {
+                updateHideUnleveledAssetsButton()
                 toolbarItems = [
                     flexLeading,
                     hierarchyCollapseToolbarButton,
                     hierarchyExpandToolbarButton,
+                    hideUnleveledAssetsToolbarButton,
                     flexTrailing
                 ]
                 nav.setToolbarHidden(false, animated: true)
@@ -839,6 +863,10 @@ class BasePhotoViewController: UIViewController {
             return
         }
         var items: [UIBarButtonItem] = [flexLeading, selectionQuickNavPreviousBarButton, selectionQuickNavNextBarButton]
+        if supportsHierarchyNumbering, sortPreference == .custom {
+            updateHideUnleveledAssetsButton()
+            items.append(hideUnleveledAssetsToolbarButton)
+        }
         if showsHierarchyCollapseToolbar {
             items.append(contentsOf: [hierarchyCollapseToolbarButton, hierarchyExpandToolbarButton])
         }
