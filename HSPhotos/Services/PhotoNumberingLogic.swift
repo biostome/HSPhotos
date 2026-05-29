@@ -255,16 +255,16 @@ enum PhotoNumberingLogic {
         spanMode: HierarchyCollapseSpanMode
     ) -> Bool {
         var descendantsMemo: [String: Bool] = [:]
+        func hasDesc(_ id: String) -> Bool {
+            if let hit = descendantsMemo[id] { return hit }
+            let v = hasDescendants(assetID: id, orderedAssetIDs: orderedAssetIDs, levels: levels, spanMode: spanMode)
+            descendantsMemo[id] = v
+            return v
+        }
         for (id, level) in levels where level > 0 {
             let isCollapsed = collapsed[id] == true
             guard expand ? isCollapsed : !isCollapsed else { continue }
-            let v: Bool = {
-                if let hit = descendantsMemo[id] { return hit }
-                let r = hasDescendants(assetID: id, orderedAssetIDs: orderedAssetIDs, levels: levels, spanMode: spanMode)
-                descendantsMemo[id] = r
-                return r
-            }()
-            if v { return true }
+            if hasDesc(id) { return true }
         }
         return false
     }
