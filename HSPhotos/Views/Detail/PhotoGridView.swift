@@ -1836,36 +1836,63 @@ extension PhotoGridView {
         return ids
     }
 
+    /// 若已选中照片且选中项存在层级 → 返回选中项 ID 集合；
+    /// 否则 → 返回 nil，表示应使用全量模式。
+    private var selectedHierarchyModeIDs: Set<String>? {
+        guard hasSelectedAssets, let collection = currentCollection else { return nil }
+        let selected = selectedAssets
+        guard selected.contains(where: { numberingService.level(for: $0, in: collection) > 0 }) else { return nil }
+        return selectedMembershipIdentifiers
+    }
+
+    /// 选择模式下是否有含层级的选中照片，用于决定是否显示层级折叠/展开按钮。
+    var hasSelectedAssetsWithHierarchy: Bool {
+        selectedHierarchyModeIDs != nil
+    }
+
     func syncHierarchyToolbarButtons(collapse: UIBarButtonItem, expand: UIBarButtonItem) {
         guard supportsHierarchyNumbering, sortPreference == .custom, let collection = currentCollection else {
             collapse.isEnabled = false
             expand.isEnabled = false
             return
         }
-        let visibleIDs = visibleAssetIDsOnScreen()
-        collapse.isEnabled = numberingService.canApplyVisibleHierarchyStep(
-            expand: false, visibleAssetIDs: visibleIDs, orderedAssets: assets, in: collection
-        )
-        expand.isEnabled = numberingService.canApplyVisibleHierarchyStep(
-            expand: true, visibleAssetIDs: visibleIDs, orderedAssets: assets, in: collection
-        )
+        if let selectedIDs = selectedHierarchyModeIDs {
+            collapse.isEnabled = numberingService.canApplyVisibleHierarchyStep(
+                expand: false, visibleAssetIDs: selectedIDs, orderedAssets: assets, in: collection
+            )
+            expand.isEnabled = numberingService.canApplyVisibleHierarchyStep(
+                expand: true, visibleAssetIDs: selectedIDs, orderedAssets: assets, in: collection
+            )
+        } else {
+            collapse.isEnabled = numberingService.canApplyAllItemsHierarchyStep(
+                expand: false, orderedAssets: assets, in: collection
+            )
+            expand.isEnabled = numberingService.canApplyAllItemsHierarchyStep(
+                expand: true, orderedAssets: assets, in: collection
+            )
+        }
     }
 
     @discardableResult
     func performVisibleHierarchyShortcut(expand: Bool) -> Bool {
         guard supportsHierarchyNumbering, sortPreference == .custom, let collection = currentCollection else { return false }
-        // 试用：暂不依赖视口中心锚点（回中逻辑见 completion 内注释）
-        // guard let anchor = centerVisibleAsset else { return false }
-        // let anchorID = anchor.localIdentifier
-        let visibleIDs = visibleAssetIDsOnScreen()
 
         numberingService.beginBatchUpdates(for: collection)
-        let changed = numberingService.applyVisibleHierarchyStep(
-            expand: expand,
-            visibleAssetIDs: visibleIDs,
-            orderedAssets: assets,
-            in: collection
-        )
+        let changed: Bool
+        if let selectedIDs = selectedHierarchyModeIDs {
+            changed = numberingService.applyVisibleHierarchyStep(
+                expand: expand,
+                visibleAssetIDs: selectedIDs,
+                orderedAssets: assets,
+                in: collection
+            )
+        } else {
+            changed = numberingService.applyAllItemsHierarchyStep(
+                expand: expand,
+                orderedAssets: assets,
+                in: collection
+            )
+        }
         numberingService.endBatchUpdates(for: collection)
         guard changed else { return false }
 

@@ -219,6 +219,42 @@ final class PhotoNumberingService {
         )
     }
 
+    func applyAllItemsHierarchyStep(
+        expand: Bool,
+        orderedAssets: [PHAsset],
+        in collection: PHAssetCollection
+    ) -> Bool {
+        let key = cacheKey(collection)
+        let levels = levelsCache[key] ?? [:]
+        let orderedIDs = orderedAssets.map(\.localIdentifier)
+        let spanMode = HierarchyCollapseSettings.shared.spanMode
+        guard let next = PhotoNumberingLogic.applyAllItemsHierarchyStep(
+            expand: expand,
+            orderedAssetIDs: orderedIDs,
+            levels: levels,
+            collapsed: collapsedCache[key] ?? [:],
+            spanMode: spanMode
+        ) else { return false }
+        collapsedCache[key] = next
+        persistAfterMutation(for: collection)
+        return true
+    }
+
+    func canApplyAllItemsHierarchyStep(
+        expand: Bool,
+        orderedAssets: [PHAsset],
+        in collection: PHAssetCollection
+    ) -> Bool {
+        let key = cacheKey(collection)
+        return PhotoNumberingLogic.canApplyAllItemsHierarchyStep(
+            expand: expand,
+            orderedAssetIDs: orderedAssets.map(\.localIdentifier),
+            levels: levelsCache[key] ?? [:],
+            collapsed: collapsedCache[key] ?? [:],
+            spanMode: HierarchyCollapseSettings.shared.spanMode
+        )
+    }
+
     func nearestVisibleNumberedAncestorAsset(
         of asset: PHAsset,
         visibleAssetIDs: Set<String>,

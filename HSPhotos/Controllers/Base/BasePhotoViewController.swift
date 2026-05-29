@@ -218,6 +218,7 @@ class BasePhotoViewController: UIViewController {
         gridView.supportsHierarchyNumbering = supportsHierarchyNumbering
 
         gridView.onSelectionQuickNavToolbarRefresh = { [weak self] in
+            self?.updateSelectionQuickNavToolbar()
             self?.syncSelectionQuickNavBarButtonsEnabled()
         }
         gridView.onHierarchyToolbarRefresh = { [weak self] in
@@ -245,7 +246,9 @@ class BasePhotoViewController: UIViewController {
     }
 
     private var showsHierarchyCollapseToolbar: Bool {
-        supportsHierarchyNumbering && sortPreference == .custom && selectionMode == .none
+        guard supportsHierarchyNumbering, sortPreference == .custom else { return false }
+        if selectionMode == .none { return true }
+        return gridView.hasSelectedAssetsWithHierarchy
     }
 
     internal func syncHierarchyToolbarButtonsEnabled() {
@@ -814,7 +817,7 @@ class BasePhotoViewController: UIViewController {
         syncSelectionQuickNavBarButtonsEnabled()
     }
 
-    /// 非选择模式：底栏层级展开/收起；选择模式：选区跳转。
+    /// 非选择模式：底栏层级展开/收起；选择模式：选区跳转 + 层级折叠/展开。
     internal func updateSelectionQuickNavToolbar() {
         guard let nav = navigationController else { return }
         let flexLeading = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
@@ -835,7 +838,12 @@ class BasePhotoViewController: UIViewController {
             }
             return
         }
-        toolbarItems = [flexLeading, selectionQuickNavPreviousBarButton, selectionQuickNavNextBarButton, flexTrailing]
+        var items: [UIBarButtonItem] = [flexLeading, selectionQuickNavPreviousBarButton, selectionQuickNavNextBarButton]
+        if showsHierarchyCollapseToolbar {
+            items.append(contentsOf: [hierarchyCollapseToolbarButton, hierarchyExpandToolbarButton])
+        }
+        items.append(flexTrailing)
+        toolbarItems = items
         nav.setToolbarHidden(false, animated: true)
     }
 

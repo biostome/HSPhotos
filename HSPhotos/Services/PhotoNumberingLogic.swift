@@ -200,6 +200,75 @@ enum PhotoNumberingLogic {
         ) != nil
     }
 
+    // MARK: - 全量层级步进（不限定可见区域，直接基于 levels 字典计算）
+
+    static func applyAllItemsHierarchyStep(
+        expand: Bool,
+        orderedAssetIDs: [String],
+        levels: [String: Int],
+        collapsed: [String: Bool],
+        spanMode: HierarchyCollapseSpanMode
+    ) -> [String: Bool]? {
+        var descendantsMemo: [String: Bool] = [:]
+        func hasDesc(_ id: String) -> Bool {
+            if let hit = descendantsMemo[id] { return hit }
+            let v = hasDescendants(assetID: id, orderedAssetIDs: orderedAssetIDs, levels: levels, spanMode: spanMode)
+            descendantsMemo[id] = v
+            return v
+        }
+
+        var candidatesByLevel: [Int: [String]] = [:]
+        for (id, level) in levels where level > 0 {
+            let isCollapsed = collapsed[id] == true
+            guard expand ? isCollapsed : !isCollapsed else { continue }
+            guard hasDesc(id) else { continue }
+            candidatesByLevel[level, default: []].append(id)
+        }
+        guard !candidatesByLevel.isEmpty else { return nil }
+
+        let targetLevel = expand
+            ? candidatesByLevel.keys.min()!
+            : candidatesByLevel.keys.max()!
+        guard let candidates = candidatesByLevel[targetLevel] else { return nil }
+
+        var next = collapsed
+        var changed = false
+        for id in candidates {
+            if expand {
+                if next[id] == true {
+                    next.removeValue(forKey: id)
+                    changed = true
+                }
+            } else if next[id] != true {
+                next[id] = true
+                changed = true
+            }
+        }
+        return changed ? next : nil
+    }
+
+    static func canApplyAllItemsHierarchyStep(
+        expand: Bool,
+        orderedAssetIDs: [String],
+        levels: [String: Int],
+        collapsed: [String: Bool],
+        spanMode: HierarchyCollapseSpanMode
+    ) -> Bool {
+        var descendantsMemo: [String: Bool] = [:]
+        for (id, level) in levels where level > 0 {
+            let isCollapsed = collapsed[id] == true
+            guard expand ? isCollapsed : !isCollapsed else { continue }
+            let v: Bool = {
+                if let hit = descendantsMemo[id] { return hit }
+                let r = hasDescendants(assetID: id, orderedAssetIDs: orderedAssetIDs, levels: levels, spanMode: spanMode)
+                descendantsMemo[id] = r
+                return r
+            }()
+            if v { return true }
+        }
+        return false
+    }
+
     private struct VisibleHierarchyStepPlan {
         let candidates: [(id: String, level: Int)]
         let targetLevel: Int
