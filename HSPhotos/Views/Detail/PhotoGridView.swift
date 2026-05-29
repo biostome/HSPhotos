@@ -1930,8 +1930,6 @@ extension PhotoGridView {
     private func finishHierarchyShortcutVisibleRefresh() {
         guard hierarchyShortcutNeedsVisibleRefresh else {
             isHierarchyShortcutVisibleAssetsAnimating = false
-            // 试用：展开/收起后不滚动回视觉锚点
-            // recenterVisualAnchor(preferredAssetID: anchorID)
             onHierarchyToolbarRefresh?()
             return
         }
