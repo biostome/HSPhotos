@@ -155,6 +155,9 @@ class PhotoGridView: UIView {
     /// 选中的结束位置
     public var selectedEnd: Int?
 
+    /// 记录范围选择起点照片的初始选中状态，用于决定范围操作是选中还是取消选中
+    internal var rangeInitialSelectionState: Bool = false
+
     // 新增：用于跟踪滑动手势选中的状态
     internal var isSlidingSelectionEnabled = false
     internal var lastSelectedIndexPath: IndexPath?
@@ -698,6 +701,7 @@ class PhotoGridView: UIView {
         selectedAssetByID.removeAll()
         selectedStart = nil
         selectedEnd = nil
+        rangeInitialSelectionState = false
         anchorPhoto = nil  // 清除锚点
         delegate?.photoGridView(self, didSelectedItems: selectedAssetsForDelegateNotification)
         collectionView.reloadData()
@@ -708,6 +712,7 @@ class PhotoGridView: UIView {
     func selectAll() {
         selectedStart = nil
         selectedEnd = nil
+        rangeInitialSelectionState = false
         anchorPhoto = nil
         selectionState.replaceAll(orderedIDs: visibleAssets.map(\.localIdentifier))
         selectedAssetByID = Dictionary(uniqueKeysWithValues: visibleAssets.map { ($0.localIdentifier, $0) })
@@ -1206,63 +1211,44 @@ extension PhotoGridView {
         guard !isSlidingSelectionEnabled else { return }
 
         let index = indexPath.item
-        let isSelected = selectionState.contains(photo.localIdentifier)
 
-        if isSelected {
+        if selectedStart == nil {
+            // 第一次点击：记录起点和初始选中状态，toggle 提供即时反馈
+            selectedStart = index
+            rangeInitialSelectionState = selectionState.contains(photo.localIdentifier)
             let rankChanged = Set(toggle(photo: photo))
             let reloadIndexPaths = indexPathsMergingExplicitAndVisibleRankChanges(
                 rankChangedIDs: rankChanged,
                 explicit: [indexPath]
             )
             reloadItemsForSelectionChange(at: reloadIndexPaths) { _ in
-                self.delegate?.photoGridView(self, didDeselectItemAt: indexPath)
-                self.delegate?.photoGridView(self, didDeselectItemAt: photo)
-                self.delegate?.photoGridView(self, didSelectedItems: self.selectedAssetsForDelegateNotification)
-            }
-            selectedStart = nil
-            selectedEnd = nil
-            return
-        }
-
-        if selectedStart == nil {
-            // 第一次点击：设置开始位置，选中单个
-            selectedStart = index
-            _ = toggle(photo: photo)
-            reloadItemsForSelectionChange(at: [indexPath]) { _ in
-                self.delegate?.photoGridView(self, didSelectItemAt: indexPath)
-                self.delegate?.photoGridView(self, didSelectItemAt: photo)
+                if self.rangeInitialSelectionState {
+                    self.delegate?.photoGridView(self, didDeselectItemAt: indexPath)
+                    self.delegate?.photoGridView(self, didDeselectItemAt: photo)
+                } else {
+                    self.delegate?.photoGridView(self, didSelectItemAt: indexPath)
+                    self.delegate?.photoGridView(self, didSelectItemAt: photo)
+                }
                 self.delegate?.photoGridView(self, didSelectedItems: self.selectedAssetsForDelegateNotification)
             }
         } else {
-            // 第二次点击：设置结束位置，选中范围，重设范围
+            // 第二次点击：根据起点初始状态决定选中还是取消选中整个范围
             selectedEnd = index
-
-            // 检查范围内是否所有照片都已选中，如果是则执行反选，否则执行选中
             let startIndex = min(selectedStart!, selectedEnd!)
             let endIndex = max(selectedStart!, selectedEnd!)
-            var allSelected = true
 
-            for i in startIndex...endIndex {
-                if i < visibleAssets.count {
-                    let asset = visibleAssets[i]
-                    if !selectionState.contains(asset.localIdentifier) {
-                        allSelected = false
-                        break
-                    }
-                }
-            }
-
-            if allSelected {
-                // 范围内所有照片都已选中，执行反选
+            if rangeInitialSelectionState {
+                // 起点原本已选中 → 取消选中整个范围
                 deselectRange(from: startIndex, to: endIndex)
             } else {
-                // 范围内有未选中的照片，执行选中
+                // 起点原本未选中 → 选中整个范围
                 let reverse = selectedEnd! < selectedStart!
                 selectRange(from: startIndex, to: endIndex, reverse: reverse)
             }
 
             selectedStart = nil
             selectedEnd = nil
+            rangeInitialSelectionState = false
         }
     }
 
@@ -1282,6 +1268,7 @@ extension PhotoGridView {
         }
         selectedStart = nil
         selectedEnd = nil
+        rangeInitialSelectionState = false
     }
 }
 
