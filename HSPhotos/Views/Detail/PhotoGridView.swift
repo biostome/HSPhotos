@@ -1880,10 +1880,10 @@ extension PhotoGridView {
         } else {
             collapse.isEnabled = numberingService.canApplyAllItemsHierarchyStep(
                 expand: false, orderedAssets: assets, in: collection
-            )
+            ) || !hideUnleveledAssets
             expand.isEnabled = numberingService.canApplyAllItemsHierarchyStep(
                 expand: true, orderedAssets: assets, in: collection
-            )
+            ) || hideUnleveledAssets
         }
     }
 

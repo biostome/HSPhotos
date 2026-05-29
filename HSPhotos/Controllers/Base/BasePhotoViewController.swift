@@ -249,11 +249,23 @@ class BasePhotoViewController: UIViewController {
     }
 
     @objc private func didTapHierarchyCollapseToolbar() {
-        gridView.performVisibleHierarchyShortcut(expand: false)
+        let changed = gridView.performVisibleHierarchyShortcut(expand: false)
+        if !changed, selectionMode == .none {
+            gridView.hideUnleveledAssets = true
+            updateHideUnleveledAssetsButton()
+        }
+        syncHierarchyToolbarButtonsEnabled()
     }
 
     @objc private func didTapHierarchyExpandToolbar() {
-        gridView.performVisibleHierarchyShortcut(expand: true)
+        if selectionMode == .none, gridView.hideUnleveledAssets {
+            gridView.hideUnleveledAssets = false
+            updateHideUnleveledAssetsButton()
+            syncHierarchyToolbarButtonsEnabled()
+        } else {
+            _ = gridView.performVisibleHierarchyShortcut(expand: true)
+            syncHierarchyToolbarButtonsEnabled()
+        }
     }
 
     @objc private func didTapHideUnleveledAssets() {
