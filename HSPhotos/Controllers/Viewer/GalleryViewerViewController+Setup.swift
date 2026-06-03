@@ -302,6 +302,7 @@ extension GalleryViewerViewController: UICollectionViewDataSource, UICollectionV
         guard targetIndex >= 0, targetIndex < assets.count else { return }
         currentIndex = targetIndex
         updateTitleAndFavorite()
+        updatePresentedInfoSheet()
     }
 
     private func syncCurrentIndexWithVisiblePage() {
@@ -313,6 +314,7 @@ extension GalleryViewerViewController: UICollectionViewDataSource, UICollectionV
         currentIndex = index
         updateTitleAndFavorite()
         updateActivePageState()
+        updatePresentedInfoSheet()
         if isPagingDrivenByThumbnailStrip {
             finishThumbnailDrivenPagingIfNeeded()
         } else {

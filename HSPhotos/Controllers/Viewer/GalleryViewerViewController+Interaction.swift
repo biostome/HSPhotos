@@ -26,8 +26,12 @@ extension GalleryViewerViewController {
     @objc func infoTapped() {
         guard currentIndex >= 0, currentIndex < assets.count else { return }
         let asset = assets[currentIndex]
-        let vc = PhotoAssetInfoSheetViewController(asset: asset)
-        
+        let vc = PhotoAssetInfoSheetViewController(
+            asset: asset,
+            collection: currentCollection,
+            orderedAssets: photoOrderedAssets ?? assets
+        )
+
         vc.onAlbumSelected = { [weak self] collection in
             self?.dismiss(animated: true) {
                 if let coll = collection, let nav = self?.navigationController {
@@ -36,11 +40,12 @@ extension GalleryViewerViewController {
                 }
             }
         }
-        
+
         if let sheet = vc.sheetPresentationController {
             sheet.detents = [.medium(), .large()]
             sheet.prefersGrabberVisible = true
         }
+        presentedInfoSheet = vc
         present(vc, animated: true)
     }
 

@@ -10,10 +10,17 @@ import Photos
 
 final class GalleryViewerViewController: UIViewController {
     var assets: [PHAsset]
+    /// 当前浏览的相簿（用于层级编号查询）
+    var currentCollection: PHAssetCollection?
+    /// 相簿内排序后的全量照片（用于计算层级编号与序号）
+    var photoOrderedAssets: [PHAsset]?
     let mediaActionService: GalleryViewerMediaActionHandling
     let mediaCellTypes: [any GalleryViewerMediaCell.Type]
     let initialPlaceholderIndex: Int
     let initialPlaceholderImage: UIImage?
+
+    /// 已呈现的信息面板（翻页时实时更新）
+    weak var presentedInfoSheet: PhotoAssetInfoSheetViewController?
 
     lazy var collectionView: UICollectionView = {
         let layout = UICollectionViewFlowLayout()
@@ -115,7 +122,9 @@ final class GalleryViewerViewController: UIViewController {
         sourceFrame: CGRect = .zero,
         sourceImage: UIImage? = nil,
         mediaActionService: GalleryViewerMediaActionHandling = GalleryViewerMediaActionService(),
-        mediaCellTypes: [any GalleryViewerMediaCell.Type] = [LivePhotoCell.self, ImageCell.self, VideoCell.self]
+        mediaCellTypes: [any GalleryViewerMediaCell.Type] = [LivePhotoCell.self, ImageCell.self, VideoCell.self],
+        collection: PHAssetCollection? = nil,
+        orderedAssets: [PHAsset]? = nil
     ) -> UINavigationController {
         let viewer = GalleryViewerViewController(
             assets: assets,
@@ -125,6 +134,8 @@ final class GalleryViewerViewController: UIViewController {
             mediaActionService: mediaActionService,
             mediaCellTypes: mediaCellTypes
         )
+        viewer.currentCollection = collection
+        viewer.photoOrderedAssets = orderedAssets
         let nav = UINavigationController(rootViewController: viewer)
         nav.modalPresentationStyle = .overFullScreen
         if let hero = viewer.heroTransitionDelegate {
@@ -242,5 +253,17 @@ extension GalleryViewerViewController {
 
     var currentDismissTransformView: UIView? {
         currentMediaCell?.dismissTransformView
+    }
+
+    /// 当翻页时，更新已打开的信息面板
+    func updatePresentedInfoSheet() {
+        guard let infoSheet = presentedInfoSheet else { return }
+        guard currentIndex >= 0, currentIndex < assets.count else { return }
+        let asset = assets[currentIndex]
+        infoSheet.refreshWithAsset(
+            asset,
+            collection: currentCollection,
+            orderedAssets: photoOrderedAssets ?? assets
+        )
     }
 }

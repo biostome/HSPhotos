@@ -538,10 +538,15 @@ private final class AssetLocationPlaceholderCardView: UIView {
 }
 
 final class PhotoAssetInfoSheetViewController: UIViewController {
-    
+
     var onAlbumSelected: ((PHAssetCollection?) -> Void)?
-    
+
     private var asset: PHAsset
+    private var currentCollection: PHAssetCollection?
+    private var orderedAssets: [PHAsset]?
+    private let numberingService = PhotoNumberingService.shared
+    private let recognitionService = PhotoRecognitionService.shared
+    private var recognitionTask: Task<Void, Never>?
     private var metadataSummary = AssetMetadataSummary()
     private var metadataRequestID: PHImageRequestID = PHInvalidImageRequestID
     private var thumbnailRequestID: PHImageRequestID = PHInvalidImageRequestID
@@ -549,7 +554,8 @@ final class PhotoAssetInfoSheetViewController: UIViewController {
     private let scrollView = UIScrollView()
     private let contentStack = UIStackView()
 
-    private let noteTextField = UITextField()
+    private let noteTextView = UITextView()
+    private var noteTextViewHeightConstraint: NSLayoutConstraint!
     private let dateLabel = UILabel()
     private let dateAdjustLabel = UILabel()
     private let identifierLabel = UILabel()
@@ -564,8 +570,10 @@ final class PhotoAssetInfoSheetViewController: UIViewController {
         metadataSummary.deviceModel != nil || metadataSummary.lensDescription != nil
     }
 
-    init(asset: PHAsset) {
+    init(asset: PHAsset, collection: PHAssetCollection? = nil, orderedAssets: [PHAsset]? = nil) {
         self.asset = asset
+        self.currentCollection = collection
+        self.orderedAssets = orderedAssets
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -579,9 +587,11 @@ final class PhotoAssetInfoSheetViewController: UIViewController {
         setupLayout()
         populateStaticContent()
         loadMetadata()
+        triggerRecognition()
     }
 
     deinit {
+        recognitionTask?.cancel()
         if metadataRequestID != PHInvalidImageRequestID {
             PHImageManager.default().cancelImageRequest(metadataRequestID)
         }
@@ -612,17 +622,19 @@ final class PhotoAssetInfoSheetViewController: UIViewController {
             contentStack.widthAnchor.constraint(equalTo: scrollView.frameLayoutGuide.widthAnchor, constant: -32)
         ])
 
-        noteTextField.translatesAutoresizingMaskIntoConstraints = false
-        noteTextField.font = .systemFont(ofSize: 16, weight: .regular)
-        noteTextField.textColor = .label
-        noteTextField.attributedPlaceholder = NSAttributedString(
-            string: "添加说明",
-            attributes: [.foregroundColor: UIColor.tertiaryLabel]
-        )
-        noteTextField.borderStyle = .none
-        noteTextField.clearButtonMode = .whileEditing
-        contentStack.addArrangedSubview(noteTextField)
-        noteTextField.heightAnchor.constraint(equalToConstant: 32).isActive = true
+        noteTextView.translatesAutoresizingMaskIntoConstraints = false
+        noteTextView.font = .systemFont(ofSize: 16, weight: .regular)
+        noteTextView.textColor = .label
+        noteTextView.backgroundColor = UIColor.secondarySystemGroupedBackground
+        noteTextView.layer.cornerRadius = 12
+        noteTextView.layer.cornerCurve = .continuous
+        noteTextView.textContainerInset = UIEdgeInsets(top: 10, left: 8, bottom: 10, right: 8)
+        noteTextView.isScrollEnabled = false
+        noteTextView.textContainer.lineFragmentPadding = 0
+
+        noteTextViewHeightConstraint = noteTextView.heightAnchor.constraint(greaterThanOrEqualToConstant: 52)
+        noteTextViewHeightConstraint.isActive = true
+        contentStack.addArrangedSubview(noteTextView)
 
         let headerRow = UIView()
         headerRow.translatesAutoresizingMaskIntoConstraints = false
@@ -699,11 +711,86 @@ final class PhotoAssetInfoSheetViewController: UIViewController {
     private func populateStaticContent() {
         dateLabel.text = Self.formattedDateText(for: asset)
         identifierLabel.text = Self.primaryResourceFilename(for: asset)
+        noteTextView.text = generateAutoDescriptionText()
+        updateNoteTextViewHeight()
         rebuildDeviceCard()
         rebuildMetricsStrip()
         rebuildLocationCard()
         rebuildCollectionsCard()
         loadThumbnailRows()
+    }
+
+    private func updateNoteTextViewHeight() {
+        let availableWidth = noteTextView.bounds.width > 0 ? noteTextView.bounds.width : view.bounds.width - 64
+        let fitSize = noteTextView.sizeThatFits(CGSize(width: availableWidth, height: UIView.noIntrinsicMetric))
+        noteTextViewHeightConstraint.constant = max(52, min(200, fitSize.height))
+    }
+
+    /// 自动生成说明文本：文件名 + 层级编号 + 序号
+    private func generateAutoDescriptionText() -> String {
+        let filename = Self.primaryResourceFilename(for: asset)
+        var parts: [String] = []
+
+        // 相片描述：原始文件名
+        parts.append("描述: \(filename)")
+
+        // 相片级别编号：层级编号（如 1.2.3）
+        if let collection = currentCollection, let ordered = orderedAssets {
+            let number = numberingService.numberString(for: asset, in: ordered, collection: collection)
+            if let number = number, !number.isEmpty {
+                parts.append("级别: \(number)")
+            }
+        }
+
+        // 相片序号：在相簿中的位置
+        if let ordered = orderedAssets, let index = ordered.firstIndex(where: { $0.localIdentifier == asset.localIdentifier }) {
+            parts.append("序号: \(index + 1)/\(ordered.count)")
+        }
+
+        return parts.joined(separator: "\n")
+    }
+
+    /// 刷新当前照片信息（当翻页时由外部调用）
+    func refreshWithAsset(_ asset: PHAsset, collection: PHAssetCollection? = nil, orderedAssets: [PHAsset]? = nil) {
+        cancelPendingRequests()
+        self.asset = asset
+        if let collection { self.currentCollection = collection }
+        if let orderedAssets { self.orderedAssets = orderedAssets }
+        metadataSummary = AssetMetadataSummary()
+        populateStaticContent()
+        loadMetadata()
+        triggerRecognition()
+    }
+
+    private func cancelPendingRequests() {
+        if metadataRequestID != PHInvalidImageRequestID {
+            PHImageManager.default().cancelImageRequest(metadataRequestID)
+            metadataRequestID = PHInvalidImageRequestID
+        }
+        recognitionTask?.cancel()
+        if thumbnailRequestID != PHInvalidImageRequestID {
+            PHImageManager.default().cancelImageRequest(thumbnailRequestID)
+            thumbnailRequestID = PHInvalidImageRequestID
+        }
+    }
+
+    /// 触发 AI 场景识别并追加到说明区域
+    private func triggerRecognition() {
+        recognitionTask?.cancel()
+        recognitionTask = Task { [weak self] in
+            guard let self else { return }
+
+            let labels = await recognitionService.classifyAsset(asset)
+            guard !labels.isEmpty, !Task.isCancelled else { return }
+
+            let sceneText = PhotoRecognitionService.formattedSceneText(from: labels)
+            let sceneLine = noteTextView.text.isEmpty ? "场景: \(sceneText)" : "\n场景: \(sceneText)"
+
+            await MainActor.run {
+                self.noteTextView.text.append(sceneLine)
+                self.updateNoteTextViewHeight()
+            }
+        }
     }
 
     @objc

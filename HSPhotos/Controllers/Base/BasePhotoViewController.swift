@@ -1492,7 +1492,9 @@ extension BasePhotoViewController: PhotoGridViewDelegate {
                     assets: self.assets,
                     initialIndex: index,
                     sourceFrame: sourceFrame,
-                    sourceImage: sourceImage
+                    sourceImage: sourceImage,
+                    collection: collection,
+                    orderedAssets: self.assets
                 )
                 present(nav, animated: true)
             }
