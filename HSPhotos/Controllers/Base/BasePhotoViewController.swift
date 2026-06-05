@@ -180,7 +180,7 @@ class BasePhotoViewController: UIViewController {
     /// 选择模式下，将折叠/展开/隐藏无级收进此菜单按钮。
     internal lazy var hierarchyToolbarMenuButton: UIBarButtonItem = {
         let button = UIBarButtonItem(
-            image: UIImage(systemName: "square.on.square"),
+            image: UIImage(systemName: "ellipsis"),
             style: .plain,
             target: nil,
             action: nil
