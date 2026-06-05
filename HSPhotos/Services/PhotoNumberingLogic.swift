@@ -220,10 +220,15 @@ enum PhotoNumberingLogic {
         collapsed: [String: Bool],
         spanMode: HierarchyCollapseSpanMode
     ) -> [String: Bool]? {
+        var idxMap: [String: Int] = [:]
+        idxMap.reserveCapacity(orderedAssetIDs.count)
+        for (i, id) in orderedAssetIDs.enumerated() { idxMap[id] = i }
+
         var descendantsMemo: [String: Bool] = [:]
         func hasDesc(_ id: String) -> Bool {
             if let hit = descendantsMemo[id] { return hit }
-            let v = hasDescendants(assetID: id, orderedAssetIDs: orderedAssetIDs, levels: levels, spanMode: spanMode)
+            guard let level = levels[id], level > 0, let idx = idxMap[id] else { return false }
+            let v = hasDescendants(at: idx, level: level, orderedAssetIDs: orderedAssetIDs, levels: levels, spanMode: spanMode)
             descendantsMemo[id] = v
             return v
         }
@@ -265,10 +270,15 @@ enum PhotoNumberingLogic {
         collapsed: [String: Bool],
         spanMode: HierarchyCollapseSpanMode
     ) -> Bool {
+        var idxMap: [String: Int] = [:]
+        idxMap.reserveCapacity(orderedAssetIDs.count)
+        for (i, id) in orderedAssetIDs.enumerated() { idxMap[id] = i }
+
         var descendantsMemo: [String: Bool] = [:]
         func hasDesc(_ id: String) -> Bool {
             if let hit = descendantsMemo[id] { return hit }
-            let v = hasDescendants(assetID: id, orderedAssetIDs: orderedAssetIDs, levels: levels, spanMode: spanMode)
+            guard let level = levels[id], level > 0, let idx = idxMap[id] else { return false }
+            let v = hasDescendants(at: idx, level: level, orderedAssetIDs: orderedAssetIDs, levels: levels, spanMode: spanMode)
             descendantsMemo[id] = v
             return v
         }
@@ -296,14 +306,18 @@ enum PhotoNumberingLogic {
     ) -> VisibleHierarchyStepPlan? {
         guard !visibleIDs.isEmpty else { return nil }
         let effective = effectiveLevels(orderedAssetIDs: orderedAssetIDs, levels: levels)
+
+        var idxMap: [String: Int] = [:]
+        idxMap.reserveCapacity(orderedAssetIDs.count)
+        for (i, id) in orderedAssetIDs.enumerated() { idxMap[id] = i }
+
         var descendantsMemo: [String: Bool] = [:]
         func hasDescendantsCached(_ assetID: String) -> Bool {
             if let hit = descendantsMemo[assetID] { return hit }
+            guard let level = levels[assetID], level > 0, let idx = idxMap[assetID] else { return false }
             let value = hasDescendants(
-                assetID: assetID,
-                orderedAssetIDs: orderedAssetIDs,
-                levels: levels,
-                spanMode: spanMode
+                at: idx, level: level,
+                orderedAssetIDs: orderedAssetIDs, levels: levels, spanMode: spanMode
             )
             descendantsMemo[assetID] = value
             return value
