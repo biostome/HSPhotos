@@ -179,6 +179,26 @@ final class PhotoNumberingService {
         )
     }
 
+    /// 批量判断：返回 orderedAssets 中所有有子孙节点的 asset ID 集合。
+    /// 内部只做一次 `map` 与一次全量扫描，避免逐条调用 `hasDescendants(_:in:collection:)` 的 O(n²) 开销。
+    func assetIDsWithDescendants(
+        in orderedAssets: [PHAsset],
+        collection: PHAssetCollection
+    ) -> Set<String> {
+        let levels = levelsCache[cacheKey(collection)] ?? [:]
+        let orderedIDs = orderedAssets.map(\.localIdentifier)
+        let spanMode = HierarchyCollapseSettings.shared.spanMode
+        let logic = PhotoNumberingLogic.self
+        var result = Set<String>()
+        result.reserveCapacity(orderedAssets.count / 4)
+        for id in orderedIDs {
+            if logic.hasDescendants(assetID: id, orderedAssetIDs: orderedIDs, levels: levels, spanMode: spanMode) {
+                result.insert(id)
+            }
+        }
+        return result
+    }
+
     func applyVisibleHierarchyStep(
         expand: Bool,
         visibleAssetIDs: Set<String>,

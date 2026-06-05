@@ -1790,14 +1790,11 @@ extension PhotoGridView {
     }
 
     /// 所有有子孙节点的层级相片在 visibleAssets 中的索引，按顺序排序。
+    /// 使用批量方法（一次 map + 一次扫描），避免 O(n²) 主线程卡顿。
     private func hierarchyBranchNavSortedTargetIndices() -> [Int] {
         guard hierarchyBranchNavIsActive, let collection = currentCollection else { return [] }
-        let targetIDs = Set(visibleAssets.indices.compactMap { idx -> Int? in
-            let asset = visibleAssets[idx]
-            guard numberingService.hasDescendants(asset, in: assets, collection: collection) else { return nil }
-            return idx
-        })
-        return Array(targetIDs).sorted()
+        let branchIDs = numberingService.assetIDsWithDescendants(in: assets, collection: collection)
+        return visibleAssets.indices.filter { branchIDs.contains(visibleAssets[$0].localIdentifier) }
     }
 
     func performHierarchyBranchNavPrevious() {
