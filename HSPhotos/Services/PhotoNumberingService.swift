@@ -180,7 +180,8 @@ final class PhotoNumberingService {
     }
 
     /// 批量判断：返回 orderedAssets 中所有有子孙节点的 asset ID 集合。
-    /// 内部只做一次 `map` 与一次全量扫描，避免逐条调用 `hasDescendants(_:in:collection:)` 的 O(n²) 开销。
+    /// 先构建下标映射，再逐条用已算好的下标调用 PhotoNumberingLogic，
+    /// 避免逐条 firstIndex(of:) 导致的 O(n²) 开销。
     func assetIDsWithDescendants(
         in orderedAssets: [PHAsset],
         collection: PHAssetCollection
@@ -189,10 +190,19 @@ final class PhotoNumberingService {
         let orderedIDs = orderedAssets.map(\.localIdentifier)
         let spanMode = HierarchyCollapseSettings.shared.spanMode
         let logic = PhotoNumberingLogic.self
+
+        // 预构建 O(1) 下标映射
+        var idxMap: [String: Int] = [:]
+        idxMap.reserveCapacity(orderedIDs.count)
+        for (i, id) in orderedIDs.enumerated() {
+            idxMap[id] = i
+        }
+
         var result = Set<String>()
         result.reserveCapacity(orderedAssets.count / 4)
         for id in orderedIDs {
-            if logic.hasDescendants(assetID: id, orderedAssetIDs: orderedIDs, levels: levels, spanMode: spanMode) {
+            guard let level = levels[id], level > 0, let idx = idxMap[id] else { continue }
+            if logic.hasDescendants(at: idx, level: level, orderedAssetIDs: orderedIDs, levels: levels, spanMode: spanMode) {
                 result.insert(id)
             }
         }

@@ -44,6 +44,7 @@ enum PhotoNumberingLogic {
 
     // MARK: - 后代判断
 
+    /// 通过 assetID 查找索引后再判断后代。单次调用开销 O(n)，适合少量调用。
     static func hasDescendants(
         assetID: String,
         orderedAssetIDs: [String],
@@ -53,13 +54,23 @@ enum PhotoNumberingLogic {
         let myLevel = levels[assetID] ?? 0
         guard myLevel > 0 else { return false }
         guard let idx = orderedAssetIDs.firstIndex(of: assetID) else { return false }
+        return hasDescendants(at: idx, level: myLevel, orderedAssetIDs: orderedAssetIDs, levels: levels, spanMode: spanMode)
+    }
 
+    /// 直接使用已算好的下标判断后代（避免重复 O(n) indexOf），适合批量处理。
+    static func hasDescendants(
+        at idx: Int,
+        level: Int,
+        orderedAssetIDs: [String],
+        levels: [String: Int],
+        spanMode: HierarchyCollapseSpanMode
+    ) -> Bool {
         if spanMode == .breakAtUnnumbered {
             for i in (idx + 1)..<orderedAssetIDs.count {
                 let lv = levels[orderedAssetIDs[i]] ?? 0
                 if lv == 0 { return false }
-                if lv <= myLevel { return false }
-                if lv > myLevel { return true }
+                if lv <= level { return false }
+                if lv > level { return true }
             }
             return false
         }
@@ -68,12 +79,12 @@ enum PhotoNumberingLogic {
         var foundHideable = false
         while i < orderedAssetIDs.count {
             let lv = levels[orderedAssetIDs[i]] ?? 0
-            if lv > 0 && lv <= myLevel { break }
-            if lv > myLevel {
+            if lv > 0 && lv <= level { break }
+            if lv > level {
                 foundHideable = true
             } else if lv == 0,
                       let nextLv = firstNumberedLevel(from: i + 1, orderedAssetIDs: orderedAssetIDs, levels: levels),
-                      nextLv > myLevel {
+                      nextLv > level {
                 foundHideable = true
             }
             i += 1
