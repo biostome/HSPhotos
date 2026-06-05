@@ -121,6 +121,29 @@ class BasePhotoViewController: UIViewController {
         return button
     }()
 
+    /// 底部工具条：在层级分支点之间跳转（`chevron.left` = 上一分支，`chevron.right` = 下一分支）。
+    internal lazy var hierarchyBranchNavPreviousBarButton: UIBarButtonItem = {
+        let button = UIBarButtonItem(
+            image: UIImage(systemName: "chevron.left"),
+            style: .plain,
+            target: self,
+            action: #selector(didTapHierarchyBranchNavPrevious)
+        )
+        button.accessibilityLabel = "上一分支"
+        return button
+    }()
+
+    internal lazy var hierarchyBranchNavNextBarButton: UIBarButtonItem = {
+        let button = UIBarButtonItem(
+            image: UIImage(systemName: "chevron.right"),
+            style: .plain,
+            target: self,
+            action: #selector(didTapHierarchyBranchNavNext)
+        )
+        button.accessibilityLabel = "下一分支"
+        return button
+    }()
+
     internal lazy var hierarchyCollapseToolbarButton: UIBarButtonItem = {
         let item = UIBarButtonItem(
             image: UIImage(systemName: "rectangle.compress.vertical"),
@@ -152,6 +175,19 @@ class BasePhotoViewController: UIViewController {
         )
         item.accessibilityLabel = "隐藏无级照片"
         return item
+    }()
+
+    /// 选择模式下，将折叠/展开/隐藏无级收进此菜单按钮。
+    internal lazy var hierarchyToolbarMenuButton: UIBarButtonItem = {
+        let button = UIBarButtonItem(
+            image: UIImage(systemName: "square.on.square"),
+            style: .plain,
+            target: nil,
+            action: nil
+        )
+        button.accessibilityLabel = "层级"
+        button.menu = createHierarchyToolbarMenu()
+        return button
     }()
 
     private lazy var fetchOptions: PHFetchOptions = {
@@ -231,9 +267,15 @@ class BasePhotoViewController: UIViewController {
         gridView.onSelectionQuickNavToolbarRefresh = { [weak self] in
             self?.updateSelectionQuickNavToolbar()
             self?.syncSelectionQuickNavBarButtonsEnabled()
+            self?.syncHierarchyBranchNavBarButtonsEnabled()
         }
         gridView.onHierarchyToolbarRefresh = { [weak self] in
             self?.syncHierarchyToolbarButtonsEnabled()
+            self?.syncHierarchyBranchNavBarButtonsEnabled()
+        }
+        gridView.onHierarchyBranchNavToolbarRefresh = { [weak self] in
+            self?.syncHierarchyBranchNavBarButtonsEnabled()
+            self?.syncSelectionQuickNavBarButtonsEnabled()
         }
 
         loadPhoto()
@@ -246,6 +288,16 @@ class BasePhotoViewController: UIViewController {
 
     @objc private func didTapSelectionQuickNavNext() {
         selectionQuickNavPerform { $0.performSelectionQuickNavNext() }
+    }
+
+    @objc private func didTapHierarchyBranchNavPrevious() {
+        gridView.performHierarchyBranchNavPrevious()
+        syncHierarchyBranchNavBarButtonsEnabled()
+    }
+
+    @objc private func didTapHierarchyBranchNavNext() {
+        gridView.performHierarchyBranchNavNext()
+        syncHierarchyBranchNavBarButtonsEnabled()
     }
 
     @objc private func didTapHierarchyCollapseToolbar() {
@@ -279,6 +331,41 @@ class BasePhotoViewController: UIViewController {
         hideUnleveledAssetsToolbarButton.accessibilityLabel = isHidden ? "显示全部" : "隐藏无级照片"
     }
 
+    /// 构建选择模式下「层级」菜单（折叠/展开/隐藏无级）。
+    private func createHierarchyToolbarMenu() -> UIMenu {
+        // 先同步按钮状态，再读取 isEnabled
+        gridView.syncHierarchyToolbarButtons(
+            collapse: hierarchyCollapseToolbarButton,
+            expand: hierarchyExpandToolbarButton
+        )
+
+        let collapseAction = UIAction(
+            title: "折叠可见层级",
+            image: UIImage(systemName: "rectangle.compress.vertical"),
+            attributes: hierarchyCollapseToolbarButton.isEnabled ? [] : .disabled
+        ) { [weak self] _ in
+            self?.didTapHierarchyCollapseToolbar()
+        }
+
+        let expandAction = UIAction(
+            title: "展开可见层级",
+            image: UIImage(systemName: "rectangle.expand.vertical"),
+            attributes: hierarchyExpandToolbarButton.isEnabled ? [] : .disabled
+        ) { [weak self] _ in
+            self?.didTapHierarchyExpandToolbar()
+        }
+
+        let isHidden = gridView.hideUnleveledAssets
+        let hideUnleveledAction = UIAction(
+            title: isHidden ? "显示全部" : "隐藏无级照片",
+            image: UIImage(systemName: isHidden ? "eye" : "eye.slash")
+        ) { [weak self] _ in
+            self?.didTapHideUnleveledAssets()
+        }
+
+        return UIMenu(title: "层级操作", children: [collapseAction, expandAction, hideUnleveledAction])
+    }
+
     private var showsHierarchyCollapseToolbar: Bool {
         guard supportsHierarchyNumbering, sortPreference == .custom else { return false }
         if selectionMode == .none { return true }
@@ -290,6 +377,18 @@ class BasePhotoViewController: UIViewController {
         gridView.syncHierarchyToolbarButtons(
             collapse: hierarchyCollapseToolbarButton,
             expand: hierarchyExpandToolbarButton
+        )
+        // 选择模式下同时更新层级菜单中的按钮状态
+        if selectionMode != .none {
+            hierarchyToolbarMenuButton.menu = createHierarchyToolbarMenu()
+        }
+    }
+
+    internal func syncHierarchyBranchNavBarButtonsEnabled() {
+        guard supportsHierarchyNumbering, sortPreference == .custom else { return }
+        gridView.syncHierarchyBranchNavBarButtons(
+            previous: hierarchyBranchNavPreviousBarButton,
+            next: hierarchyBranchNavNextBarButton
         )
     }
 
@@ -856,11 +955,15 @@ class BasePhotoViewController: UIViewController {
         guard let nav = navigationController else { return }
         let flexLeading = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
         let flexTrailing = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
+        let showsHierarchy = supportsHierarchyNumbering && sortPreference == .custom
         if selectionMode == .none {
-            if showsHierarchyCollapseToolbar {
+            if showsHierarchy {
+                // 浏览模式：层级分支快跳 + 层级操作按钮
                 updateHideUnleveledAssetsButton()
                 toolbarItems = [
                     flexLeading,
+                    hierarchyBranchNavPreviousBarButton,
+                    hierarchyBranchNavNextBarButton,
                     hierarchyCollapseToolbarButton,
                     hierarchyExpandToolbarButton,
                     hideUnleveledAssetsToolbarButton,
@@ -868,19 +971,22 @@ class BasePhotoViewController: UIViewController {
                 ]
                 nav.setToolbarHidden(false, animated: true)
                 syncHierarchyToolbarButtonsEnabled()
+                syncHierarchyBranchNavBarButtonsEnabled()
             } else {
                 nav.setToolbarHidden(true, animated: true)
                 toolbarItems = nil
             }
             return
         }
+
+        // 选择模式
         var items: [UIBarButtonItem] = [flexLeading, selectionQuickNavPreviousBarButton, selectionQuickNavNextBarButton]
-        if supportsHierarchyNumbering, sortPreference == .custom {
-            updateHideUnleveledAssetsButton()
-            items.append(hideUnleveledAssetsToolbarButton)
-        }
-        if showsHierarchyCollapseToolbar {
-            items.append(contentsOf: [hierarchyCollapseToolbarButton, hierarchyExpandToolbarButton])
+        if showsHierarchy {
+            // 层级模式：追加分支快跳 + 层级操作菜单
+            items.append(hierarchyBranchNavPreviousBarButton)
+            items.append(hierarchyBranchNavNextBarButton)
+            hierarchyToolbarMenuButton.menu = createHierarchyToolbarMenu()
+            items.append(hierarchyToolbarMenuButton)
         }
         items.append(flexTrailing)
         toolbarItems = items
