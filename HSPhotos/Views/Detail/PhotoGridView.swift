@@ -867,10 +867,13 @@ class PhotoGridView: UIView {
             oldIDs.contains(asset.localIdentifier) ? nil : index
         }
 
-        let inserts = insertFinalIndices.map { finalIndex in
-            let keptBefore = newVisible.prefix(finalIndex).filter { oldIDs.contains($0.localIdentifier) }.count
-            let insertsBefore = insertFinalIndices.filter { $0 < finalIndex }.count
-            return IndexPath(item: keptBefore + insertsBefore, section: 0)
+        // 预计算"保留项"前缀和，使 insert IndexPath 计算从 O(n²) 降为 O(n)
+        var keptPrefix = [Int](repeating: 0, count: newVisible.count + 1)
+        for i in 0..<newVisible.count {
+            keptPrefix[i + 1] = keptPrefix[i] + (oldIDs.contains(newVisible[i].localIdentifier) ? 1 : 0)
+        }
+        let inserts = insertFinalIndices.enumerated().map { (insertIdx, finalIndex) in
+            IndexPath(item: keptPrefix[finalIndex] + insertIdx, section: 0)
         }
 
         let reloads = newVisible.enumerated().compactMap { index, asset in
