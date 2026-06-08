@@ -98,51 +98,44 @@ class BasePhotoViewController: UIViewController {
         return button
     }()
 
-    /// 底部工具条：在可见连续选区间的头/尾之间跳转（`chevron.up` = 上一处，`chevron.down` = 下一处）。
-    internal lazy var selectionQuickNavPreviousBarButton: UIBarButtonItem = {
+    /// 底部工具条：按当前快跳模式跳到上一处。
+    internal lazy var quickJumpPreviousBarButton: UIBarButtonItem = {
         let button = UIBarButtonItem(
             image: UIImage(systemName: "chevron.up"),
             style: .plain,
             target: self,
-            action: #selector(didTapSelectionQuickNavPrevious)
+            action: #selector(didTapQuickJumpPrevious)
         )
         button.accessibilityLabel = "上一处"
         return button
     }()
 
-    internal lazy var selectionQuickNavNextBarButton: UIBarButtonItem = {
+    /// 底部工具条：按当前快跳模式跳到下一处。
+    internal lazy var quickJumpNextBarButton: UIBarButtonItem = {
         let button = UIBarButtonItem(
             image: UIImage(systemName: "chevron.down"),
             style: .plain,
             target: self,
-            action: #selector(didTapSelectionQuickNavNext)
+            action: #selector(didTapQuickJumpNext)
         )
         button.accessibilityLabel = "下一处"
         return button
     }()
 
-    /// 底部工具条：在层级分支点之间跳转（`chevron.left` = 上一分支，`chevron.right` = 下一分支）。
-    internal lazy var hierarchyBranchNavPreviousBarButton: UIBarButtonItem = {
+    /// 选择当前快跳模式：选区 / 层级分支 / 无级。
+    internal lazy var quickJumpModeBarButton: UIBarButtonItem = {
         let button = UIBarButtonItem(
-            image: UIImage(systemName: "chevron.left"),
+            image: UIImage(systemName: quickJumpMode.iconName),
             style: .plain,
-            target: self,
-            action: #selector(didTapHierarchyBranchNavPrevious)
+            target: nil,
+            action: nil
         )
-        button.accessibilityLabel = "上一分支"
+        button.accessibilityLabel = "快跳模式"
+        button.menu = createQuickJumpModeMenu()
         return button
     }()
 
-    internal lazy var hierarchyBranchNavNextBarButton: UIBarButtonItem = {
-        let button = UIBarButtonItem(
-            image: UIImage(systemName: "chevron.right"),
-            style: .plain,
-            target: self,
-            action: #selector(didTapHierarchyBranchNavNext)
-        )
-        button.accessibilityLabel = "下一分支"
-        return button
-    }()
+    internal var quickJumpMode: PhotoGridQuickJumpMode = .selection
 
     internal lazy var hierarchyCollapseToolbarButton: UIBarButtonItem = {
         let item = UIBarButtonItem(
@@ -221,6 +214,8 @@ class BasePhotoViewController: UIViewController {
     internal var selectionMode: PhotoSelectionMode = .none {
         didSet {
             gridView.selectionMode = selectionMode
+            quickJumpMode = selectionMode == .none ? .hierarchyBranch : .selection
+            gridView.resetQuickJumpAnchor()
             updateNavigationBar()
             updateOperationMenu()
         }
@@ -264,39 +259,30 @@ class BasePhotoViewController: UIViewController {
         gridView.currentCollection = collection
         gridView.supportsHierarchyNumbering = supportsHierarchyNumbering
 
-        gridView.onSelectionQuickNavToolbarRefresh = { [weak self] in
+        gridView.onQuickJumpToolbarRefresh = { [weak self] in
             self?.updateSelectionQuickNavToolbar()
-            self?.syncSelectionQuickNavBarButtonsEnabled()
+            self?.syncQuickJumpBarButtonsEnabled()
         }
         gridView.onHierarchyToolbarRefresh = { [weak self] in
             self?.syncHierarchyToolbarButtonsEnabled()
-            self?.syncHierarchyBranchNavBarButtonsEnabled()
-        }
-        gridView.onHierarchyBranchNavToolbarRefresh = { [weak self] in
-            self?.syncHierarchyBranchNavBarButtonsEnabled()
-            self?.syncSelectionQuickNavBarButtonsEnabled()
+            self?.syncQuickJumpBarButtonsEnabled()
         }
 
         loadPhoto()
         setupUndoManager()
     }
 
-    @objc private func didTapSelectionQuickNavPrevious() {
-        selectionQuickNavPerform { $0.performSelectionQuickNavPrevious() }
+    @objc private func didTapQuickJumpPrevious() {
+        performQuickJump(direction: .previous)
     }
 
-    @objc private func didTapSelectionQuickNavNext() {
-        selectionQuickNavPerform { $0.performSelectionQuickNavNext() }
+    @objc private func didTapQuickJumpNext() {
+        performQuickJump(direction: .next)
     }
 
-    @objc private func didTapHierarchyBranchNavPrevious() {
-        gridView.performHierarchyBranchNavPrevious()
-        syncHierarchyBranchNavBarButtonsEnabled()
-    }
-
-    @objc private func didTapHierarchyBranchNavNext() {
-        gridView.performHierarchyBranchNavNext()
-        syncHierarchyBranchNavBarButtonsEnabled()
+    private func performQuickJump(direction: PhotoGridView.QuickJumpDirection) {
+        gridView.performQuickJump(mode: quickJumpMode, direction: direction)
+        syncQuickJumpBarButtonsEnabled()
     }
 
     @objc private func didTapHierarchyCollapseToolbar() {
@@ -376,6 +362,55 @@ class BasePhotoViewController: UIViewController {
         return gridView.hasSelectedAssetsWithHierarchy
     }
 
+    private var showsHierarchyQuickJumpModes: Bool {
+        supportsHierarchyNumbering && sortPreference == .custom
+    }
+
+    private var availableQuickJumpModes: [PhotoGridQuickJumpMode] {
+        if selectionMode == .none {
+            return showsHierarchyQuickJumpModes ? [.hierarchyBranch, .unleveled] : []
+        }
+        var modes: [PhotoGridQuickJumpMode] = [.selection]
+        if showsHierarchyQuickJumpModes {
+            modes.append(contentsOf: [.hierarchyBranch, .unleveled])
+        }
+        return modes
+    }
+
+    private func normalizeQuickJumpModeForCurrentContext() {
+        let modes = availableQuickJumpModes
+        guard !modes.isEmpty else { return }
+        if !modes.contains(quickJumpMode) {
+            quickJumpMode = modes[0]
+        }
+    }
+
+    private func createQuickJumpModeMenu() -> UIMenu {
+        let actions = availableQuickJumpModes.map { mode in
+            UIAction(
+                title: mode.title,
+                image: UIImage(systemName: mode.iconName),
+                attributes: gridView.isQuickJumpModeAvailable(mode) ? [] : .disabled,
+                state: mode == quickJumpMode ? .on : .off
+            ) { [weak self] _ in
+                guard let self else { return }
+                self.quickJumpMode = mode
+                self.gridView.resetQuickJumpAnchor()
+                self.updateQuickJumpModeButton()
+                self.syncQuickJumpBarButtonsEnabled()
+            }
+        }
+        return UIMenu(title: "快跳", children: actions)
+    }
+
+    private func updateQuickJumpModeButton() {
+        normalizeQuickJumpModeForCurrentContext()
+        quickJumpModeBarButton.image = UIImage(systemName: quickJumpMode.iconName)
+        quickJumpModeBarButton.accessibilityLabel = "快跳：\(quickJumpMode.title)"
+        quickJumpModeBarButton.menu = createQuickJumpModeMenu()
+        quickJumpModeBarButton.isEnabled = !availableQuickJumpModes.isEmpty
+    }
+
     internal func syncHierarchyToolbarButtonsEnabled() {
         guard showsHierarchyCollapseToolbar else { return }
         if selectionMode != .none {
@@ -390,25 +425,22 @@ class BasePhotoViewController: UIViewController {
         )
     }
 
-    internal func syncHierarchyBranchNavBarButtonsEnabled() {
-        guard supportsHierarchyNumbering, sortPreference == .custom else { return }
-        gridView.syncHierarchyBranchNavBarButtons(
-            previous: hierarchyBranchNavPreviousBarButton,
-            next: hierarchyBranchNavNextBarButton
+    internal func syncQuickJumpBarButtonsEnabled() {
+        updateQuickJumpModeButton()
+        gridView.syncQuickJumpBarButtons(
+            mode: quickJumpMode,
+            previous: quickJumpPreviousBarButton,
+            next: quickJumpNextBarButton
         )
+        syncHierarchyToolbarButtonsEnabled()
     }
 
-    private func selectionQuickNavPerform(_ action: (PhotoGridView) -> Void) {
-        action(gridView)
-        syncSelectionQuickNavBarButtonsEnabled()
+    internal func syncHierarchyBranchNavBarButtonsEnabled() {
+        syncQuickJumpBarButtonsEnabled()
     }
 
     internal func syncSelectionQuickNavBarButtonsEnabled() {
-        gridView.syncSelectionQuickNavBarButtons(
-            previous: selectionQuickNavPreviousBarButton,
-            next: selectionQuickNavNextBarButton
-        )
-        syncHierarchyToolbarButtonsEnabled()
+        syncQuickJumpBarButtonsEnabled()
     }
 
     private func setupUI() {
@@ -956,20 +988,22 @@ class BasePhotoViewController: UIViewController {
         syncSelectionQuickNavBarButtonsEnabled()
     }
 
-    /// 非选择模式：底栏层级展开/收起 + 无级照片显示/隐藏；选择模式：选区跳转 + 层级折叠/展开 + 无级照片显示/隐藏。
+    /// 非选择模式：快跳 + 层级展开/收起 + 无级照片显示/隐藏；选择模式：快跳 + 层级折叠/展开 + 无级照片显示/隐藏。
     internal func updateSelectionQuickNavToolbar() {
         guard let nav = navigationController else { return }
         let flexLeading = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
         let flexTrailing = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
         let showsHierarchy = supportsHierarchyNumbering && sortPreference == .custom
+        updateQuickJumpModeButton()
         if selectionMode == .none {
             if showsHierarchy {
-                // 浏览模式：层级分支快跳 + 层级操作按钮
+                // 浏览模式：快跳 + 层级操作按钮
                 updateHideUnleveledAssetsButton()
                 toolbarItems = [
                     flexLeading,
-                    hierarchyBranchNavPreviousBarButton,
-                    hierarchyBranchNavNextBarButton,
+                    quickJumpPreviousBarButton,
+                    quickJumpNextBarButton,
+                    quickJumpModeBarButton,
                     hierarchyCollapseToolbarButton,
                     hierarchyExpandToolbarButton,
                     hideUnleveledAssetsToolbarButton,
@@ -977,7 +1011,7 @@ class BasePhotoViewController: UIViewController {
                 ]
                 nav.setToolbarHidden(false, animated: true)
                 syncHierarchyToolbarButtonsEnabled()
-                syncHierarchyBranchNavBarButtonsEnabled()
+                syncQuickJumpBarButtonsEnabled()
             } else {
                 nav.setToolbarHidden(true, animated: true)
                 toolbarItems = nil
@@ -986,11 +1020,13 @@ class BasePhotoViewController: UIViewController {
         }
 
         // 选择模式
-        var items: [UIBarButtonItem] = [flexLeading, selectionQuickNavPreviousBarButton, selectionQuickNavNextBarButton]
+        var items: [UIBarButtonItem] = [
+            flexLeading,
+            quickJumpPreviousBarButton,
+            quickJumpNextBarButton,
+            quickJumpModeBarButton
+        ]
         if showsHierarchy {
-            // 层级模式：追加分支快跳 + 层级操作菜单
-            items.append(hierarchyBranchNavPreviousBarButton)
-            items.append(hierarchyBranchNavNextBarButton)
             hierarchyToolbarMenuButton.menu = createHierarchyToolbarMenu()
             items.append(hierarchyToolbarMenuButton)
         }

@@ -15,6 +15,34 @@ enum PhotoSelectionMode {
     case range
 }
 
+enum PhotoGridQuickJumpMode: CaseIterable {
+    case selection
+    case hierarchyBranch
+    case unleveled
+
+    var title: String {
+        switch self {
+        case .selection:
+            return "选区"
+        case .hierarchyBranch:
+            return "分支"
+        case .unleveled:
+            return "无级"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .selection:
+            return "checkmark.circle"
+        case .hierarchyBranch:
+            return "point.topleft.down.curvedto.point.bottomright.up"
+        case .unleveled:
+            return "0.circle"
+        }
+    }
+}
+
 // 定义排序逻辑的自定义错误
 enum PhotoSortError: Error, LocalizedError {
     case notEnoughPhotosSelected
@@ -84,6 +112,7 @@ class PhotoGridView: UIView {
             if idsChanged {
                 clearSelectionStateForDataSourceChange()
             }
+            invalidateQuickJumpTargetCache()
             invalidateCustomOrderCache()
             invalidateDateTextCache()
             if idsChanged {
@@ -223,13 +252,15 @@ class PhotoGridView: UIView {
     private var selectedIdentifierSetCache: Set<String>?
 
     /// 快跳定位共享锚点（可见下标）；`nil` 表示按当前视口边界取下一目标。
-    /// 选中快跳和层级分支快跳共用此锚点。
     private var lastQuickNavJumpIndex: Int?
-    /// 由控制器注入：锚点或选中集变化时刷新底部工具条上按钮的 `isEnabled`。
+    private var quickJumpTargetCache: [PhotoGridQuickJumpMode: [Int]] = [:]
+    /// 由控制器注入：锚点或目标链变化时刷新底部工具条上按钮的 `isEnabled`。
+    var onQuickJumpToolbarRefresh: (() -> Void)?
+    /// 旧入口保留给现有控制器代码，内部转发到统一快跳刷新。
     var onSelectionQuickNavToolbarRefresh: (() -> Void)?
     /// 由控制器注入：刷新底栏层级展开/收起按钮状态
     var onHierarchyToolbarRefresh: (() -> Void)?
-    /// 由控制器注入：刷新层级分支快跳按钮状态
+    /// 旧入口保留给现有控制器代码，内部转发到统一快跳刷新。
     var onHierarchyBranchNavToolbarRefresh: (() -> Void)?
 
     // 当前锚点照片
@@ -242,6 +273,7 @@ class PhotoGridView: UIView {
         didSet {
             if oldValue != sortPreference {
                 hierarchyCache.removeAll()
+                invalidateQuickJumpTargetCache()
             }
         }
     }
@@ -250,13 +282,20 @@ class PhotoGridView: UIView {
     public var currentCollection: PHAssetCollection? {
         didSet {
             hierarchyCache.removeAll()
+            invalidateQuickJumpTargetCache()
             customOrderIndexCache.removeAll()
             dateTextCache.removeAll()
         }
     }
 
     /// 是否支持层级编号功能。首页（图库）不支持，相册内支持。
-    public var supportsHierarchyNumbering: Bool = true
+    public var supportsHierarchyNumbering: Bool = true {
+        didSet {
+            if oldValue != supportsHierarchyNumbering {
+                invalidateQuickJumpTargetCache()
+            }
+        }
+    }
 
     /// 是否隐藏无层级照片（level == 0），仅对自定义排序相册生效
     public var hideUnleveledAssets: Bool = false {
@@ -644,6 +683,7 @@ class PhotoGridView: UIView {
 
     private func invalidateSelectedIdentifierSetCache() {
         selectedIdentifierSetCache = nil
+        invalidateQuickJumpTargetCache(for: .selection)
     }
 
     private func cachedSelectedIdentifierSet() -> Set<String> {
@@ -879,6 +919,7 @@ class PhotoGridView: UIView {
             UIView.performWithoutAnimation {
                 collectionView.reloadData()
             }
+            invalidateQuickJumpTargetCache()
             syncSelectionQuickNavCurrentVisibleIndexToLastSelectedAsset()
             scheduleHierarchyToolbarRefresh()
             completion?()
@@ -901,6 +942,7 @@ class PhotoGridView: UIView {
         guard animated else {
             visibleAssets = newVisibleAssets
             collectionView.reloadData()
+            invalidateQuickJumpTargetCache()
             syncSelectionQuickNavCurrentVisibleIndexToLastSelectedAsset()
             scheduleHierarchyToolbarRefresh()
             completion?()
@@ -930,6 +972,7 @@ class PhotoGridView: UIView {
                 guard let self else { return }
                 self.visibleAssets = newVisibleAssets
                 self.collectionView.reloadData()
+                self.invalidateQuickJumpTargetCache()
             } completion: { _ in finish() }
             return
         }
@@ -940,6 +983,7 @@ class PhotoGridView: UIView {
         collectionView.performBatchUpdates { [weak self] in
             guard let self else { return }
             self.visibleAssets = newVisibleAssets
+            self.invalidateQuickJumpTargetCache()
             if !diff.deletes.isEmpty {
                 self.collectionView.deleteItems(at: diff.deletes)
             }
@@ -1134,6 +1178,7 @@ class PhotoGridView: UIView {
             } else {
                 visibleAssets = assets
             }
+            invalidateQuickJumpTargetCache()
 
             for asset in assetsToDelete {
                 let id = asset.localIdentifier
@@ -1454,20 +1499,20 @@ extension PhotoGridView: UICollectionViewDelegateFlowLayout {
         scrollDelegate?.scrollViewDidEndDragging?(scrollView, willDecelerate: decelerate)
         if !decelerate {
             onHierarchyToolbarRefresh?()
-            onHierarchyBranchNavToolbarRefresh?()
+            onQuickJumpToolbarRefresh?()
         }
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         scrollDelegate?.scrollViewDidEndDecelerating?(scrollView)
         onHierarchyToolbarRefresh?()
-        onHierarchyBranchNavToolbarRefresh?()
+        onQuickJumpToolbarRefresh?()
     }
 
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
         scrollDelegate?.scrollViewDidEndScrollingAnimation?(scrollView)
         onHierarchyToolbarRefresh?()
-        onHierarchyBranchNavToolbarRefresh?()
+        onQuickJumpToolbarRefresh?()
     }
 }
 
@@ -1746,9 +1791,14 @@ extension PhotoGridView: CustomVerticalScrollIndicatorDelegate {
     }
 }
 
-// MARK: - 选择模式快速定位（连续块头 / 尾）
+// MARK: - 快跳定位（选区 / 层级分支 / 无级）
 
 extension PhotoGridView {
+
+    enum QuickJumpDirection {
+        case previous
+        case next
+    }
 
     /// 将链式锚点对齐到「选中序号最大」（最近选入）的格；无选中或非选择模式时清空。
     /// 若该格在头尾目标链上无法向两侧移动（如只选一张且唯一目标即自身），则置 `nil`，改用视口边界判断可用性，避免两键全灰。
@@ -1756,9 +1806,9 @@ extension PhotoGridView {
         var newJump: Int?
         defer {
             lastQuickNavJumpIndex = newJump
-            postSelectionQuickNavToolbarRefresh()
+            postQuickJumpToolbarRefresh()
         }
-        guard selectionQuickNavIsActive, selectedAssetCount > 0 else {
+        guard quickJumpModeIsActive(.selection), selectedAssetCount > 0 else {
             return
         }
         if selectedAssetCount == visibleAssets.count {
@@ -1766,206 +1816,179 @@ extension PhotoGridView {
             return
         }
         guard
-              let lastID = selectionState.lastSelectedID,
-              let idx = visibleAssets.firstIndex(where: { $0.localIdentifier == lastID }) else {
+            let lastID = selectionState.lastSelectedID,
+            let idx = visibleAssets.firstIndex(where: { $0.localIdentifier == lastID })
+        else {
             return
         }
-        let targets = selectionQuickNavSortedTargetIndices()
+        let targets = quickJumpTargetIndices(for: .selection)
         let canMoveAlongTargets = targets.contains { $0 < idx } || targets.contains { $0 > idx }
         newJump = canMoveAlongTargets ? idx : nil
     }
 
-    func syncSelectionQuickNavBarButtons(previous: UIBarButtonItem, next: UIBarButtonItem) {
-        guard selectionQuickNavIsActive else {
-            selectionQuickNavSetBarButtons(previous: previous, next: next, canPrev: false, canNext: false)
+    func isQuickJumpModeAvailable(_ mode: PhotoGridQuickJumpMode) -> Bool {
+        quickJumpModeIsActive(mode)
+    }
+
+    func syncQuickJumpBarButtons(mode: PhotoGridQuickJumpMode, previous: UIBarButtonItem, next: UIBarButtonItem) {
+        guard quickJumpModeIsActive(mode) else {
+            quickJumpSetBarButtons(previous: previous, next: next, canPrev: false, canNext: false)
             return
         }
-        let targets = selectionQuickNavSortedTargetIndices()
+        let targets = quickJumpTargetIndices(for: mode)
         guard !targets.isEmpty else {
-            selectionQuickNavSetBarButtons(previous: previous, next: next, canPrev: false, canNext: false)
+            quickJumpSetBarButtons(previous: previous, next: next, canPrev: false, canNext: false)
             return
         }
-        let (vmin, vmax) = selectionQuickNavVisibleItemBounds()
-        let (canPrev, canNext) = selectionQuickNavAvailability(targets: targets, vmin: vmin, vmax: vmax)
-        selectionQuickNavSetBarButtons(previous: previous, next: next, canPrev: canPrev, canNext: canNext)
+        let (vmin, vmax) = quickJumpVisibleItemBounds()
+        let (canPrev, canNext) = quickJumpAvailability(targets: targets, vmin: vmin, vmax: vmax)
+        quickJumpSetBarButtons(previous: previous, next: next, canPrev: canPrev, canNext: canNext)
     }
 
-    func performSelectionQuickNavPrevious() {
-        performSelectionQuickNav(step: .towardLowerIndex)
-    }
-
-    func performSelectionQuickNavNext() {
-        performSelectionQuickNav(step: .towardHigherIndex)
-    }
-
-    private enum SelectionQuickNavStep {
-        case towardLowerIndex
-        case towardHigherIndex
-    }
-
-    private func performSelectionQuickNav(step: SelectionQuickNavStep) {
-        guard selectionQuickNavIsActive else { return }
-        let targets = selectionQuickNavSortedTargetIndices()
+    func performQuickJump(mode: PhotoGridQuickJumpMode, direction: QuickJumpDirection) {
+        guard quickJumpModeIsActive(mode) else { return }
+        let targets = quickJumpTargetIndices(for: mode)
         guard !targets.isEmpty else { return }
 
-        let (vmin, vmax) = selectionQuickNavVisibleItemBounds()
-        guard let index = selectionQuickNavDestination(targets: targets, step: step, vmin: vmin, vmax: vmax) else { return }
+        let (vmin, vmax) = quickJumpVisibleItemBounds()
+        guard let index = quickJumpDestination(targets: targets, direction: direction, vmin: vmin, vmax: vmax) else { return }
 
         let indexPath = IndexPath(item: index, section: 0)
         collectionView.scrollToItem(at: indexPath, at: .centeredVertically, animated: true)
         lastQuickNavJumpIndex = index
-        postSelectionQuickNavToolbarRefresh()
+        postQuickJumpToolbarRefresh()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.selectionQuickNavHighlightDelay) { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.quickJumpHighlightDelay) { [weak self] in
             guard let self else { return }
             guard let cell = self.collectionView.cellForItem(at: indexPath) as? PhotoCell else { return }
             cell.performQuickNavigationHighlightAnimation()
         }
     }
 
+    func resetQuickJumpAnchor() {
+        lastQuickNavJumpIndex = nil
+        postQuickJumpToolbarRefresh()
+    }
+
+    func syncSelectionQuickNavBarButtons(previous: UIBarButtonItem, next: UIBarButtonItem) {
+        syncQuickJumpBarButtons(mode: .selection, previous: previous, next: next)
+    }
+
+    func performSelectionQuickNavPrevious() {
+        performQuickJump(mode: .selection, direction: .previous)
+    }
+
+    func performSelectionQuickNavNext() {
+        performQuickJump(mode: .selection, direction: .next)
+    }
+
+    func syncHierarchyBranchNavBarButtons(previous: UIBarButtonItem, next: UIBarButtonItem) {
+        syncQuickJumpBarButtons(mode: .hierarchyBranch, previous: previous, next: next)
+    }
+
+    func performHierarchyBranchNavPrevious() {
+        performQuickJump(mode: .hierarchyBranch, direction: .previous)
+    }
+
+    func performHierarchyBranchNavNext() {
+        performQuickJump(mode: .hierarchyBranch, direction: .next)
+    }
+
+    private static let quickJumpHighlightDelay: TimeInterval = 0.32
+
+    private func quickJumpModeIsActive(_ mode: PhotoGridQuickJumpMode) -> Bool {
+        switch mode {
+        case .selection:
+            return selectionMode == .multiple || selectionMode == .range
+        case .hierarchyBranch, .unleveled:
+            return sortPreference == .custom && supportsHierarchyNumbering && currentCollection != nil
+        }
+    }
+
+    private func quickJumpTargetIndices(for mode: PhotoGridQuickJumpMode) -> [Int] {
+        guard quickJumpModeIsActive(mode) else { return [] }
+        if let cached = quickJumpTargetCache[mode] {
+            return cached
+        }
+        let targets: [Int]
+        switch mode {
+        case .selection:
+            targets = selectionQuickJumpTargetIndices()
+        case .hierarchyBranch:
+            targets = hierarchyBranchQuickJumpTargetIndices()
+        case .unleveled:
+            targets = unleveledQuickJumpTargetIndices()
+        }
+        quickJumpTargetCache[mode] = targets
+        return targets
+    }
+
     /// 所有连续选中块：每块贡献「头」；块内多于一张时再贡献「尾」。按可见顺序去重排序。
-    private func selectionQuickNavSortedTargetIndices() -> [Int] {
-        guard selectionQuickNavIsActive else { return [] }
+    private func selectionQuickJumpTargetIndices() -> [Int] {
         if selectedAssetCount == visibleAssets.count {
             guard visibleAssets.count > 1 else { return visibleAssets.isEmpty ? [] : [0] }
             return [0, visibleAssets.count - 1]
         }
         let ids = cachedSelectedIdentifierSet()
-        guard !ids.isEmpty else { return [] }
-
-        var result = Set<Int>()
-        var i = 0
-        while i < visibleAssets.count {
-            guard ids.contains(visibleAssets[i].localIdentifier) else {
-                i += 1
-                continue
-            }
-            let range = selectionQuickNavExpandContiguousRange(from: i, selectedIDs: ids)
-            result.insert(range.lowerBound)
-            if range.lowerBound != range.upperBound {
-                result.insert(range.upperBound)
-            }
-            i = range.upperBound + 1
-        }
-        return Array(result).sorted()
-    }
-
-    private func selectionQuickNavExpandContiguousRange(from anchor: Int, selectedIDs: Set<String>) -> ClosedRange<Int> {
-        var lo = anchor
-        var hi = anchor
-        while lo > 0, selectedIDs.contains(visibleAssets[lo - 1].localIdentifier) {
-            lo -= 1
-        }
-        while hi + 1 < visibleAssets.count, selectedIDs.contains(visibleAssets[hi + 1].localIdentifier) {
-            hi += 1
-        }
-        return lo...hi
-    }
-
-    private static let selectionQuickNavHighlightDelay: TimeInterval = 0.32
-
-    private var selectionQuickNavIsActive: Bool {
-        selectionMode == .multiple || selectionMode == .range
-    }
-
-    private func postSelectionQuickNavToolbarRefresh() {
-        onSelectionQuickNavToolbarRefresh?()
-    }
-
-    private func selectionQuickNavVisibleItemBounds() -> (min: Int, max: Int) {
-        let items = collectionView.indexPathsForVisibleItems.map(\.item)
-        return (items.min() ?? 0, items.max() ?? 0)
-    }
-
-    private func selectionQuickNavSetBarButtons(previous: UIBarButtonItem, next: UIBarButtonItem, canPrev: Bool, canNext: Bool) {
-        previous.isEnabled = canPrev
-        next.isEnabled = canNext
-    }
-
-    private func selectionQuickNavDestination(targets: [Int], step: SelectionQuickNavStep, vmin: Int, vmax: Int) -> Int? {
-        switch step {
-        case .towardLowerIndex:
-            if let last = lastQuickNavJumpIndex {
-                return targets.last { $0 < last }
-            }
-            return targets.last { $0 < vmax }
-        case .towardHigherIndex:
-            if let last = lastQuickNavJumpIndex {
-                return targets.first { $0 > last }
-            }
-            return targets.first { $0 > vmin }
-        }
-    }
-
-    private func selectionQuickNavAvailability(targets: [Int], vmin: Int, vmax: Int) -> (canPrev: Bool, canNext: Bool) {
-        if let last = lastQuickNavJumpIndex {
-            return (targets.contains { $0 < last }, targets.contains { $0 > last })
-        }
-        return (targets.contains { $0 < vmax }, targets.contains { $0 > vmin })
-    }
-}
-
-// MARK: - 层级分支点快跳定位
-
-extension PhotoGridView {
-
-    /// 层级分支快跳是否可用（自定义排序 + 支持层级 + 有相册引用）。
-    private var hierarchyBranchNavIsActive: Bool {
-        sortPreference == .custom && supportsHierarchyNumbering && currentCollection != nil
+        return contiguousBlockEdgeIndices { ids.contains(visibleAssets[$0].localIdentifier) }
     }
 
     /// 所有有子孙节点的层级相片在 visibleAssets 中的索引，按顺序排序。
     /// 使用批量方法（一次 map + 一次扫描），避免 O(n²) 主线程卡顿。
-    private func hierarchyBranchNavSortedTargetIndices() -> [Int] {
-        guard hierarchyBranchNavIsActive, let collection = currentCollection else { return [] }
+    private func hierarchyBranchQuickJumpTargetIndices() -> [Int] {
+        guard let collection = currentCollection else { return [] }
         let branchIDs = numberingService.assetIDsWithDescendants(in: assets, collection: collection)
         return visibleAssets.indices.filter { branchIDs.contains(visibleAssets[$0].localIdentifier) }
     }
 
-    func performHierarchyBranchNavPrevious() {
-        performHierarchyBranchNav(step: .towardLowerIndex)
-    }
-
-    func performHierarchyBranchNavNext() {
-        performHierarchyBranchNav(step: .towardHigherIndex)
-    }
-
-    private enum HierarchyBranchNavStep {
-        case towardLowerIndex
-        case towardHigherIndex
-    }
-
-    private func performHierarchyBranchNav(step: HierarchyBranchNavStep) {
-        guard hierarchyBranchNavIsActive else { return }
-        let targets = hierarchyBranchNavSortedTargetIndices()
-        guard !targets.isEmpty else { return }
-
-        let (vmin, vmax) = hierarchyBranchNavVisibleItemBounds()
-        guard let index = hierarchyBranchNavDestination(targets: targets, step: step, vmin: vmin, vmax: vmax) else { return }
-
-        let indexPath = IndexPath(item: index, section: 0)
-        collectionView.scrollToItem(at: indexPath, at: .centeredVertically, animated: true)
-        lastQuickNavJumpIndex = index
-        postHierarchyBranchNavToolbarRefresh()
-
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.hierarchyBranchNavHighlightDelay) { [weak self] in
-            guard let self else { return }
-            guard let cell = self.collectionView.cellForItem(at: indexPath) as? PhotoCell else { return }
-            cell.performQuickNavigationHighlightAnimation()
+    /// 无级快跳：连续 level == 0 的段落贡献头尾，间隔开的段落逐段跳。
+    private func unleveledQuickJumpTargetIndices() -> [Int] {
+        guard let collection = currentCollection else { return [] }
+        return contiguousBlockEdgeIndices {
+            numberingService.level(for: visibleAssets[$0], in: collection) == 0
         }
     }
 
-    private static let hierarchyBranchNavHighlightDelay: TimeInterval = 0.32
+    private func contiguousBlockEdgeIndices(matching isTarget: (Int) -> Bool) -> [Int] {
+        var result: [Int] = []
+        var i = 0
+        while i < visibleAssets.count {
+            guard isTarget(i) else {
+                i += 1
+                continue
+            }
+            let start = i
+            var end = i
+            while end + 1 < visibleAssets.count, isTarget(end + 1) {
+                end += 1
+            }
+            result.append(start)
+            if end != start {
+                result.append(end)
+            }
+            i = end + 1
+        }
+        return result
+    }
 
-    /// 跳转目标计算：在 targets 中按 step 方向搜索，优先使用共享锚点 lastQuickNavJumpIndex。
-    private func hierarchyBranchNavDestination(targets: [Int], step: HierarchyBranchNavStep, vmin: Int, vmax: Int) -> Int? {
-        switch step {
-        case .towardLowerIndex:
+    private func quickJumpVisibleItemBounds() -> (min: Int, max: Int) {
+        let items = collectionView.indexPathsForVisibleItems.map(\.item)
+        return (items.min() ?? 0, items.max() ?? 0)
+    }
+
+    private func quickJumpSetBarButtons(previous: UIBarButtonItem, next: UIBarButtonItem, canPrev: Bool, canNext: Bool) {
+        previous.isEnabled = canPrev
+        next.isEnabled = canNext
+    }
+
+    private func quickJumpDestination(targets: [Int], direction: QuickJumpDirection, vmin: Int, vmax: Int) -> Int? {
+        switch direction {
+        case .previous:
             if let last = lastQuickNavJumpIndex {
                 return targets.last { $0 < last }
             }
             return targets.last { $0 < vmax }
-        case .towardHigherIndex:
+        case .next:
             if let last = lastQuickNavJumpIndex {
                 return targets.first { $0 > last }
             }
@@ -1973,37 +1996,24 @@ extension PhotoGridView {
         }
     }
 
-    func syncHierarchyBranchNavBarButtons(previous: UIBarButtonItem, next: UIBarButtonItem) {
-        guard hierarchyBranchNavIsActive else {
-            previous.isEnabled = false
-            next.isEnabled = false
-            return
-        }
-        let targets = hierarchyBranchNavSortedTargetIndices()
-        guard !targets.isEmpty else {
-            previous.isEnabled = false
-            next.isEnabled = false
-            return
-        }
-        let (vmin, vmax) = hierarchyBranchNavVisibleItemBounds()
-        let (canPrev, canNext) = hierarchyBranchNavAvailability(targets: targets, vmin: vmin, vmax: vmax)
-        previous.isEnabled = canPrev
-        next.isEnabled = canNext
-    }
-
-    private func hierarchyBranchNavAvailability(targets: [Int], vmin: Int, vmax: Int) -> (canPrev: Bool, canNext: Bool) {
+    private func quickJumpAvailability(targets: [Int], vmin: Int, vmax: Int) -> (canPrev: Bool, canNext: Bool) {
         if let last = lastQuickNavJumpIndex {
             return (targets.contains { $0 < last }, targets.contains { $0 > last })
         }
         return (targets.contains { $0 < vmax }, targets.contains { $0 > vmin })
     }
 
-    private func hierarchyBranchNavVisibleItemBounds() -> (min: Int, max: Int) {
-        let items = collectionView.indexPathsForVisibleItems.map(\.item)
-        return (items.min() ?? 0, items.max() ?? 0)
+    private func invalidateQuickJumpTargetCache(for mode: PhotoGridQuickJumpMode? = nil) {
+        if let mode {
+            quickJumpTargetCache[mode] = nil
+        } else {
+            quickJumpTargetCache.removeAll()
+        }
     }
 
-    private func postHierarchyBranchNavToolbarRefresh() {
+    private func postQuickJumpToolbarRefresh() {
+        onQuickJumpToolbarRefresh?()
+        onSelectionQuickNavToolbarRefresh?()
         onHierarchyBranchNavToolbarRefresh?()
     }
 }
