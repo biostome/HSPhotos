@@ -96,6 +96,11 @@ final class PhotoNumberingService {
         levelsCache[cacheKey(collection)]?[asset.localIdentifier] ?? 0
     }
 
+    func containsLevel(in assetIDs: Set<String>, collection: PHAssetCollection) -> Bool {
+        guard let levels = levelsCache[cacheKey(collection)], !levels.isEmpty else { return false }
+        return assetIDs.contains { (levels[$0] ?? 0) > 0 }
+    }
+
     /// 是否折叠
     func isCollapsed(_ asset: PHAsset, in collection: PHAssetCollection) -> Bool {
         collapsedCache[cacheKey(collection)]?[asset.localIdentifier] ?? false

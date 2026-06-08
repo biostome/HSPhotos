@@ -267,7 +267,6 @@ class BasePhotoViewController: UIViewController {
         gridView.onSelectionQuickNavToolbarRefresh = { [weak self] in
             self?.updateSelectionQuickNavToolbar()
             self?.syncSelectionQuickNavBarButtonsEnabled()
-            self?.syncHierarchyBranchNavBarButtonsEnabled()
         }
         gridView.onHierarchyToolbarRefresh = { [weak self] in
             self?.syncHierarchyToolbarButtonsEnabled()
@@ -333,11 +332,16 @@ class BasePhotoViewController: UIViewController {
 
     /// 构建选择模式下「层级」菜单（折叠/展开/隐藏无级）。
     private func createHierarchyToolbarMenu() -> UIMenu {
-        // 先同步按钮状态，再读取 isEnabled
-        gridView.syncHierarchyToolbarButtons(
-            collapse: hierarchyCollapseToolbarButton,
-            expand: hierarchyExpandToolbarButton
-        )
+        if selectionMode == .none {
+            // 先同步按钮状态，再读取 isEnabled
+            gridView.syncHierarchyToolbarButtons(
+                collapse: hierarchyCollapseToolbarButton,
+                expand: hierarchyExpandToolbarButton
+            )
+        } else {
+            hierarchyCollapseToolbarButton.isEnabled = true
+            hierarchyExpandToolbarButton.isEnabled = true
+        }
 
         let collapseAction = UIAction(
             title: "折叠可见层级",
@@ -374,14 +378,16 @@ class BasePhotoViewController: UIViewController {
 
     internal func syncHierarchyToolbarButtonsEnabled() {
         guard showsHierarchyCollapseToolbar else { return }
+        if selectionMode != .none {
+            hierarchyCollapseToolbarButton.isEnabled = true
+            hierarchyExpandToolbarButton.isEnabled = true
+            hierarchyToolbarMenuButton.menu = createHierarchyToolbarMenu()
+            return
+        }
         gridView.syncHierarchyToolbarButtons(
             collapse: hierarchyCollapseToolbarButton,
             expand: hierarchyExpandToolbarButton
         )
-        // 选择模式下同时更新层级菜单中的按钮状态
-        if selectionMode != .none {
-            hierarchyToolbarMenuButton.menu = createHierarchyToolbarMenu()
-        }
     }
 
     internal func syncHierarchyBranchNavBarButtonsEnabled() {
@@ -651,6 +657,7 @@ class BasePhotoViewController: UIViewController {
     }
 
     internal func onCopy() {
+        gridView.materializeSelectionIfNeeded()
         AssetPasteboard.copyAssets(gridView.selectedAssets) { [weak self] success, message in
             guard let self = self else { return }
             if !success {
@@ -661,6 +668,7 @@ class BasePhotoViewController: UIViewController {
     }
 
     internal func onDuplicate() {
+        gridView.materializeSelectionIfNeeded()
         let selectedAssets = gridView.selectedAssets
         guard !selectedAssets.isEmpty else {
             showAlert(title: "复制失败", message: "请先选择要复制的照片")
@@ -704,6 +712,7 @@ class BasePhotoViewController: UIViewController {
     }
 
     internal func onDelete() {
+        gridView.materializeSelectionIfNeeded()
         let selectedAssets = gridView.selectedAssets
         guard !selectedAssets.isEmpty else {
             showAlert(title: "删除失败", message: "请先选择要删除的照片")
@@ -714,6 +723,7 @@ class BasePhotoViewController: UIViewController {
     }
 
     internal func onMove() {
+        gridView.materializeSelectionIfNeeded()
         let selectedAssets = gridView.selectedAssets
         guard !selectedAssets.isEmpty else {
             showAlert(title: "移动失败", message: "请先选择要移动的照片")
@@ -922,15 +932,11 @@ class BasePhotoViewController: UIViewController {
     /// 全选所有资产
     @objc internal func selectAllAssets() {
         gridView.selectAll()
-        // 更新按钮状态
-        updateSelectAllButton()
     }
 
     /// 取消全选所有资产
     @objc internal func deselectAllAssets() {
         gridView.clearSelected()
-        // 更新按钮状态
-        updateSelectAllButton()
     }
 
     internal func updateNavigationBar() {
@@ -1016,7 +1022,7 @@ class BasePhotoViewController: UIViewController {
 
     /// 检查是否所有可见资产都已被选中
     internal func isAllAssetsSelected() -> Bool {
-        gridView.selectedAssetCount == gridView.allAssets.count && !gridView.allAssets.isEmpty
+        gridView.selectedAssetCount == gridView.visibleAssetCount && gridView.visibleAssetCount > 0
     }
 
     // MARK: - Undo Manager Helper Methods
@@ -1115,15 +1121,31 @@ class BasePhotoViewController: UIViewController {
 
         menuChildren = [undoAction, redoAction, addToAlbum, tagAction]
         if sortPreference == .custom, supportsHierarchyNumbering {
-            menuChildren.append(createHierarchyMenu(attributes: attributes))
+            menuChildren.append(deferredHierarchyMenu(attributes: attributes))
         }
         menuChildren += [delete, move, paste, copy, duplicate, sort]
         return UIMenu(title: "操作选项", children: menuChildren)
     }
 
-    internal func createHierarchyMenu(attributes: UIMenuElement.Attributes) -> UIMenu {
+    internal func deferredHierarchyMenu(attributes: UIMenuElement.Attributes) -> UIMenu {
+        UIMenu(
+            title: "层级操作",
+            image: UIImage(systemName: "list.bullet.indent"),
+            children: [
+                UIDeferredMenuElement { [weak self] completion in
+                    guard let self else {
+                        completion([])
+                        return
+                    }
+                    completion(self.createHierarchyMenuChildren(attributes: attributes))
+                }
+            ]
+        )
+    }
+
+    internal func createHierarchyMenuChildren(attributes: UIMenuElement.Attributes) -> [UIMenuElement] {
         let selected = orderedSelectedAssets()
-        guard !selected.isEmpty else { return UIMenu(title: "层级", children: []) }
+        guard !selected.isEmpty else { return [] }
 
         let firstAsset = selected[0]
         let prevLv = getPreviousLevel(for: firstAsset)
@@ -1178,7 +1200,7 @@ class BasePhotoViewController: UIViewController {
             children.append(clearAction)
         }
 
-        return UIMenu(title: "层级操作", children: children)
+        return children
     }
 
     internal func updateOperationMenu() {
@@ -1197,6 +1219,7 @@ class BasePhotoViewController: UIViewController {
     }
 
     internal func onAddToAlbumSelectedAssets() {
+        gridView.materializeSelectionIfNeeded()
         let selectedAssets = gridView.selectedAssets
         guard !selectedAssets.isEmpty else {
             showAlert(title: "添加失败", message: "请先选择要添加的照片")
@@ -1206,6 +1229,7 @@ class BasePhotoViewController: UIViewController {
     }
 
     internal func onTagSelectedAssets() {
+        gridView.materializeSelectionIfNeeded()
         let selectedAssets = gridView.selectedAssets
         guard !selectedAssets.isEmpty else { return }
         showTagAssignPicker(for: selectedAssets.map { $0.localIdentifier })
@@ -1375,6 +1399,7 @@ class BasePhotoViewController: UIViewController {
     }
 
     internal func orderedSelectedAssets() -> [PHAsset] {
+        gridView.materializeSelectionIfNeeded()
         let selectedIDs = gridView.selectedMembershipIdentifiers
         guard !selectedIDs.isEmpty else { return [] }
         return assets.filter { selectedIDs.contains($0.localIdentifier) }
