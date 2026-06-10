@@ -173,6 +173,51 @@ struct PhotoNumberingLogicTests {
         #expect(next?["r2"] == true)
     }
 
+    // MARK: - hierarchy jump
+
+    @Test func hierarchyJump_siblingAndLevelTargetsUseCurrentLevel() {
+        let visible = ["one", "one_one", "one_two", "two"]
+        let levels = ["one": 1, "one_one": 2, "one_two": 2, "two": 1]
+
+        #expect(
+            PhotoNumberingLogic.hierarchySiblingJumpTargets(
+                visibleAssetIDs: visible,
+                levels: levels,
+                referenceIndex: 0
+            ) == [0, 3]
+        )
+        #expect(
+            PhotoNumberingLogic.hierarchyLevelJumpTarget(
+                visibleAssetIDs: visible,
+                levels: levels,
+                referenceIndex: 0,
+                direction: 1
+            ) == 1
+        )
+        #expect(
+            PhotoNumberingLogic.hierarchyLevelJumpTarget(
+                visibleAssetIDs: visible,
+                levels: levels,
+                referenceIndex: 1,
+                direction: -1
+            ) == 0
+        )
+    }
+
+    @Test func hierarchyJump_childDoesNotCrossSiblingBoundary() {
+        let visible = ["one", "two", "two_one"]
+        let levels = ["one": 1, "two": 1, "two_one": 2]
+
+        #expect(
+            PhotoNumberingLogic.hierarchyLevelJumpTarget(
+                visibleAssetIDs: visible,
+                levels: levels,
+                referenceIndex: 0,
+                direction: 1
+            ) == nil
+        )
+    }
+
     // MARK: - reconcileLevelsWithOrder
 
     @Test func reconcile_correctsOvershoot_andPreservesValidChain() {

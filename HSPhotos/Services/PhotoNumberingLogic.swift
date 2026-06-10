@@ -398,6 +398,52 @@ enum PhotoNumberingLogic {
         return nil
     }
 
+    static func hierarchySiblingJumpTargets(
+        visibleAssetIDs: [String],
+        levels: [String: Int],
+        referenceIndex: Int
+    ) -> [Int] {
+        guard let level = nearestVisibleNumberedLevel(
+            visibleAssetIDs: visibleAssetIDs,
+            levels: levels,
+            referenceIndex: referenceIndex
+        ) else { return [] }
+        return visibleAssetIDs.indices.filter {
+            (levels[visibleAssetIDs[$0]] ?? 0) == level
+        }
+    }
+
+    static func hierarchyLevelJumpTarget(
+        visibleAssetIDs: [String],
+        levels: [String: Int],
+        referenceIndex: Int,
+        direction: Int
+    ) -> Int? {
+        guard direction == -1 || direction == 1 else { return nil }
+        guard let currentIndex = nearestVisibleNumberedIndex(
+            visibleAssetIDs: visibleAssetIDs,
+            levels: levels,
+            referenceIndex: referenceIndex
+        ) else { return nil }
+        let currentLevel = levels[visibleAssetIDs[currentIndex]] ?? 0
+        let targetLevel = currentLevel + direction
+        guard targetLevel > 0 else { return nil }
+
+        if direction < 0 {
+            return visibleAssetIDs.indices.reversed().first {
+                $0 < currentIndex && (levels[visibleAssetIDs[$0]] ?? 0) == targetLevel
+            }
+        }
+        var index = currentIndex + 1
+        while index < visibleAssetIDs.count {
+            let level = levels[visibleAssetIDs[index]] ?? 0
+            if level <= currentLevel { return nil }
+            if level == targetLevel { return index }
+            index += 1
+        }
+        return nil
+    }
+
     private static func hierarchyControlTargetID(
         at index: Int,
         orderedAssetIDs: [String],
@@ -426,6 +472,43 @@ enum PhotoNumberingLogic {
     }
 
     // MARK: - Private
+
+    private static func nearestVisibleNumberedIndex(
+        visibleAssetIDs: [String],
+        levels: [String: Int],
+        referenceIndex: Int
+    ) -> Int? {
+        guard !visibleAssetIDs.isEmpty else { return nil }
+        let clamped = max(0, min(referenceIndex, visibleAssetIDs.count - 1))
+        if (levels[visibleAssetIDs[clamped]] ?? 0) > 0 {
+            return clamped
+        }
+
+        var bestIndex: Int?
+        var bestDistance = Int.max
+        for index in visibleAssetIDs.indices {
+            guard (levels[visibleAssetIDs[index]] ?? 0) > 0 else { continue }
+            let distance = abs(index - clamped)
+            if distance < bestDistance {
+                bestDistance = distance
+                bestIndex = index
+            }
+        }
+        return bestIndex
+    }
+
+    private static func nearestVisibleNumberedLevel(
+        visibleAssetIDs: [String],
+        levels: [String: Int],
+        referenceIndex: Int
+    ) -> Int? {
+        guard let index = nearestVisibleNumberedIndex(
+            visibleAssetIDs: visibleAssetIDs,
+            levels: levels,
+            referenceIndex: referenceIndex
+        ) else { return nil }
+        return levels[visibleAssetIDs[index]]
+    }
 
     private static func firstNumberedLevel(from startIndex: Int, orderedAssetIDs: [String], levels: [String: Int]) -> Int? {
         var i = startIndex

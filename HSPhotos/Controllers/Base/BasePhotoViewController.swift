@@ -122,6 +122,30 @@ class BasePhotoViewController: UIViewController {
         return button
     }()
 
+    /// 底部工具条：层级快跳时回到上一级节点。
+    internal lazy var quickJumpParentLevelBarButton: UIBarButtonItem = {
+        let button = UIBarButtonItem(
+            image: UIImage(systemName: "chevron.left"),
+            style: .plain,
+            target: self,
+            action: #selector(didTapQuickJumpParentLevel)
+        )
+        button.accessibilityLabel = "跳到上一级"
+        return button
+    }()
+
+    /// 底部工具条：层级快跳时进入下一级节点。
+    internal lazy var quickJumpChildLevelBarButton: UIBarButtonItem = {
+        let button = UIBarButtonItem(
+            image: UIImage(systemName: "chevron.right"),
+            style: .plain,
+            target: self,
+            action: #selector(didTapQuickJumpChildLevel)
+        )
+        button.accessibilityLabel = "跳到下一级"
+        return button
+    }()
+
     /// 选择当前快跳模式：选区 / 层级分支 / 无级。
     internal lazy var quickJumpModeBarButton: UIBarButtonItem = {
         let button = UIBarButtonItem(
@@ -285,24 +309,24 @@ class BasePhotoViewController: UIViewController {
         syncQuickJumpBarButtonsEnabled()
     }
 
+    @objc private func didTapQuickJumpParentLevel() {
+        gridView.performHierarchyLevelJump(mode: quickJumpMode, direction: .parent)
+        syncQuickJumpBarButtonsEnabled()
+    }
+
+    @objc private func didTapQuickJumpChildLevel() {
+        gridView.performHierarchyLevelJump(mode: quickJumpMode, direction: .child)
+        syncQuickJumpBarButtonsEnabled()
+    }
+
     @objc private func didTapHierarchyCollapseToolbar() {
-        let changed = gridView.performVisibleHierarchyShortcut(expand: false)
-        if !changed, selectionMode == .none {
-            gridView.hideUnleveledAssets = true
-            updateHideUnleveledAssetsButton()
-        }
+        _ = gridView.performVisibleHierarchyShortcut(expand: false)
         syncHierarchyToolbarButtonsEnabled()
     }
 
     @objc private func didTapHierarchyExpandToolbar() {
-        if selectionMode == .none, gridView.hideUnleveledAssets {
-            gridView.hideUnleveledAssets = false
-            updateHideUnleveledAssetsButton()
-            syncHierarchyToolbarButtonsEnabled()
-        } else {
-            _ = gridView.performVisibleHierarchyShortcut(expand: true)
-            syncHierarchyToolbarButtonsEnabled()
-        }
+        _ = gridView.performVisibleHierarchyShortcut(expand: true)
+        syncHierarchyToolbarButtonsEnabled()
     }
 
     @objc private func didTapHideUnleveledAssets() {
@@ -314,6 +338,7 @@ class BasePhotoViewController: UIViewController {
         let isHidden = gridView.hideUnleveledAssets
         hideUnleveledAssetsToolbarButton.image = UIImage(systemName: isHidden ? "eye" : "eye.slash")
         hideUnleveledAssetsToolbarButton.accessibilityLabel = isHidden ? "显示全部" : "隐藏无级照片"
+        hierarchyToolbarMenuButton.menu = createHierarchyToolbarMenu()
     }
 
     /// 构建选择模式下「层级」菜单（折叠/展开/隐藏无级）。
@@ -431,6 +456,11 @@ class BasePhotoViewController: UIViewController {
             mode: quickJumpMode,
             previous: quickJumpPreviousBarButton,
             next: quickJumpNextBarButton
+        )
+        gridView.syncHierarchyLevelJumpBarButtons(
+            mode: quickJumpMode,
+            parent: quickJumpParentLevelBarButton,
+            child: quickJumpChildLevelBarButton
         )
         syncHierarchyToolbarButtonsEnabled()
     }
@@ -999,14 +1029,15 @@ class BasePhotoViewController: UIViewController {
             if showsHierarchy {
                 // 浏览模式：快跳 + 层级操作按钮
                 updateHideUnleveledAssetsButton()
+                hierarchyToolbarMenuButton.menu = createHierarchyToolbarMenu()
                 toolbarItems = [
                     flexLeading,
                     quickJumpPreviousBarButton,
-                    quickJumpNextBarButton,
+                    quickJumpParentLevelBarButton,
                     quickJumpModeBarButton,
-                    hierarchyCollapseToolbarButton,
-                    hierarchyExpandToolbarButton,
-                    hideUnleveledAssetsToolbarButton,
+                    quickJumpChildLevelBarButton,
+                    quickJumpNextBarButton,
+                    hierarchyToolbarMenuButton,
                     flexTrailing
                 ]
                 nav.setToolbarHidden(false, animated: true)
@@ -1027,6 +1058,8 @@ class BasePhotoViewController: UIViewController {
             quickJumpModeBarButton
         ]
         if showsHierarchy {
+            items.insert(quickJumpParentLevelBarButton, at: 2)
+            items.insert(quickJumpChildLevelBarButton, at: 4)
             hierarchyToolbarMenuButton.menu = createHierarchyToolbarMenu()
             items.append(hierarchyToolbarMenuButton)
         }

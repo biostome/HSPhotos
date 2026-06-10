@@ -101,6 +101,15 @@ final class PhotoNumberingService {
         return assetIDs.contains { (levels[$0] ?? 0) > 0 }
     }
 
+    func effectiveLevels(
+        for orderedAssets: [PHAsset],
+        in collection: PHAssetCollection
+    ) -> [String: Int] {
+        let levels = levelsCache[cacheKey(collection)] ?? [:]
+        let orderedIDs = orderedAssets.map(\.localIdentifier)
+        return PhotoNumberingLogic.effectiveLevels(orderedAssetIDs: orderedIDs, levels: levels)
+    }
+
     /// 是否折叠
     func isCollapsed(_ asset: PHAsset, in collection: PHAssetCollection) -> Bool {
         collapsedCache[cacheKey(collection)]?[asset.localIdentifier] ?? false

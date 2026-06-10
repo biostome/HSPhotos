@@ -1800,6 +1800,11 @@ extension PhotoGridView {
         case next
     }
 
+    enum HierarchyLevelJumpDirection {
+        case parent
+        case child
+    }
+
     /// 将链式锚点对齐到「选中序号最大」（最近选入）的格；无选中或非选择模式时清空。
     /// 若该格在头尾目标链上无法向两侧移动（如只选一张且唯一目标即自身），则置 `nil`，改用视口边界判断可用性，避免两键全灰。
     func syncSelectionQuickNavCurrentVisibleIndexToLastSelectedAsset() {
@@ -1853,16 +1858,23 @@ extension PhotoGridView {
         let (vmin, vmax) = quickJumpVisibleItemBounds()
         guard let index = quickJumpDestination(targets: targets, direction: direction, vmin: vmin, vmax: vmax) else { return }
 
-        let indexPath = IndexPath(item: index, section: 0)
-        collectionView.scrollToItem(at: indexPath, at: .centeredVertically, animated: true)
-        lastQuickNavJumpIndex = index
-        postQuickJumpToolbarRefresh()
+        scrollToQuickJumpIndex(index)
+    }
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + Self.quickJumpHighlightDelay) { [weak self] in
-            guard let self else { return }
-            guard let cell = self.collectionView.cellForItem(at: indexPath) as? PhotoCell else { return }
-            cell.performQuickNavigationHighlightAnimation()
+    func syncHierarchyLevelJumpBarButtons(mode: PhotoGridQuickJumpMode, parent: UIBarButtonItem, child: UIBarButtonItem) {
+        guard quickJumpModeIsActive(mode), mode == .hierarchyBranch else {
+            parent.isEnabled = false
+            child.isEnabled = false
+            return
         }
+        parent.isEnabled = hierarchyLevelJumpDestination(direction: .parent) != nil
+        child.isEnabled = hierarchyLevelJumpDestination(direction: .child) != nil
+    }
+
+    func performHierarchyLevelJump(mode: PhotoGridQuickJumpMode, direction: HierarchyLevelJumpDirection) {
+        guard quickJumpModeIsActive(mode), mode == .hierarchyBranch else { return }
+        guard let index = hierarchyLevelJumpDestination(direction: direction) else { return }
+        scrollToQuickJumpIndex(index)
     }
 
     func resetQuickJumpAnchor() {
@@ -1907,6 +1919,9 @@ extension PhotoGridView {
 
     private func quickJumpTargetIndices(for mode: PhotoGridQuickJumpMode) -> [Int] {
         guard quickJumpModeIsActive(mode) else { return [] }
+        if mode == .hierarchyBranch {
+            return hierarchyBranchQuickJumpTargetIndices()
+        }
         if let cached = quickJumpTargetCache[mode] {
             return cached
         }
@@ -1933,12 +1948,17 @@ extension PhotoGridView {
         return contiguousBlockEdgeIndices { ids.contains(visibleAssets[$0].localIdentifier) }
     }
 
-    /// 所有有子孙节点的层级相片在 visibleAssets 中的索引，按顺序排序。
-    /// 使用批量方法（一次 map + 一次扫描），避免 O(n²) 主线程卡顿。
+    /// 层级同级快跳：有编号节点按有效级别分组，只在当前级别内前后跳。
     private func hierarchyBranchQuickJumpTargetIndices() -> [Int] {
         guard let collection = currentCollection else { return [] }
-        let branchIDs = numberingService.assetIDsWithDescendants(in: assets, collection: collection)
-        return visibleAssets.indices.filter { branchIDs.contains(visibleAssets[$0].localIdentifier) }
+        guard let current = currentHierarchyBranchJumpTarget() else { return [] }
+        let visibleIDs = visibleAssets.map(\.localIdentifier)
+        let levels = numberingService.effectiveLevels(for: assets, in: collection)
+        return PhotoNumberingLogic.hierarchySiblingJumpTargets(
+            visibleAssetIDs: visibleIDs,
+            levels: levels,
+            referenceIndex: current.visibleIndex
+        )
     }
 
     /// 无级快跳：连续 level == 0 的段落贡献头尾，间隔开的段落逐段跳。
@@ -2001,6 +2021,79 @@ extension PhotoGridView {
             return (targets.contains { $0 < last }, targets.contains { $0 > last })
         }
         return (targets.contains { $0 < vmax }, targets.contains { $0 > vmin })
+    }
+
+    private struct HierarchyNodeJumpTarget {
+        let visibleIndex: Int
+        let assetID: String
+        let level: Int
+    }
+
+    private func currentHierarchyBranchJumpTarget() -> HierarchyNodeJumpTarget? {
+        guard let collection = currentCollection else { return nil }
+        let targets = hierarchyNodeJumpTargets(in: collection)
+        guard !targets.isEmpty else { return nil }
+
+        let referenceIndex: Int
+        if let last = lastQuickNavJumpIndex, visibleAssets.indices.contains(last) {
+            referenceIndex = last
+        } else {
+            let bounds = quickJumpVisibleItemBounds()
+            referenceIndex = (bounds.min + bounds.max) / 2
+        }
+
+        if let exact = targets.first(where: { $0.visibleIndex == referenceIndex }) {
+            return exact
+        }
+
+        return targets.min {
+            abs($0.visibleIndex - referenceIndex) < abs($1.visibleIndex - referenceIndex)
+        }
+    }
+
+    private func hierarchyLevelJumpDestination(direction: HierarchyLevelJumpDirection) -> Int? {
+        guard let collection = currentCollection else { return nil }
+        guard let current = currentHierarchyBranchJumpTarget() else { return nil }
+        let targets = hierarchyNodeJumpTargets(in: collection)
+        switch direction {
+        case .parent:
+            return PhotoNumberingLogic.hierarchyLevelJumpTarget(
+                visibleAssetIDs: targets.map(\.assetID),
+                levels: Dictionary(uniqueKeysWithValues: targets.map { ($0.assetID, $0.level) }),
+                referenceIndex: targets.firstIndex { $0.assetID == current.assetID } ?? 0,
+                direction: -1
+            ).map { targets[$0].visibleIndex }
+        case .child:
+            return PhotoNumberingLogic.hierarchyLevelJumpTarget(
+                visibleAssetIDs: targets.map(\.assetID),
+                levels: Dictionary(uniqueKeysWithValues: targets.map { ($0.assetID, $0.level) }),
+                referenceIndex: targets.firstIndex { $0.assetID == current.assetID } ?? 0,
+                direction: 1
+            ).map { targets[$0].visibleIndex }
+        }
+    }
+
+    private func hierarchyNodeJumpTargets(in collection: PHAssetCollection) -> [HierarchyNodeJumpTarget] {
+        let levels = numberingService.effectiveLevels(for: assets, in: collection)
+        return visibleAssets.indices.compactMap { index in
+            let asset = visibleAssets[index]
+            let id = asset.localIdentifier
+            guard let level = levels[id], level > 0 else { return nil }
+            return HierarchyNodeJumpTarget(visibleIndex: index, assetID: id, level: level)
+        }
+    }
+
+    private func scrollToQuickJumpIndex(_ index: Int) {
+        let indexPath = IndexPath(item: index, section: 0)
+        collectionView.scrollToItem(at: indexPath, at: .centeredVertically, animated: true)
+        lastQuickNavJumpIndex = index
+        postQuickJumpToolbarRefresh()
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.quickJumpHighlightDelay) { [weak self] in
+            guard let self else { return }
+            guard let cell = self.collectionView.cellForItem(at: indexPath) as? PhotoCell else { return }
+            cell.performQuickNavigationHighlightAnimation()
+        }
     }
 
     private func invalidateQuickJumpTargetCache(for mode: PhotoGridQuickJumpMode? = nil) {
@@ -2126,10 +2219,10 @@ extension PhotoGridView {
         } else {
             collapse.isEnabled = numberingService.canApplyAllItemsHierarchyStep(
                 expand: false, orderedAssets: assets, in: collection
-            ) || !hideUnleveledAssets
+            )
             expand.isEnabled = numberingService.canApplyAllItemsHierarchyStep(
                 expand: true, orderedAssets: assets, in: collection
-            ) || hideUnleveledAssets
+            )
         }
     }
 
