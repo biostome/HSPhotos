@@ -215,8 +215,7 @@ class GalleryViewController: BasePhotoViewController {
     }
     
     @objc private func didTapShareButton() {
-        gridView.materializeSelectionIfNeeded()
-        let selectedAssets = gridView.selectedAssets
+        let selectedAssets = selectedAssetsFromStore()
         guard !selectedAssets.isEmpty else { return }
         
         let addToAlbumActivity = GalleryAddToAlbumActivity { [weak self] in

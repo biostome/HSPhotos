@@ -176,15 +176,77 @@ struct PhotoNumberingLogicTests {
     // MARK: - hierarchy jump
 
     @Test func hierarchyJump_siblingAndLevelTargetsUseCurrentLevel() {
-        let visible = ["one", "one_one", "one_two", "two"]
-        let levels = ["one": 1, "one_one": 2, "one_two": 2, "two": 1]
+        let visible = ["one", "one_one", "one_two", "one_two_one", "two", "two_one", "two_two", "two_two_one"]
+        let levels = [
+            "one": 1,
+            "one_one": 2,
+            "one_two": 2,
+            "one_two_one": 3,
+            "two": 1,
+            "two_one": 2,
+            "two_two": 2,
+            "two_two_one": 3
+        ]
 
         #expect(
             PhotoNumberingLogic.hierarchySiblingJumpTargets(
                 visibleAssetIDs: visible,
                 levels: levels,
                 referenceIndex: 0
-            ) == [0, 3]
+            ) == [0, 4]
+        )
+        #expect(
+            PhotoNumberingLogic.hierarchySiblingJumpTargets(
+                visibleAssetIDs: visible,
+                levels: levels,
+                referenceIndex: 1
+            ) == [1, 2]
+        )
+        #expect(
+            PhotoNumberingLogic.hierarchySiblingJumpTargets(
+                visibleAssetIDs: visible,
+                levels: levels,
+                referenceIndex: 2
+            ) == [1, 2]
+        )
+        #expect(
+            PhotoNumberingLogic.hierarchySiblingJumpTargets(
+                visibleAssetIDs: visible,
+                levels: levels,
+                referenceIndex: 3
+            ) == [3]
+        )
+        #expect(
+            PhotoNumberingLogic.hierarchySiblingJumpTarget(
+                visibleAssetIDs: visible,
+                levels: levels,
+                referenceIndex: 1,
+                direction: 1
+            ) == 2
+        )
+        #expect(
+            PhotoNumberingLogic.hierarchySiblingJumpTarget(
+                visibleAssetIDs: visible,
+                levels: levels,
+                referenceIndex: 2,
+                direction: 1
+            ) == 5
+        )
+        #expect(
+            PhotoNumberingLogic.hierarchySiblingJumpTarget(
+                visibleAssetIDs: visible,
+                levels: levels,
+                referenceIndex: 3,
+                direction: 1
+            ) == 7
+        )
+        #expect(
+            PhotoNumberingLogic.hierarchySiblingJumpTarget(
+                visibleAssetIDs: visible,
+                levels: levels,
+                referenceIndex: 5,
+                direction: -1
+            ) == 2
         )
         #expect(
             PhotoNumberingLogic.hierarchyLevelJumpTarget(

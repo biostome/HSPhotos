@@ -8,6 +8,106 @@
 import Foundation
 
 enum PhotoNumberingLogic {
+    struct HierarchySiblingJumpIndex {
+        private let numberedIndices: [Int]
+        private let siblingTargetsByIndex: [Int: [Int]]
+        private let previousByIndex: [Int: Int]
+        private let nextByIndex: [Int: Int]
+
+        init(visibleAssetIDs: [String], levels: [String: Int]) {
+            let paths = PhotoNumberingLogic.hierarchyNumberPaths(
+                visibleAssetIDs: visibleAssetIDs,
+                levels: levels
+            )
+            var numberedIndices: [Int] = []
+            var siblingGroups: [[Int]: [Int]] = [:]
+            var depthGroups: [Int: [Int]] = [:]
+
+            numberedIndices.reserveCapacity(visibleAssetIDs.count)
+            for (index, path) in paths.enumerated() {
+                guard let path, !path.isEmpty else { continue }
+                numberedIndices.append(index)
+                siblingGroups[Array(path.dropLast()), default: []].append(index)
+                depthGroups[path.count, default: []].append(index)
+            }
+
+            var siblingTargetsByIndex: [Int: [Int]] = [:]
+            var preferredPreviousByIndex: [Int: Int] = [:]
+            var preferredNextByIndex: [Int: Int] = [:]
+            for group in siblingGroups.values {
+                for (offset, index) in group.enumerated() {
+                    siblingTargetsByIndex[index] = group
+                    if offset > 0 {
+                        preferredPreviousByIndex[index] = group[offset - 1]
+                    }
+                    if offset + 1 < group.count {
+                        preferredNextByIndex[index] = group[offset + 1]
+                    }
+                }
+            }
+
+            var previousByIndex: [Int: Int] = [:]
+            var nextByIndex: [Int: Int] = [:]
+            for group in depthGroups.values {
+                for (offset, index) in group.enumerated() {
+                    if let preferred = preferredPreviousByIndex[index] {
+                        previousByIndex[index] = preferred
+                    } else if offset > 0 {
+                        previousByIndex[index] = group[offset - 1]
+                    }
+                    if let preferred = preferredNextByIndex[index] {
+                        nextByIndex[index] = preferred
+                    } else if offset + 1 < group.count {
+                        nextByIndex[index] = group[offset + 1]
+                    }
+                }
+            }
+
+            self.numberedIndices = numberedIndices
+            self.siblingTargetsByIndex = siblingTargetsByIndex
+            self.previousByIndex = previousByIndex
+            self.nextByIndex = nextByIndex
+        }
+
+        func siblingTargets(referenceIndex: Int) -> [Int] {
+            guard let index = nearestNumberedIndex(to: referenceIndex) else { return [] }
+            return siblingTargetsByIndex[index] ?? []
+        }
+
+        func jumpTarget(referenceIndex: Int, direction: Int) -> Int? {
+            guard direction == -1 || direction == 1 else { return nil }
+            guard let index = nearestNumberedIndex(to: referenceIndex) else { return nil }
+            return direction < 0 ? previousByIndex[index] : nextByIndex[index]
+        }
+
+        private func nearestNumberedIndex(to referenceIndex: Int) -> Int? {
+            guard !numberedIndices.isEmpty else { return nil }
+            var low = 0
+            var high = numberedIndices.count
+            while low < high {
+                let mid = (low + high) / 2
+                if numberedIndices[mid] < referenceIndex {
+                    low = mid + 1
+                } else {
+                    high = mid
+                }
+            }
+
+            let after = low < numberedIndices.count ? numberedIndices[low] : nil
+            let beforeIndex = low - 1
+            let before = beforeIndex >= 0 ? numberedIndices[beforeIndex] : nil
+            switch (before, after) {
+            case (nil, let index?):
+                return index
+            case (let index?, nil):
+                return index
+            case (let lhs?, let rhs?):
+                return abs(lhs - referenceIndex) <= abs(rhs - referenceIndex) ? lhs : rhs
+            case (nil, nil):
+                return nil
+            }
+        }
+    }
 
     // MARK: - 编号计算
 
@@ -403,14 +503,22 @@ enum PhotoNumberingLogic {
         levels: [String: Int],
         referenceIndex: Int
     ) -> [Int] {
-        guard let level = nearestVisibleNumberedLevel(
+        HierarchySiblingJumpIndex(
             visibleAssetIDs: visibleAssetIDs,
-            levels: levels,
-            referenceIndex: referenceIndex
-        ) else { return [] }
-        return visibleAssetIDs.indices.filter {
-            (levels[visibleAssetIDs[$0]] ?? 0) == level
-        }
+            levels: levels
+        ).siblingTargets(referenceIndex: referenceIndex)
+    }
+
+    static func hierarchySiblingJumpTarget(
+        visibleAssetIDs: [String],
+        levels: [String: Int],
+        referenceIndex: Int,
+        direction: Int
+    ) -> Int? {
+        HierarchySiblingJumpIndex(
+            visibleAssetIDs: visibleAssetIDs,
+            levels: levels
+        ).jumpTarget(referenceIndex: referenceIndex, direction: direction)
     }
 
     static func hierarchyLevelJumpTarget(
@@ -497,17 +605,35 @@ enum PhotoNumberingLogic {
         return bestIndex
     }
 
-    private static func nearestVisibleNumberedLevel(
+    private static func hierarchyNumberPaths(
         visibleAssetIDs: [String],
-        levels: [String: Int],
-        referenceIndex: Int
-    ) -> Int? {
-        guard let index = nearestVisibleNumberedIndex(
-            visibleAssetIDs: visibleAssetIDs,
-            levels: levels,
-            referenceIndex: referenceIndex
-        ) else { return nil }
-        return levels[visibleAssetIDs[index]]
+        levels: [String: Int]
+    ) -> [[Int]?] {
+        var result = Array<[Int]?>(repeating: nil, count: visibleAssetIDs.count)
+        var counters: [Int] = [0]
+        var lastLevel = 0
+
+        for (index, id) in visibleAssetIDs.enumerated() {
+            let level = levels[id] ?? 0
+            guard level > 0 else { continue }
+
+            let correctedLevel = min(level, lastLevel + 1)
+            while counters.count <= correctedLevel {
+                counters.append(0)
+            }
+
+            if correctedLevel <= lastLevel {
+                for i in (correctedLevel + 1)..<counters.count {
+                    counters[i] = 0
+                }
+            }
+
+            counters[correctedLevel] += 1
+            lastLevel = correctedLevel
+            result[index] = Array(counters[1...correctedLevel])
+        }
+
+        return result
     }
 
     private static func firstNumberedLevel(from startIndex: Int, orderedAssetIDs: [String], levels: [String: Int]) -> Int? {

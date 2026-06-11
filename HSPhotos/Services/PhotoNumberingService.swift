@@ -101,6 +101,10 @@ final class PhotoNumberingService {
         return assetIDs.contains { (levels[$0] ?? 0) > 0 }
     }
 
+    func levels(in collection: PHAssetCollection) -> [String: Int] {
+        levelsCache[cacheKey(collection)] ?? [:]
+    }
+
     func effectiveLevels(
         for orderedAssets: [PHAsset],
         in collection: PHAssetCollection

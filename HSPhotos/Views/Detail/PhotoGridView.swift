@@ -105,38 +105,82 @@ class PhotoGridView: UIView {
     /// 层级快捷按钮：避免连续点击叠加重入 `performBatchUpdates`
     private var isHierarchyShortcutVisibleAssetsAnimating = false
     private var hierarchyShortcutNeedsVisibleRefresh = false
+    private var isApplyingSnapshot = false
 
     public var assets: [PHAsset] = [] {
         didSet {
-            let idsChanged = oldValue.map(\.localIdentifier) != assets.map(\.localIdentifier)
-            if idsChanged {
-                clearSelectionStateForDataSourceChange()
-            }
-            invalidateQuickJumpTargetCache()
-            invalidateCustomOrderCache()
-            invalidateDateTextCache()
-            if idsChanged {
-                hierarchyCache.removeAll()
-            }
-            updateVisibleAssets()
-            // 删除节点后存储层级已校正，但可见序列可能不变（例如删的是折叠分支内未展示的项），须强制刷新编号 overlay
-            if idsChanged, sortPreference == .custom, supportsHierarchyNumbering {
-                collectionView.reloadData()
-            }
-            if sortPreference == .custom, supportsHierarchyNumbering {
-                scheduleHierarchyToolbarRefresh()
-            }
+            guard !isApplyingSnapshot else { return }
+            let oldAssetIDs = assetIDs
+            rebuildAssetLookup()
+            handleAssetsDidChange(idsChanged: oldAssetIDs != assetIDs)
+        }
+    }
+
+    func apply(snapshot: PhotoCollectionSnapshot) {
+        applyAssets(
+            snapshot.visibleAssets,
+            assetIDs: snapshot.visibleAssetIDs,
+            assetByID: snapshot.assetByID
+        )
+    }
+
+    private func applyAssets(
+        _ assets: [PHAsset],
+        assetIDs: [String],
+        assetByID: [String: PHAsset]
+    ) {
+        let oldAssetIDs = self.assetIDs
+        isApplyingSnapshot = true
+        self.assets = assets
+        isApplyingSnapshot = false
+        self.assetIDs = assetIDs
+        self.assetByID = assetByID
+        assetIndexByID.removeAll(keepingCapacity: true)
+        assetIndexByID.reserveCapacity(assetIDs.count)
+        for (index, id) in assetIDs.enumerated() {
+            assetIndexByID[id] = index
+        }
+        handleAssetsDidChange(idsChanged: oldAssetIDs != assetIDs)
+    }
+
+    private func handleAssetsDidChange(idsChanged: Bool) {
+        if idsChanged {
+            clearSelectionStateForDataSourceChange()
+        }
+        invalidateQuickJumpTargetCache()
+        invalidateCustomOrderCache()
+        invalidateDateTextCache()
+        if idsChanged {
+            hierarchyCache.removeAll()
+        }
+        updateVisibleAssets()
+        // 删除节点后存储层级已校正，但可见序列可能不变（例如删的是折叠分支内未展示的项），须强制刷新编号 overlay
+        if idsChanged, sortPreference == .custom, supportsHierarchyNumbering {
+            collectionView.reloadData()
+        }
+        if sortPreference == .custom, supportsHierarchyNumbering {
+            prewarmContextMenuHierarchyCacheIfNeeded()
+            scheduleHierarchyToolbarRefresh()
         }
     }
 
     // 实际显示的照片（经过层级折叠过滤）
     private var visibleAssets: [PHAsset] = []
+    private var assetIDs: [String] = []
+    private var visibleAssetIDs: [String] = []
+    private var assetByID: [String: PHAsset] = [:]
+    private var assetIndexByID: [String: Int] = [:]
+    private var visibleAssetIndexByID: [String: Int] = [:]
 
     public var delegate: PhotoGridViewDelegate?
 
     public weak var scrollDelegate: UIScrollViewDelegate?
 
     public var selectedAssets: [PHAsset] { selectedPhotos }
+
+    public var selectedAssetIDs: [String] {
+        allVisibleSelectionActive ? visibleAssetIDs : selectionState.orderedIDs
+    }
 
     public func materializeSelectionIfNeeded() {
         expandAllVisibleSelectionIfNeeded()
@@ -150,9 +194,13 @@ class PhotoGridView: UIView {
 
     public var visibleAssetCount: Int { visibleAssets.count }
 
+    public var selectedAssetIDSet: Set<String> {
+        cachedSelectedIdentifierSet()
+    }
+
     /// 与 `selectedAssets` 成员一致，用于 O(1) 成员判断而无需构造 `[PHAsset]`。
     public var selectedMembershipIdentifiers: Set<String> {
-        cachedSelectedIdentifierSet()
+        selectedAssetIDSet
     }
 
     private static let maxSelectedAssetsInDelegatePayload = 512
@@ -225,13 +273,8 @@ class PhotoGridView: UIView {
             return visibleAssets
         }
         if selectedAssetByID.count < selectionState.count {
-            var lookup: [String: PHAsset] = [:]
-            lookup.reserveCapacity(assets.count)
-            for asset in assets {
-                lookup[asset.localIdentifier] = asset
-            }
             for id in selectionState.orderedIDs {
-                if selectedAssetByID[id] == nil, let asset = lookup[id] {
+                if selectedAssetByID[id] == nil, let asset = assetByID[id] {
                     selectedAssetByID[id] = asset
                 }
             }
@@ -254,6 +297,13 @@ class PhotoGridView: UIView {
     /// 快跳定位共享锚点（可见下标）；`nil` 表示按当前视口边界取下一目标。
     private var lastQuickNavJumpIndex: Int?
     private var quickJumpTargetCache: [PhotoGridQuickJumpMode: [Int]] = [:]
+    private var hierarchyEffectiveLevelsCache: [String: Int]?
+    private var hierarchyNodeJumpTargetsCache: [HierarchyNodeJumpTarget]?
+    private var hierarchySiblingJumpIndexCache: PhotoNumberingLogic.HierarchySiblingJumpIndex?
+    private var hierarchyLevelJumpDestinationCache: [HierarchyLevelJumpDestinationCacheKey: HierarchyLevelJumpDestinationCacheValue] = [:]
+    private var contextMenuPreviousLevelCache: [Int]?
+    private static var didPrewarmContextMenuResources = false
+    private static var contextMenuSymbolCache: [String: UIImage] = [:]
     /// 由控制器注入：锚点或目标链变化时刷新底部工具条上按钮的 `isEnabled`。
     var onQuickJumpToolbarRefresh: (() -> Void)?
     /// 旧入口保留给现有控制器代码，内部转发到统一快跳刷新。
@@ -374,6 +424,7 @@ class PhotoGridView: UIView {
         setupUI()
         setupGestures()
         observeOverlayAndHierarchySettings()
+        prewarmContextMenuResourcesIfNeeded()
     }
 
     required init?(coder: NSCoder) {
@@ -405,6 +456,32 @@ class PhotoGridView: UIView {
             guard let self = self else { return }
             self.updateVisibleAssets()
         }
+    }
+
+    private func rebuildAssetLookup() {
+        assetIDs.removeAll(keepingCapacity: true)
+        assetByID.removeAll(keepingCapacity: true)
+        assetIndexByID.removeAll(keepingCapacity: true)
+        assetIDs.reserveCapacity(assets.count)
+        assetByID.reserveCapacity(assets.count)
+        assetIndexByID.reserveCapacity(assets.count)
+        for (index, asset) in assets.enumerated() {
+            let id = asset.localIdentifier
+            assetIDs.append(id)
+            assetByID[id] = asset
+            assetIndexByID[id] = index
+        }
+    }
+
+    private func setVisibleAssetsCache(_ assets: [PHAsset]) {
+        visibleAssets = assets
+        visibleAssetIDs = assets.map(\.localIdentifier)
+        visibleAssetIndexByID.removeAll(keepingCapacity: true)
+        visibleAssetIndexByID.reserveCapacity(visibleAssetIDs.count)
+        for (index, id) in visibleAssetIDs.enumerated() {
+            visibleAssetIndexByID[id] = index
+        }
+        contextMenuPreviousLevelCache = nil
     }
 
     private func setupUI() {
@@ -442,6 +519,43 @@ class PhotoGridView: UIView {
         let panGesture = UIPanGestureRecognizer(target: self, action: #selector(handlePanGesture(_:)))
         panGesture.delegate = self
         collectionView.addGestureRecognizer(panGesture)
+    }
+
+    private func prewarmContextMenuResourcesIfNeeded() {
+        guard !Self.didPrewarmContextMenuResources else { return }
+        Self.didPrewarmContextMenuResources = true
+        DispatchQueue.main.async {
+            let symbolNames = [
+                "anchor.slash",
+                "anchor",
+                "tag",
+                "doc.on.clipboard",
+                "trash",
+                "list.number",
+                "arrow.right.to.line",
+                "list.bullet.indent",
+                "arrow.left",
+                "arrow.right",
+                "xmark.circle",
+                "rectangle.expand.vertical",
+                "rectangle.compress.vertical"
+            ]
+            for name in symbolNames {
+                Self.contextMenuSymbolCache[name] = UIImage(systemName: name)
+            }
+            _ = UIAction(title: "", image: nil) { _ in }
+            _ = UIMenu(title: "", children: [])
+            _ = UIDeferredMenuElement { completion in completion([]) }
+        }
+    }
+
+    private func contextMenuImage(_ systemName: String) -> UIImage? {
+        if let image = Self.contextMenuSymbolCache[systemName] {
+            return image
+        }
+        let image = UIImage(systemName: systemName)
+        Self.contextMenuSymbolCache[systemName] = image
+        return image
     }
 
     private func calculateNewColumns(for scaleDelta: CGFloat) -> Int {
@@ -689,7 +803,7 @@ class PhotoGridView: UIView {
     private func cachedSelectedIdentifierSet() -> Set<String> {
         if let cache = selectedIdentifierSetCache { return cache }
         if allVisibleSelectionActive {
-            let ids = Set(visibleAssets.map(\.localIdentifier))
+            let ids = Set(visibleAssetIDs)
             selectedIdentifierSetCache = ids
             return ids
         }
@@ -712,16 +826,12 @@ class PhotoGridView: UIView {
 
     private func expandAllVisibleSelectionIfNeeded() {
         guard allVisibleSelectionActive else { return }
-        var orderedIDs: [String] = []
-        orderedIDs.reserveCapacity(visibleAssets.count)
         var assetsByID: [String: PHAsset] = [:]
         assetsByID.reserveCapacity(visibleAssets.count)
         for asset in visibleAssets {
-            let id = asset.localIdentifier
-            orderedIDs.append(id)
-            assetsByID[id] = asset
+            assetsByID[asset.localIdentifier] = asset
         }
-        selectionState.replaceAll(orderedIDs: orderedIDs)
+        selectionState.replaceAll(orderedIDs: visibleAssetIDs)
         selectedAssetByID = assetsByID
         allVisibleSelectionActive = false
         invalidateSelectedIdentifierSetCache()
@@ -940,7 +1050,7 @@ class PhotoGridView: UIView {
         }
 
         guard animated else {
-            visibleAssets = newVisibleAssets
+            setVisibleAssetsCache(newVisibleAssets)
             collectionView.reloadData()
             invalidateQuickJumpTargetCache()
             syncSelectionQuickNavCurrentVisibleIndexToLastSelectedAsset()
@@ -970,7 +1080,7 @@ class PhotoGridView: UIView {
                 options: [.transitionCrossDissolve, .curveEaseInOut, .allowUserInteraction]
             ) { [weak self] in
                 guard let self else { return }
-                self.visibleAssets = newVisibleAssets
+                self.setVisibleAssetsCache(newVisibleAssets)
                 self.collectionView.reloadData()
                 self.invalidateQuickJumpTargetCache()
             } completion: { _ in finish() }
@@ -982,7 +1092,7 @@ class PhotoGridView: UIView {
         CATransaction.setAnimationTimingFunction(CAMediaTimingFunction(name: .easeInEaseOut))
         collectionView.performBatchUpdates { [weak self] in
             guard let self else { return }
-            self.visibleAssets = newVisibleAssets
+            self.setVisibleAssetsCache(newVisibleAssets)
             self.invalidateQuickJumpTargetCache()
             if !diff.deletes.isEmpty {
                 self.collectionView.deleteItems(at: diff.deletes)
@@ -1116,6 +1226,7 @@ class PhotoGridView: UIView {
     /// 刷新层级显示（层级/顺序变更：重算编号与可见集）
     func refreshParagraphDisplay(animated: Bool = false, completion: (() -> Void)? = nil) {
         hierarchyCache.removeAll()
+        invalidateQuickJumpTargetCache()
         updateVisibleAssets(animated: animated, completion: completion)
     }
 
@@ -1174,9 +1285,9 @@ class PhotoGridView: UIView {
                 let valid = Set(self.assets.map(\.localIdentifier))
                 numberingService.cleanupInvalidNodes(validAssetIDs: valid, orderedAssets: self.assets, for: collection)
                 hierarchyCache.removeAll()
-                visibleAssets = computeVisibleAssets()
+                setVisibleAssetsCache(computeVisibleAssets())
             } else {
-                visibleAssets = assets
+                setVisibleAssetsCache(assets)
             }
             invalidateQuickJumpTargetCache()
 
@@ -1486,6 +1597,8 @@ extension PhotoGridView: UICollectionViewDelegateFlowLayout {
         // 如果正在滑动选择，则阻止滚动
         if isSlidingSelectionEnabled {
             scrollView.isScrollEnabled = false
+        } else {
+            clearQuickJumpAnchorForUserScroll()
         }
 
         scrollDelegate?.scrollViewWillBeginDragging?(scrollView)
@@ -1498,20 +1611,17 @@ extension PhotoGridView: UICollectionViewDelegateFlowLayout {
         }
         scrollDelegate?.scrollViewDidEndDragging?(scrollView, willDecelerate: decelerate)
         if !decelerate {
-            onHierarchyToolbarRefresh?()
             onQuickJumpToolbarRefresh?()
         }
     }
 
     func scrollViewDidEndDecelerating(_ scrollView: UIScrollView) {
         scrollDelegate?.scrollViewDidEndDecelerating?(scrollView)
-        onHierarchyToolbarRefresh?()
         onQuickJumpToolbarRefresh?()
     }
 
     func scrollViewDidEndScrollingAnimation(_ scrollView: UIScrollView) {
         scrollDelegate?.scrollViewDidEndScrollingAnimation?(scrollView)
-        onHierarchyToolbarRefresh?()
         onQuickJumpToolbarRefresh?()
     }
 }
@@ -1570,152 +1680,49 @@ extension PhotoGridView {
     func collectionView(_ collectionView: UICollectionView, contextMenuConfigurationForItemAt indexPath: IndexPath, point: CGPoint) -> UIContextMenuConfiguration? {
         guard indexPath.item < visibleAssets.count else { return nil }
         let asset = visibleAssets[indexPath.item]
-        let isCurrentAnchor = anchorPhoto?.localIdentifier == asset.localIdentifier
-        let isCurrentHierarchyCollapsed = currentCollection != nil ? numberingService.isCollapsed(asset, in: currentCollection!) : false
-        let hasHierarchyDescendants = currentCollection != nil ? numberingService.hasDescendants(asset, in: assets, collection: currentCollection!) : false
+        let assetID = visibleAssetIDs[indexPath.item]
+        let visibleIndex = indexPath.item
+        let isCurrentAnchor = anchorPhoto?.localIdentifier == assetID
 
-        return UIContextMenuConfiguration(identifier: nil, previewProvider: nil) { [self] _ in
+        return UIContextMenuConfiguration(identifier: indexPath as NSIndexPath, previewProvider: nil) { [self] _ in
             var anchorGroup: [UIMenuElement] = []
-            var hierarchyGroup: [UIMenuElement] = []
             var tailGroup: [UIMenuElement] = []
 
             // 锚点相关操作
             if isCurrentAnchor {
-                let removeAnchorAction = UIAction(title: "取消锚点", image: UIImage(systemName: "anchor.slash")) { [weak self] _ in
-                    self?.anchorPhoto = nil
-                    self?.collectionView.reloadData()
+                let removeAnchorAction = UIAction(title: "取消锚点", image: contextMenuImage("anchor.slash")) { [weak self] _ in
+                    guard let self else { return }
+                    let oldAnchorID = self.anchorPhoto?.localIdentifier
+                    self.anchorPhoto = nil
+                    self.reloadAnchorCells(oldID: oldAnchorID, newID: nil)
                 }
                 anchorGroup.append(removeAnchorAction)
             } else {
-                let setAnchorAction = UIAction(title: "设为锚点", image: UIImage(systemName: "anchor")) { [weak self] _ in
-                    self?.anchorPhoto = asset
-                    self?.collectionView.reloadData()
-                    self?.delegate?.photoGridView(self!, didSetAnchor: asset)
+                let setAnchorAction = UIAction(title: "设为锚点", image: contextMenuImage("anchor")) { [weak self] _ in
+                    guard let self else { return }
+                    let oldAnchorID = self.anchorPhoto?.localIdentifier
+                    self.anchorPhoto = asset
+                    self.reloadAnchorCells(oldID: oldAnchorID, newID: assetID)
+                    self.delegate?.photoGridView(self, didSetAnchor: asset)
                 }
                 anchorGroup.append(setAnchorAction)
             }
 
-            // 情况 2 & 3: 层级操作 (由于层级必须连续且有根，这里根据上下文提供智能选项)
-            if sortPreference == .custom, supportsHierarchyNumbering, let collection = currentCollection {
-                let currLv = numberingService.level(for: asset, in: collection)
-
-                // 向上递归查找最近的一个层级节点作为参考点 (prevLevel)
-                var prevLv = 0
-                if let idx = visibleAssets.firstIndex(of: asset), idx > 0 {
-                    for i in (0..<idx).reversed() {
-                        let lv = numberingService.level(for: visibleAssets[i], in: collection)
-                        if lv > 0 {
-                            prevLv = lv
-                            break
-                        }
-                    }
-                }
-
-                if currLv == 0 {
-                    // --- 情况 1 & 2: 节点尚未进入层级系统 ---
-                    // 规则: 总是提供“设为主级”作为根入口
-                    let setMain = UIAction(title: "设为主级", image: UIImage(systemName: "list.number")) { [weak self] _ in
-                        guard let self = self else { return }
-                        self.numberingService.setLevel(1, for: asset, in: collection)
-                        self.refreshParagraphDisplay()
-                    }
-                    hierarchyGroup.append(setMain)
-
-                    if prevLv > 0 {
-                        // 规则: 如果上方有层级，则一并提供“设为同级”与“设为子级”选项
-                        let setSame = UIAction(title: "设为同级", image: UIImage(systemName: "arrow.right.to.line")) { [weak self] _ in
-                            guard let self = self else { return }
-                            self.numberingService.setLevel(prevLv, for: asset, in: collection)
-                            self.refreshParagraphDisplay()
-                        }
-                        let setSub = UIAction(title: "设为子级", image: UIImage(systemName: "list.bullet.indent")) { [weak self] _ in
-                            guard let self = self else { return }
-                            self.numberingService.setLevel(prevLv + 1, for: asset, in: collection)
-                            self.refreshParagraphDisplay()
-                        }
-                        hierarchyGroup.append(setSame)
-                        hierarchyGroup.append(setSub)
-                    }
-                } else {
-                    // --- 情况 3: 节点已在层级系统中，并列提供调整选项 ---
-
-                    // 1. 提升层级 (只有大于 1 级时可提升，符合“已经是主项则隐藏设为主项”的逻辑)
-                    if currLv > 1 {
-                        let promote = UIAction(title: "提升层级", image: UIImage(systemName: "arrow.left")) { [weak self] _ in
-                            guard let self = self else { return }
-                            self.numberingService.setLevel(currLv - 1, for: asset, in: collection)
-                            self.refreshParagraphDisplay()
-                        }
-                        hierarchyGroup.append(promote)
-                    }
-
-                    // 2. 下降层级 (层级连续性约束：当前深度不能超过 prev + 1)
-                    if currLv < prevLv + 1 {
-                        let demote = UIAction(title: "下降层级", image: UIImage(systemName: "arrow.right")) { [weak self] _ in
-                            guard let self = self else { return }
-                            self.numberingService.setLevel(currLv + 1, for: asset, in: collection)
-                            self.refreshParagraphDisplay()
-                        }
-                        hierarchyGroup.append(demote)
-                    }
-
-                    // 3. 设为同级 (如果当前深度与参考节点不同，则允许对齐)
-                    if currLv != prevLv && prevLv > 0 {
-                        let setSame = UIAction(title: "设为同级", image: UIImage(systemName: "arrow.right.to.line")) { [weak self] _ in
-                            guard let self = self else { return }
-                            self.numberingService.setLevel(prevLv, for: asset, in: collection)
-                            self.refreshParagraphDisplay()
-                        }
-                        hierarchyGroup.append(setSame)
-                    }
-
-                    // 选项：取消编号 (级联执行，清理下属子树)
-                    let clearAction = UIAction(title: "取消编号", image: UIImage(systemName: "xmark.circle"), attributes: .destructive) { [weak self] _ in
-                        guard let self = self, let idx = self.visibleAssets.firstIndex(of: asset) else { return }
-                        self.numberingService.beginBatchUpdates(for: collection)
-                        defer { self.numberingService.endBatchUpdates(for: collection) }
-                        self.numberingService.clearLevel(for: asset, in: collection)
-                        // 级联清除下属子节点
-                        for i in (idx + 1)..<self.visibleAssets.count {
-                            let next = self.visibleAssets[i]
-                            let nextLv = self.numberingService.level(for: next, in: collection)
-                            if nextLv == 0 || nextLv <= currLv { break }
-                            self.numberingService.clearLevel(for: next, in: collection)
-                        }
-                        self.refreshParagraphDisplay()
-                    }
-                    hierarchyGroup.append(clearAction)
-                }
-
-                // 节点折叠/展开操作
-                if hasHierarchyDescendants || isCurrentHierarchyCollapsed {
-                    let collapseAction = UIAction(
-                        title: isCurrentHierarchyCollapsed ? "展开" : "折叠",
-                        image: UIImage(systemName: isCurrentHierarchyCollapsed ? "rectangle.expand.vertical" : "rectangle.compress.vertical")
-                    ) { [weak self] _ in
-                        guard let self = self else { return }
-                        self.numberingService.toggleCollapse(asset, in: collection)
-                        self.refreshParagraphDisplay()
-                    }
-                    hierarchyGroup.append(collapseAction)
-                }
-            }
-
             // 其他操作：添加标签 → 粘贴到此后方 → 删除（危险操作放最后）
-            let tagAction = UIAction(title: "添加标签", image: UIImage(systemName: "tag")) { [weak self] _ in
+            let tagAction = UIAction(title: "添加标签", image: contextMenuImage("tag")) { [weak self] _ in
                 guard let self = self else { return }
                 self.delegate?.photoGridView(self, didRequestAddTagFor: asset)
             }
             tailGroup.append(tagAction)
 
-            let pasteAction = UIAction(title: "粘贴到此后方", image: UIImage(systemName: "doc.on.clipboard")) { [weak self] _ in
+            let pasteAction = UIAction(title: "粘贴到此后方", image: contextMenuImage("doc.on.clipboard")) { [weak self] _ in
                 if let pasteAssets = AssetPasteboard.assetsFromPasteboard(), !pasteAssets.isEmpty {
                     self?.handlePasteToAfter(asset: asset, assets: pasteAssets)
                 }
             }
             tailGroup.append(pasteAction)
 
-            let deleteAction = UIAction(title: "删除", image: UIImage(systemName: "trash"), attributes: .destructive) { [weak self] _ in
+            let deleteAction = UIAction(title: "删除", image: contextMenuImage("trash"), attributes: .destructive) { [weak self] _ in
                 guard let self = self else { return }
                 self.delegate?.photoGridView(self, didRequestDelete: asset)
             }
@@ -1723,10 +1730,12 @@ extension PhotoGridView {
 
             var rootChildren: [UIMenuElement] = []
             if !anchorGroup.isEmpty {
-                rootChildren.append(UIMenu(title: "锚点", image: UIImage(systemName: "anchor"), options: .displayInline, children: anchorGroup))
+                rootChildren.append(UIMenu(title: "锚点", image: contextMenuImage("anchor"), options: .displayInline, children: anchorGroup))
             }
-            if !hierarchyGroup.isEmpty {
-                rootChildren.append(UIMenu(title: "层级", options: .displayInline, children: hierarchyGroup))
+            if sortPreference == .custom, supportsHierarchyNumbering, currentCollection != nil {
+                rootChildren.append(UIDeferredMenuElement { completion in
+                    completion([self.makeHierarchyContextMenu(asset: asset, assetID: assetID, visibleIndex: visibleIndex)])
+                })
             }
             if !tailGroup.isEmpty {
                 rootChildren.append(UIMenu(title: "其他", options: .displayInline, children: tailGroup))
@@ -1735,9 +1744,158 @@ extension PhotoGridView {
         }
     }
 
+    private func contextMenuPreviousLevel(at visibleIndex: Int, levels: [String: Int]) -> Int {
+        if let cached = contextMenuPreviousLevelCache, visibleIndex < cached.count {
+            return cached[visibleIndex]
+        }
+        guard visibleIndex > 0 else { return 0 }
+        for index in stride(from: visibleIndex - 1, through: 0, by: -1) {
+            let level = levels[visibleAssetIDs[index]] ?? 0
+            if level > 0 {
+                return level
+            }
+        }
+        return 0
+    }
+
+    private func makeHierarchyContextMenu(asset: PHAsset, assetID: String, visibleIndex: Int) -> UIMenu {
+        guard sortPreference == .custom, supportsHierarchyNumbering, let collection = currentCollection else {
+            return UIMenu(title: "层级", children: [])
+        }
+
+        let levels = numberingService.levels(in: collection)
+        let currLv = levels[assetID] ?? 0
+        let prevLv = contextMenuPreviousLevel(at: visibleIndex, levels: levels)
+        var hierarchyGroup: [UIMenuElement] = []
+
+        if currLv == 0 {
+            let setMain = UIAction(title: "设为主级", image: contextMenuImage("list.number")) { [weak self] _ in
+                guard let self else { return }
+                self.numberingService.setLevel(1, for: asset, in: collection)
+                self.refreshParagraphDisplay()
+            }
+            hierarchyGroup.append(setMain)
+
+            if prevLv > 0 {
+                let setSame = UIAction(title: "设为同级", image: contextMenuImage("arrow.right.to.line")) { [weak self] _ in
+                    guard let self else { return }
+                    self.numberingService.setLevel(prevLv, for: asset, in: collection)
+                    self.refreshParagraphDisplay()
+                }
+                let setSub = UIAction(title: "设为子级", image: contextMenuImage("list.bullet.indent")) { [weak self] _ in
+                    guard let self else { return }
+                    self.numberingService.setLevel(prevLv + 1, for: asset, in: collection)
+                    self.refreshParagraphDisplay()
+                }
+                hierarchyGroup.append(setSame)
+                hierarchyGroup.append(setSub)
+            }
+        } else {
+            if currLv > 1 {
+                let promote = UIAction(title: "提升层级", image: contextMenuImage("arrow.left")) { [weak self] _ in
+                    guard let self else { return }
+                    self.numberingService.setLevel(currLv - 1, for: asset, in: collection)
+                    self.refreshParagraphDisplay()
+                }
+                hierarchyGroup.append(promote)
+            }
+
+            if currLv < prevLv + 1 {
+                let demote = UIAction(title: "下降层级", image: contextMenuImage("arrow.right")) { [weak self] _ in
+                    guard let self else { return }
+                    self.numberingService.setLevel(currLv + 1, for: asset, in: collection)
+                    self.refreshParagraphDisplay()
+                }
+                hierarchyGroup.append(demote)
+            }
+
+            if currLv != prevLv && prevLv > 0 {
+                let setSame = UIAction(title: "设为同级", image: contextMenuImage("arrow.right.to.line")) { [weak self] _ in
+                    guard let self else { return }
+                    self.numberingService.setLevel(prevLv, for: asset, in: collection)
+                    self.refreshParagraphDisplay()
+                }
+                hierarchyGroup.append(setSame)
+            }
+
+            let clearAction = UIAction(title: "取消编号", image: contextMenuImage("xmark.circle"), attributes: .destructive) { [weak self] _ in
+                guard let self, let idx = self.visibleAssetIndexByID[assetID] else { return }
+                let latestLevels = self.numberingService.levels(in: collection)
+                self.numberingService.beginBatchUpdates(for: collection)
+                defer { self.numberingService.endBatchUpdates(for: collection) }
+                self.numberingService.clearLevel(for: asset, in: collection)
+                for i in (idx + 1)..<self.visibleAssetIDs.count {
+                    let nextID = self.visibleAssetIDs[i]
+                    let nextLv = latestLevels[nextID] ?? 0
+                    if nextLv == 0 || nextLv <= currLv { break }
+                    if let next = self.assetByID[nextID] {
+                        self.numberingService.clearLevel(for: next, in: collection)
+                    }
+                }
+                self.refreshParagraphDisplay()
+            }
+            hierarchyGroup.append(clearAction)
+        }
+
+        let isCurrentHierarchyCollapsed = numberingService.isCollapsed(asset, in: collection)
+        let hasHierarchyDescendants = numberingService.hasDescendants(asset, in: assets, collection: collection)
+        if hasHierarchyDescendants || isCurrentHierarchyCollapsed {
+            let collapseAction = UIAction(
+                title: isCurrentHierarchyCollapsed ? "展开" : "折叠",
+                image: contextMenuImage(isCurrentHierarchyCollapsed ? "rectangle.expand.vertical" : "rectangle.compress.vertical")
+            ) { [weak self] _ in
+                guard let self else { return }
+                self.numberingService.toggleCollapse(asset, in: collection)
+                self.refreshParagraphDisplay()
+            }
+            hierarchyGroup.append(collapseAction)
+        }
+
+        return UIMenu(title: "层级", options: .displayInline, children: hierarchyGroup)
+    }
+
+    private func prewarmContextMenuHierarchyCacheIfNeeded() {
+        guard sortPreference == .custom, supportsHierarchyNumbering, let collection = currentCollection else { return }
+        let levels = numberingService.levels(in: collection)
+        DispatchQueue.main.async { [weak self] in
+            self?.prewarmContextMenuHierarchyCache(levels: levels)
+        }
+    }
+
+    private func prewarmContextMenuHierarchyCache(levels: [String: Int]) {
+        var result: [Int] = []
+        result.reserveCapacity(visibleAssetIDs.count)
+        var previousLevel = 0
+        for id in visibleAssetIDs {
+            result.append(previousLevel)
+            let level = levels[id] ?? 0
+            if level > 0 {
+                previousLevel = level
+            }
+        }
+        contextMenuPreviousLevelCache = result
+    }
+
+    private func reloadAnchorCells(oldID: String?, newID: String?) {
+        let ids = [oldID, newID].compactMap { $0 }
+        let indexPaths = ids.compactMap { id -> IndexPath? in
+            guard let index = visibleAssetIndexByID[id] else { return nil }
+            return IndexPath(item: index, section: 0)
+        }
+        guard !indexPaths.isEmpty else { return }
+        collectionView.reloadItems(at: Array(Set(indexPaths)))
+    }
+
     func collectionView(_ collectionView: UICollectionView, previewForHighlightingContextMenuWithConfiguration configuration: UIContextMenuConfiguration) -> UITargetedPreview? {
-        guard let identifier = configuration.identifier as? IndexPath,
-              let cell = collectionView.cellForItem(at: identifier) else { return nil }
+        let indexPath: IndexPath?
+        if let identifier = configuration.identifier as? IndexPath {
+            indexPath = identifier
+        } else if let identifier = configuration.identifier as? NSIndexPath {
+            indexPath = identifier as IndexPath
+        } else {
+            indexPath = nil
+        }
+        guard let indexPath, let cell = collectionView.cellForItem(at: indexPath) else { return nil }
 
         return UITargetedPreview(view: cell)
     }
@@ -1801,8 +1959,8 @@ extension PhotoGridView {
     }
 
     enum HierarchyLevelJumpDirection {
-        case parent
-        case child
+        case shallower
+        case deeper
     }
 
     /// 将链式锚点对齐到「选中序号最大」（最近选入）的格；无选中或非选择模式时清空。
@@ -1816,13 +1974,13 @@ extension PhotoGridView {
         guard quickJumpModeIsActive(.selection), selectedAssetCount > 0 else {
             return
         }
-        if selectedAssetCount == visibleAssets.count {
-            newJump = visibleAssets.count > 1 ? visibleAssets.count - 1 : nil
+        if selectedAssetCount == visibleAssetIDs.count {
+            newJump = visibleAssetIDs.count > 1 ? visibleAssetIDs.count - 1 : nil
             return
         }
         guard
             let lastID = selectionState.lastSelectedID,
-            let idx = visibleAssets.firstIndex(where: { $0.localIdentifier == lastID })
+            let idx = visibleAssetIDs.firstIndex(of: lastID)
         else {
             return
         }
@@ -1840,6 +1998,11 @@ extension PhotoGridView {
             quickJumpSetBarButtons(previous: previous, next: next, canPrev: false, canNext: false)
             return
         }
+        if mode == .hierarchyBranch {
+            let availability = hierarchyBranchQuickJumpAvailability()
+            quickJumpSetBarButtons(previous: previous, next: next, canPrev: availability.canPrev, canNext: availability.canNext)
+            return
+        }
         let targets = quickJumpTargetIndices(for: mode)
         guard !targets.isEmpty else {
             quickJumpSetBarButtons(previous: previous, next: next, canPrev: false, canNext: false)
@@ -1852,6 +2015,11 @@ extension PhotoGridView {
 
     func performQuickJump(mode: PhotoGridQuickJumpMode, direction: QuickJumpDirection) {
         guard quickJumpModeIsActive(mode) else { return }
+        if mode == .hierarchyBranch {
+            guard let index = hierarchyBranchQuickJumpDestination(direction: direction) else { return }
+            scrollToQuickJumpIndex(index)
+            return
+        }
         let targets = quickJumpTargetIndices(for: mode)
         guard !targets.isEmpty else { return }
 
@@ -1861,14 +2029,14 @@ extension PhotoGridView {
         scrollToQuickJumpIndex(index)
     }
 
-    func syncHierarchyLevelJumpBarButtons(mode: PhotoGridQuickJumpMode, parent: UIBarButtonItem, child: UIBarButtonItem) {
+    func syncHierarchyLevelJumpBarButtons(mode: PhotoGridQuickJumpMode, shallower: UIBarButtonItem, deeper: UIBarButtonItem) {
         guard quickJumpModeIsActive(mode), mode == .hierarchyBranch else {
-            parent.isEnabled = false
-            child.isEnabled = false
+            shallower.isEnabled = false
+            deeper.isEnabled = false
             return
         }
-        parent.isEnabled = hierarchyLevelJumpDestination(direction: .parent) != nil
-        child.isEnabled = hierarchyLevelJumpDestination(direction: .child) != nil
+        shallower.isEnabled = hierarchyLevelJumpDestination(direction: .shallower) != nil
+        deeper.isEnabled = hierarchyLevelJumpDestination(direction: .deeper) != nil
     }
 
     func performHierarchyLevelJump(mode: PhotoGridQuickJumpMode, direction: HierarchyLevelJumpDirection) {
@@ -1880,6 +2048,12 @@ extension PhotoGridView {
     func resetQuickJumpAnchor() {
         lastQuickNavJumpIndex = nil
         postQuickJumpToolbarRefresh()
+    }
+
+    private func clearQuickJumpAnchorForUserScroll() {
+        guard lastQuickNavJumpIndex != nil else { return }
+        lastQuickNavJumpIndex = nil
+        hierarchyLevelJumpDestinationCache.removeAll()
     }
 
     func syncSelectionQuickNavBarButtons(previous: UIBarButtonItem, next: UIBarButtonItem) {
@@ -1940,32 +2114,45 @@ extension PhotoGridView {
 
     /// 所有连续选中块：每块贡献「头」；块内多于一张时再贡献「尾」。按可见顺序去重排序。
     private func selectionQuickJumpTargetIndices() -> [Int] {
-        if selectedAssetCount == visibleAssets.count {
-            guard visibleAssets.count > 1 else { return visibleAssets.isEmpty ? [] : [0] }
-            return [0, visibleAssets.count - 1]
+        if selectedAssetCount == visibleAssetIDs.count {
+            guard visibleAssetIDs.count > 1 else { return visibleAssetIDs.isEmpty ? [] : [0] }
+            return [0, visibleAssetIDs.count - 1]
         }
         let ids = cachedSelectedIdentifierSet()
-        return contiguousBlockEdgeIndices { ids.contains(visibleAssets[$0].localIdentifier) }
+        return contiguousBlockEdgeIndices { ids.contains(visibleAssetIDs[$0]) }
     }
 
-    /// 层级同级快跳：有编号节点按有效级别分组，只在当前级别内前后跳。
+    /// 层级同级快跳：在当前父节点下，只沿同级兄弟前后跳。
     private func hierarchyBranchQuickJumpTargetIndices() -> [Int] {
         guard let collection = currentCollection else { return [] }
         guard let current = currentHierarchyBranchJumpTarget() else { return [] }
-        let visibleIDs = visibleAssets.map(\.localIdentifier)
-        let levels = numberingService.effectiveLevels(for: assets, in: collection)
-        return PhotoNumberingLogic.hierarchySiblingJumpTargets(
-            visibleAssetIDs: visibleIDs,
-            levels: levels,
-            referenceIndex: current.visibleIndex
+        let levels = hierarchyEffectiveLevels(in: collection)
+        return hierarchySiblingJumpIndex(levels: levels).siblingTargets(referenceIndex: current.visibleIndex)
+    }
+
+    private func hierarchyBranchQuickJumpDestination(direction: QuickJumpDirection) -> Int? {
+        guard let collection = currentCollection else { return nil }
+        guard let current = currentHierarchyBranchJumpTarget() else { return nil }
+        let levels = hierarchyEffectiveLevels(in: collection)
+        return hierarchySiblingJumpIndex(levels: levels).jumpTarget(
+            referenceIndex: current.visibleIndex,
+            direction: direction == .previous ? -1 : 1
+        )
+    }
+
+    private func hierarchyBranchQuickJumpAvailability() -> (canPrev: Bool, canNext: Bool) {
+        (
+            hierarchyBranchQuickJumpDestination(direction: .previous) != nil,
+            hierarchyBranchQuickJumpDestination(direction: .next) != nil
         )
     }
 
     /// 无级快跳：连续 level == 0 的段落贡献头尾，间隔开的段落逐段跳。
     private func unleveledQuickJumpTargetIndices() -> [Int] {
         guard let collection = currentCollection else { return [] }
+        let levels = hierarchyEffectiveLevels(in: collection)
         return contiguousBlockEdgeIndices {
-            numberingService.level(for: visibleAssets[$0], in: collection) == 0
+            (levels[visibleAssetIDs[$0]] ?? 0) == 0
         }
     }
 
@@ -2004,23 +2191,47 @@ extension PhotoGridView {
     private func quickJumpDestination(targets: [Int], direction: QuickJumpDirection, vmin: Int, vmax: Int) -> Int? {
         switch direction {
         case .previous:
-            if let last = lastQuickNavJumpIndex {
-                return targets.last { $0 < last }
-            }
-            return targets.last { $0 < vmax }
+            return previousQuickJumpTarget(in: targets, before: lastQuickNavJumpIndex ?? vmax)
         case .next:
-            if let last = lastQuickNavJumpIndex {
-                return targets.first { $0 > last }
-            }
-            return targets.first { $0 > vmin }
+            return nextQuickJumpTarget(in: targets, after: lastQuickNavJumpIndex ?? vmin)
         }
     }
 
     private func quickJumpAvailability(targets: [Int], vmin: Int, vmax: Int) -> (canPrev: Bool, canNext: Bool) {
-        if let last = lastQuickNavJumpIndex {
-            return (targets.contains { $0 < last }, targets.contains { $0 > last })
+        let anchor = lastQuickNavJumpIndex
+        return (
+            previousQuickJumpTarget(in: targets, before: anchor ?? vmax) != nil,
+            nextQuickJumpTarget(in: targets, after: anchor ?? vmin) != nil
+        )
+    }
+
+    private func nextQuickJumpTarget(in targets: [Int], after value: Int) -> Int? {
+        var low = 0
+        var high = targets.count
+        while low < high {
+            let mid = (low + high) / 2
+            if targets[mid] <= value {
+                low = mid + 1
+            } else {
+                high = mid
+            }
         }
-        return (targets.contains { $0 < vmax }, targets.contains { $0 > vmin })
+        return low < targets.count ? targets[low] : nil
+    }
+
+    private func previousQuickJumpTarget(in targets: [Int], before value: Int) -> Int? {
+        var low = 0
+        var high = targets.count
+        while low < high {
+            let mid = (low + high) / 2
+            if targets[mid] < value {
+                low = mid + 1
+            } else {
+                high = mid
+            }
+        }
+        let index = low - 1
+        return index >= 0 ? targets[index] : nil
     }
 
     private struct HierarchyNodeJumpTarget {
@@ -2029,58 +2240,139 @@ extension PhotoGridView {
         let level: Int
     }
 
+    private struct HierarchyLevelJumpDestinationCacheKey: Hashable {
+        let direction: HierarchyLevelJumpDirection
+        let referenceAssetID: String
+    }
+
+    private enum HierarchyLevelJumpDestinationCacheValue {
+        case none
+        case index(Int)
+
+        var index: Int? {
+            switch self {
+            case .none:
+                return nil
+            case .index(let index):
+                return index
+            }
+        }
+    }
+
     private func currentHierarchyBranchJumpTarget() -> HierarchyNodeJumpTarget? {
         guard let collection = currentCollection else { return nil }
         let targets = hierarchyNodeJumpTargets(in: collection)
         guard !targets.isEmpty else { return nil }
 
         let referenceIndex: Int
-        if let last = lastQuickNavJumpIndex, visibleAssets.indices.contains(last) {
+        if let last = lastQuickNavJumpIndex, visibleAssetIDs.indices.contains(last) {
             referenceIndex = last
         } else {
             let bounds = quickJumpVisibleItemBounds()
             referenceIndex = (bounds.min + bounds.max) / 2
         }
 
-        if let exact = targets.first(where: { $0.visibleIndex == referenceIndex }) {
-            return exact
+        return nearestHierarchyNodeJumpTarget(in: targets, to: referenceIndex)
+    }
+
+    private func nearestHierarchyNodeJumpTarget(
+        in targets: [HierarchyNodeJumpTarget],
+        to referenceIndex: Int
+    ) -> HierarchyNodeJumpTarget? {
+        var low = 0
+        var high = targets.count
+        while low < high {
+            let mid = (low + high) / 2
+            if targets[mid].visibleIndex < referenceIndex {
+                low = mid + 1
+            } else {
+                high = mid
+            }
         }
 
-        return targets.min {
-            abs($0.visibleIndex - referenceIndex) < abs($1.visibleIndex - referenceIndex)
+        let after = low < targets.count ? targets[low] : nil
+        let beforeIndex = low - 1
+        let before = beforeIndex >= 0 ? targets[beforeIndex] : nil
+        switch (before, after) {
+        case (nil, let target?):
+            return target
+        case (let target?, nil):
+            return target
+        case (let lhs?, let rhs?):
+            return abs(lhs.visibleIndex - referenceIndex) <= abs(rhs.visibleIndex - referenceIndex) ? lhs : rhs
+        case (nil, nil):
+            return nil
         }
     }
 
     private func hierarchyLevelJumpDestination(direction: HierarchyLevelJumpDirection) -> Int? {
         guard let collection = currentCollection else { return nil }
         guard let current = currentHierarchyBranchJumpTarget() else { return nil }
+        let cacheKey = HierarchyLevelJumpDestinationCacheKey(
+            direction: direction,
+            referenceAssetID: current.assetID
+        )
+        if let cached = hierarchyLevelJumpDestinationCache[cacheKey] {
+            return cached.index
+        }
         let targets = hierarchyNodeJumpTargets(in: collection)
+        let targetIDs = targets.map(\.assetID)
+        let levels = Dictionary(uniqueKeysWithValues: targets.map { ($0.assetID, $0.level) })
+        let referenceIndex = targets.firstIndex { $0.assetID == current.assetID } ?? 0
+        let destination: Int?
         switch direction {
-        case .parent:
-            return PhotoNumberingLogic.hierarchyLevelJumpTarget(
-                visibleAssetIDs: targets.map(\.assetID),
-                levels: Dictionary(uniqueKeysWithValues: targets.map { ($0.assetID, $0.level) }),
-                referenceIndex: targets.firstIndex { $0.assetID == current.assetID } ?? 0,
+        case .shallower:
+            destination = PhotoNumberingLogic.hierarchyLevelJumpTarget(
+                visibleAssetIDs: targetIDs,
+                levels: levels,
+                referenceIndex: referenceIndex,
                 direction: -1
             ).map { targets[$0].visibleIndex }
-        case .child:
-            return PhotoNumberingLogic.hierarchyLevelJumpTarget(
-                visibleAssetIDs: targets.map(\.assetID),
-                levels: Dictionary(uniqueKeysWithValues: targets.map { ($0.assetID, $0.level) }),
-                referenceIndex: targets.firstIndex { $0.assetID == current.assetID } ?? 0,
+        case .deeper:
+            destination = PhotoNumberingLogic.hierarchyLevelJumpTarget(
+                visibleAssetIDs: targetIDs,
+                levels: levels,
+                referenceIndex: referenceIndex,
                 direction: 1
             ).map { targets[$0].visibleIndex }
         }
+        hierarchyLevelJumpDestinationCache[cacheKey] = destination.map { .index($0) } ?? HierarchyLevelJumpDestinationCacheValue.none
+        return destination
     }
 
     private func hierarchyNodeJumpTargets(in collection: PHAssetCollection) -> [HierarchyNodeJumpTarget] {
-        let levels = numberingService.effectiveLevels(for: assets, in: collection)
-        return visibleAssets.indices.compactMap { index in
-            let asset = visibleAssets[index]
-            let id = asset.localIdentifier
+        if let cached = hierarchyNodeJumpTargetsCache {
+            return cached
+        }
+        let levels = hierarchyEffectiveLevels(in: collection)
+        let targets: [HierarchyNodeJumpTarget] = visibleAssetIDs.indices.compactMap { index in
+            let id = visibleAssetIDs[index]
             guard let level = levels[id], level > 0 else { return nil }
             return HierarchyNodeJumpTarget(visibleIndex: index, assetID: id, level: level)
         }
+        hierarchyNodeJumpTargetsCache = targets
+        return targets
+    }
+
+    private func hierarchyEffectiveLevels(in collection: PHAssetCollection) -> [String: Int] {
+        if let cached = hierarchyEffectiveLevelsCache {
+            return cached
+        }
+        let levels = numberingService.effectiveLevels(for: assets, in: collection)
+        hierarchyEffectiveLevelsCache = levels
+        return levels
+    }
+
+    private func hierarchySiblingJumpIndex(levels: [String: Int]) -> PhotoNumberingLogic.HierarchySiblingJumpIndex {
+        if let cached = hierarchySiblingJumpIndexCache {
+            return cached
+        }
+        let index = PhotoNumberingLogic.HierarchySiblingJumpIndex(
+            visibleAssetIDs: visibleAssetIDs,
+            levels: levels
+        )
+        hierarchySiblingJumpIndexCache = index
+        return index
     }
 
     private func scrollToQuickJumpIndex(_ index: Int) {
@@ -2099,9 +2391,25 @@ extension PhotoGridView {
     private func invalidateQuickJumpTargetCache(for mode: PhotoGridQuickJumpMode? = nil) {
         if let mode {
             quickJumpTargetCache[mode] = nil
+            if mode == .hierarchyBranch {
+                invalidateHierarchyQuickJumpCache()
+            }
         } else {
             quickJumpTargetCache.removeAll()
+            invalidateHierarchyQuickJumpCache()
         }
+    }
+
+    private func invalidateHierarchyQuickJumpCache() {
+        hierarchyEffectiveLevelsCache = nil
+        hierarchyNodeJumpTargetsCache = nil
+        hierarchySiblingJumpIndexCache = nil
+        hierarchyLevelJumpDestinationCache.removeAll()
+        invalidateContextMenuHierarchyCache()
+    }
+
+    private func invalidateContextMenuHierarchyCache() {
+        contextMenuPreviousLevelCache = nil
     }
 
     private func postQuickJumpToolbarRefresh() {
@@ -2142,15 +2450,15 @@ extension PhotoGridView {
         if let attributes = collectionView.collectionViewLayout.layoutAttributesForElements(in: visibleRect) {
             for attribute in attributes where attribute.representedElementCategory == .cell {
                 let indexPath = attribute.indexPath
-                guard indexPath.section == 0, indexPath.item < visibleAssets.count else { continue }
-                ids.insert(visibleAssets[indexPath.item].localIdentifier)
+                guard indexPath.section == 0, indexPath.item < visibleAssetIDs.count else { continue }
+                ids.insert(visibleAssetIDs[indexPath.item])
             }
         }
 
         if ids.isEmpty {
             for indexPath in collectionView.indexPathsForVisibleItems {
-                guard indexPath.section == 0, indexPath.item < visibleAssets.count else { continue }
-                ids.insert(visibleAssets[indexPath.item].localIdentifier)
+                guard indexPath.section == 0, indexPath.item < visibleAssetIDs.count else { continue }
+                ids.insert(visibleAssetIDs[indexPath.item])
             }
         }
 
@@ -2162,7 +2470,7 @@ extension PhotoGridView {
 
     /// `indexPathsForVisibleItems` 尚未就绪时，按 contentOffset 与格网估算视口内项
     private func approximateVisibleAssetIDsOnScreen() -> Set<String> {
-        guard !visibleAssets.isEmpty,
+        guard !visibleAssetIDs.isEmpty,
               let layout = collectionView.collectionViewLayout as? UICollectionViewFlowLayout else { return [] }
         let rowStride = layout.itemSize.height + layout.minimumLineSpacing
         let colStride = layout.itemSize.width + layout.minimumInteritemSpacing
@@ -2182,8 +2490,8 @@ extension PhotoGridView {
         for row in firstRow...lastRow {
             for column in 0..<columns {
                 let index = row * columns + column
-                guard index < visibleAssets.count else { continue }
-                ids.insert(visibleAssets[index].localIdentifier)
+                guard index < visibleAssetIDs.count else { continue }
+                ids.insert(visibleAssetIDs[index])
             }
         }
         return ids
@@ -2281,11 +2589,11 @@ extension PhotoGridView {
     private func recenterVisualAnchor(preferredAssetID: String) {
         DispatchQueue.main.async { [weak self] in
             guard let self, let collection = self.currentCollection else { return }
-            let visibleIDs = Set(self.visibleAssets.map(\.localIdentifier))
+            let visibleIDs = Set(self.visibleAssetIDs)
             let targetID: String
             if visibleIDs.contains(preferredAssetID) {
                 targetID = preferredAssetID
-            } else if let preferred = self.assets.first(where: { $0.localIdentifier == preferredAssetID }),
+            } else if let preferred = self.assetByID[preferredAssetID],
                       let ancestor = self.numberingService.nearestVisibleNumberedAncestorAsset(
                           of: preferred,
                           visibleAssetIDs: visibleIDs,
@@ -2298,7 +2606,7 @@ extension PhotoGridView {
             } else {
                 return
             }
-            guard let index = self.visibleAssets.firstIndex(where: { $0.localIdentifier == targetID }) else { return }
+            guard let index = self.visibleAssetIDs.firstIndex(of: targetID) else { return }
             self.collectionView.layoutIfNeeded()
             self.collectionView.scrollToItem(
                 at: IndexPath(item: index, section: 0),

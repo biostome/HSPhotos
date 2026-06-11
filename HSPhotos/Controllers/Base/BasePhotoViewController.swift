@@ -122,7 +122,7 @@ class BasePhotoViewController: UIViewController {
         return button
     }()
 
-    /// 底部工具条：层级快跳时回到上一级节点。
+    /// 底部工具条：层级快跳时回到父级节点。
     internal lazy var quickJumpParentLevelBarButton: UIBarButtonItem = {
         let button = UIBarButtonItem(
             image: UIImage(systemName: "chevron.left"),
@@ -130,11 +130,11 @@ class BasePhotoViewController: UIViewController {
             target: self,
             action: #selector(didTapQuickJumpParentLevel)
         )
-        button.accessibilityLabel = "跳到上一级"
+        button.accessibilityLabel = "回到上一级"
         return button
     }()
 
-    /// 底部工具条：层级快跳时进入下一级节点。
+    /// 底部工具条：层级快跳时进入子级节点。
     internal lazy var quickJumpChildLevelBarButton: UIBarButtonItem = {
         let button = UIBarButtonItem(
             image: UIImage(systemName: "chevron.right"),
@@ -142,7 +142,7 @@ class BasePhotoViewController: UIViewController {
             target: self,
             action: #selector(didTapQuickJumpChildLevel)
         )
-        button.accessibilityLabel = "跳到下一级"
+        button.accessibilityLabel = "进入下一级"
         return button
     }()
 
@@ -214,23 +214,34 @@ class BasePhotoViewController: UIViewController {
     }()
 
     internal let collection: PHAssetCollection
-    internal var sortPreference: PhotoSortPreference = .custom
+    private let photoStore = PhotoCollectionStore()
+
+    internal var sortPreference: PhotoSortPreference {
+        get { photoStore.sortPreference }
+        set {
+            guard newValue != photoStore.sortPreference else { return }
+            let snapshot = photoStore.replaceSortPreference(newValue)
+            if isViewLoaded {
+                render(snapshot)
+            }
+        }
+    }
 
     /// 是否支持层级编号功能。首页（图库）不支持，相册内支持。
     internal var supportsHierarchyNumbering: Bool { true }
 
     /// 全量照片（排序后的原始数据），始终保持完整
-    internal var assets: [PHAsset] = [] {
-        didSet {
-            applyTagFilter()
-        }
+    internal var assets: [PHAsset] {
+        get { photoStore.assets }
+        set { render(photoStore.replaceAssets(newValue)) }
     }
 
     /// 标签过滤状态，变化时自动重新过滤并刷新 gridView
-    internal var filterState: TagFilterState = TagFilterState() {
-        didSet {
-            guard filterState != oldValue else { return }
-            applyTagFilter()
+    internal var filterState: TagFilterState {
+        get { photoStore.filterState }
+        set {
+            guard newValue != photoStore.filterState else { return }
+            render(photoStore.replaceFilterState(newValue))
             syncSearchTokens()
         }
     }
@@ -310,12 +321,12 @@ class BasePhotoViewController: UIViewController {
     }
 
     @objc private func didTapQuickJumpParentLevel() {
-        gridView.performHierarchyLevelJump(mode: quickJumpMode, direction: .parent)
+        gridView.performHierarchyLevelJump(mode: quickJumpMode, direction: .shallower)
         syncQuickJumpBarButtonsEnabled()
     }
 
     @objc private func didTapQuickJumpChildLevel() {
-        gridView.performHierarchyLevelJump(mode: quickJumpMode, direction: .child)
+        gridView.performHierarchyLevelJump(mode: quickJumpMode, direction: .deeper)
         syncQuickJumpBarButtonsEnabled()
     }
 
@@ -459,8 +470,8 @@ class BasePhotoViewController: UIViewController {
         )
         gridView.syncHierarchyLevelJumpBarButtons(
             mode: quickJumpMode,
-            parent: quickJumpParentLevelBarButton,
-            child: quickJumpChildLevelBarButton
+            shallower: quickJumpParentLevelBarButton,
+            deeper: quickJumpChildLevelBarButton
         )
         syncHierarchyToolbarButtonsEnabled()
     }
@@ -631,17 +642,19 @@ class BasePhotoViewController: UIViewController {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
 
-            let assets = PHAsset.fetchAssets(in: collection, options: options)
+            let result = PHAsset.fetchAssets(in: collection, options: options)
             var newAssets: [PHAsset] = []
-            assets.enumerateObjects { asset, _, _ in
+            newAssets.reserveCapacity(result.count)
+            result.enumerateObjects { asset, _, _ in
                 newAssets.append(asset)
             }
 
-            let validAssetIDs = Set(newAssets.map { $0.localIdentifier })
+            let validAssetIDs = Set(newAssets.map(\.localIdentifier))
             PhotoNumberingService.shared.cleanupInvalidNodes(validAssetIDs: validAssetIDs, for: collection)
 
             DispatchQueue.main.async {
-                self.assets = newAssets
+                let snapshot = self.photoStore.replaceAssets(newAssets)
+                self.render(snapshot)
                 self.gridView.scheduleHierarchyToolbarRefresh()
             }
         }
@@ -658,14 +671,16 @@ class BasePhotoViewController: UIViewController {
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
             guard let self = self else { return }
 
-            let assets = PHAsset.fetchAssets(in: collection, options: options)
+            let result = PHAsset.fetchAssets(in: collection, options: options)
             var newAssets: [PHAsset] = []
-            assets.enumerateObjects { asset, _, _ in
+            newAssets.reserveCapacity(result.count)
+            result.enumerateObjects { asset, _, _ in
                 newAssets.append(asset)
             }
 
             DispatchQueue.main.async {
-                self.assets = newAssets
+                let snapshot = self.photoStore.replaceAssets(newAssets)
+                self.render(snapshot)
                 self.gridView.sortPreference = preference
                 preference.set(preference: self.collection)
                 
@@ -719,8 +734,8 @@ class BasePhotoViewController: UIViewController {
     }
 
     internal func onCopy() {
-        gridView.materializeSelectionIfNeeded()
-        AssetPasteboard.copyAssets(gridView.selectedAssets) { [weak self] success, message in
+        let selectedAssets = selectedAssetsFromStore()
+        AssetPasteboard.copyAssets(selectedAssets) { [weak self] success, message in
             guard let self = self else { return }
             if !success {
                 let alertMessage = message ?? "无法复制到剪切板"
@@ -730,8 +745,7 @@ class BasePhotoViewController: UIViewController {
     }
 
     internal func onDuplicate() {
-        gridView.materializeSelectionIfNeeded()
-        let selectedAssets = gridView.selectedAssets
+        let selectedAssets = selectedAssetsFromStore()
         guard !selectedAssets.isEmpty else {
             showAlert(title: "复制失败", message: "请先选择要复制的照片")
             return
@@ -774,8 +788,7 @@ class BasePhotoViewController: UIViewController {
     }
 
     internal func onDelete() {
-        gridView.materializeSelectionIfNeeded()
-        let selectedAssets = gridView.selectedAssets
+        let selectedAssets = selectedAssetsFromStore()
         guard !selectedAssets.isEmpty else {
             showAlert(title: "删除失败", message: "请先选择要删除的照片")
             return
@@ -785,8 +798,7 @@ class BasePhotoViewController: UIViewController {
     }
 
     internal func onMove() {
-        gridView.materializeSelectionIfNeeded()
-        let selectedAssets = gridView.selectedAssets
+        let selectedAssets = selectedAssetsFromStore()
         guard !selectedAssets.isEmpty else {
             showAlert(title: "移动失败", message: "请先选择要移动的照片")
             return
@@ -1033,10 +1045,10 @@ class BasePhotoViewController: UIViewController {
                 toolbarItems = [
                     flexLeading,
                     quickJumpPreviousBarButton,
-                    quickJumpParentLevelBarButton,
-                    quickJumpModeBarButton,
-                    quickJumpChildLevelBarButton,
                     quickJumpNextBarButton,
+                    quickJumpModeBarButton,
+                    quickJumpParentLevelBarButton,
+                    quickJumpChildLevelBarButton,
                     hierarchyToolbarMenuButton,
                     flexTrailing
                 ]
@@ -1058,8 +1070,8 @@ class BasePhotoViewController: UIViewController {
             quickJumpModeBarButton
         ]
         if showsHierarchy {
-            items.insert(quickJumpParentLevelBarButton, at: 2)
-            items.insert(quickJumpChildLevelBarButton, at: 4)
+            items.append(quickJumpParentLevelBarButton)
+            items.append(quickJumpChildLevelBarButton)
             hierarchyToolbarMenuButton.menu = createHierarchyToolbarMenu()
             items.append(hierarchyToolbarMenuButton)
         }
@@ -1091,7 +1103,7 @@ class BasePhotoViewController: UIViewController {
 
     /// 检查是否所有可见资产都已被选中
     internal func isAllAssetsSelected() -> Bool {
-        gridView.selectedAssetCount == gridView.visibleAssetCount && gridView.visibleAssetCount > 0
+        gridView.selectedAssetIDSet.count == gridView.visibleAssetCount && gridView.visibleAssetCount > 0
     }
 
     // MARK: - Undo Manager Helper Methods
@@ -1288,8 +1300,7 @@ class BasePhotoViewController: UIViewController {
     }
 
     internal func onAddToAlbumSelectedAssets() {
-        gridView.materializeSelectionIfNeeded()
-        let selectedAssets = gridView.selectedAssets
+        let selectedAssets = selectedAssetsFromStore()
         guard !selectedAssets.isEmpty else {
             showAlert(title: "添加失败", message: "请先选择要添加的照片")
             return
@@ -1298,10 +1309,9 @@ class BasePhotoViewController: UIViewController {
     }
 
     internal func onTagSelectedAssets() {
-        gridView.materializeSelectionIfNeeded()
-        let selectedAssets = gridView.selectedAssets
-        guard !selectedAssets.isEmpty else { return }
-        showTagAssignPicker(for: selectedAssets.map { $0.localIdentifier })
+        let selectedAssetIDs = gridView.selectedAssetIDs
+        guard !selectedAssetIDs.isEmpty else { return }
+        showTagAssignPicker(for: selectedAssetIDs)
     }
 
     /// 弹出标签分配面板（为多张照片打标签）
@@ -1468,10 +1478,13 @@ class BasePhotoViewController: UIViewController {
     }
 
     internal func orderedSelectedAssets() -> [PHAsset] {
-        gridView.materializeSelectionIfNeeded()
-        let selectedIDs = gridView.selectedMembershipIdentifiers
+        let selectedIDs = gridView.selectedAssetIDSet
         guard !selectedIDs.isEmpty else { return [] }
-        return assets.filter { selectedIDs.contains($0.localIdentifier) }
+        return photoStore.orderedAssets(for: selectedIDs)
+    }
+
+    internal func selectedAssetsFromStore() -> [PHAsset] {
+        photoStore.assets(for: gridView.selectedAssetIDs)
     }
 
     internal func syncSuccess(message: String) {
@@ -1517,12 +1530,11 @@ class BasePhotoViewController: UIViewController {
 
     /// 根据 filterState 过滤 assets 并更新 gridView
     @objc internal func applyTagFilter() {
-        if filterState.isActive {
-            let matchedIDs = PhotoTagService.shared.filteredIdentifiers(by: filterState)
-            gridView.assets = assets.filter { matchedIDs.contains($0.localIdentifier) }
-        } else {
-            gridView.assets = assets
-        }
+        render(photoStore.replaceFilterState(filterState))
+    }
+
+    private func render(_ snapshot: PhotoCollectionSnapshot) {
+        gridView.apply(snapshot: snapshot)
         updateTagFilterButtonAppearance()
         syncSearchBarVisibility()
     }
@@ -1530,7 +1542,7 @@ class BasePhotoViewController: UIViewController {
     /// 弹出标签筛选面板
     @objc internal func didTapTagFilter() {
         let panel = TagFilterPanelViewController(currentState: filterState)
-        panel.candidateIdentifiers = assets.map { $0.localIdentifier }
+        panel.candidateIdentifiers = photoStore.assetIDs
         panel.delegate = self
         if let sheet = panel.sheetPresentationController {
             sheet.detents = [.medium(), .large()]
@@ -1798,8 +1810,9 @@ extension BasePhotoViewController: SearchBarViewDelegate {
     }
 
     func searchBarViewDidRemoveToken(_ searchBarView: SearchBarView, tagID: String) {
-        filterState.selectedTagIDs.remove(tagID)
-        // filterState didSet 会触发 applyTagFilter + syncSearchTokens
+        var nextState = filterState
+        nextState.selectedTagIDs.remove(tagID)
+        filterState = nextState
     }
 
     func searchBarViewDidTapFilter(_ searchBarView: SearchBarView) {
