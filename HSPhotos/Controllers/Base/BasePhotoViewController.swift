@@ -980,7 +980,7 @@ class BasePhotoViewController: UIViewController {
             // 开启全屏侧滑返回
             navigationController?.interactivePopGestureRecognizer?.isEnabled = true
         }
-        updateNavigationBar()
+        // updateNavigationBar() is already called via selectionMode didSet observer
     }
 
     /// 切换范围选择开关
@@ -997,7 +997,7 @@ class BasePhotoViewController: UIViewController {
             // 关闭范围选择
             rangeSwitchItem.image = UIImage(systemName: "checkmark.seal")
             rangeSwitchItem.tag = 0
-            if selectionMode == .range {
+            if selectionMode == .range && !forceOff {
                 setSelectionMode(.multiple)
             }
         }

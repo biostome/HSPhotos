@@ -152,6 +152,7 @@ class PhotoGridView: UIView {
         invalidateDateTextCache()
         if idsChanged {
             hierarchyCache.removeAll()
+            invalidateHierarchyEnablementCache()
         }
         updateVisibleAssets()
         // 删除节点后存储层级已校正，但可见序列可能不变（例如删的是折叠分支内未展示的项），须强制刷新编号 overlay
@@ -301,6 +302,8 @@ class PhotoGridView: UIView {
     private var hierarchyNodeJumpTargetsCache: [HierarchyNodeJumpTarget]?
     private var hierarchySiblingJumpIndexCache: PhotoNumberingLogic.HierarchySiblingJumpIndex?
     private var hierarchyLevelJumpDestinationCache: [HierarchyLevelJumpDestinationCacheKey: HierarchyLevelJumpDestinationCacheValue] = [:]
+private var cachedCanCollapseAll: Bool?
+private var cachedCanExpandAll: Bool?
     private var contextMenuPreviousLevelCache: [Int]?
     private static var didPrewarmContextMenuResources = false
     private static var contextMenuSymbolCache: [String: UIImage] = [:]
@@ -1208,6 +1211,7 @@ class PhotoGridView: UIView {
             let isCollapsed = collapsed[id] ?? false
             hierarchyCache[id] = (text: text, isCollapsed: isCollapsed)
         }
+        invalidateHierarchyEnablementCache()
     }
 
     /// 仅折叠状态变化时同步角标，编号字符串不变
@@ -2412,6 +2416,16 @@ extension PhotoGridView {
         contextMenuPreviousLevelCache = nil
     }
 
+    private func invalidateHierarchyEnablementCache() {
+        cachedCanCollapseAll = nil
+        cachedCanExpandAll = nil
+    }
+
+    private func validateHierarchyEnablementCache(canCollapseAll: Bool, canExpandAll: Bool) {
+        cachedCanCollapseAll = canCollapseAll
+        cachedCanExpandAll = canExpandAll
+    }
+
     private func postQuickJumpToolbarRefresh() {
         onQuickJumpToolbarRefresh?()
         onSelectionQuickNavToolbarRefresh?()
@@ -2525,12 +2539,18 @@ extension PhotoGridView {
                 expand: true, visibleAssetIDs: selectedIDs, orderedAssets: assets, in: collection
             )
         } else {
-            collapse.isEnabled = numberingService.canApplyAllItemsHierarchyStep(
-                expand: false, orderedAssets: assets, in: collection
-            )
-            expand.isEnabled = numberingService.canApplyAllItemsHierarchyStep(
-                expand: true, orderedAssets: assets, in: collection
-            )
+            if let canCollapseAll = cachedCanCollapseAll, let canExpandAll = cachedCanExpandAll {
+                collapse.isEnabled = canCollapseAll
+                expand.isEnabled = canExpandAll
+            } else {
+                collapse.isEnabled = numberingService.canApplyAllItemsHierarchyStep(
+                    expand: false, orderedAssets: assets, in: collection
+                )
+                expand.isEnabled = numberingService.canApplyAllItemsHierarchyStep(
+                    expand: true, orderedAssets: assets, in: collection
+                )
+                validateHierarchyEnablementCache(canCollapseAll: collapse.isEnabled, canExpandAll: expand.isEnabled)
+            }
         }
     }
 
