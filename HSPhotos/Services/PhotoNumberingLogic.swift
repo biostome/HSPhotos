@@ -192,16 +192,28 @@ enum PhotoNumberingLogic {
         collapsed: [String: Bool],
         includeGaps: Bool
     ) -> [String] {
+        let n = orderedAssetIDs.count
         var visible: [String] = []
+        visible.reserveCapacity(n)
         var collapsingLevel: Int?
+
+        // Precompute next numbered level to avoid O(n²) firstNumberedLevel scans
+        var nextNumberedLv: [Int?] = Array(repeating: nil, count: n)
+        if includeGaps {
+            var nextLv: Int?
+            for i in stride(from: n - 1, through: 0, by: -1) {
+                let lv = levels[orderedAssetIDs[i]] ?? 0
+                if lv > 0 { nextLv = lv }
+                nextNumberedLv[i] = nextLv
+            }
+        }
 
         for (index, id) in orderedAssetIDs.enumerated() {
             let lv = levels[id] ?? 0
 
             if lv == 0 {
                 if let L = collapsingLevel, includeGaps,
-                   let nextLv = firstNumberedLevel(from: index + 1, orderedAssetIDs: orderedAssetIDs, levels: levels),
-                   nextLv > L {
+                   let nextLv = nextNumberedLv[index], nextLv > L {
                     continue
                 }
                 collapsingLevel = nil
