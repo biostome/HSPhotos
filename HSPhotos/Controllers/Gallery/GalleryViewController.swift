@@ -134,32 +134,29 @@ class GalleryViewController: BasePhotoViewController {
         // 打开图片浏览器
         if selectionMode == .none {
             if let index = self.assets.firstIndex(of: asset) {
-                // 获取选中图片的帧和图片
+                // 获取选中图片的帧
                 var sourceFrame: CGRect = .zero
-                var sourceImage: UIImage? = nil
                 
                 // 尝试获取选中的cell的frame
                 if let cellFrame = photoGridView.getCellFrame(for: asset) {
                     sourceFrame = view.convert(cellFrame, from: photoGridView)
                 }
                 
-                // 尝试获取缩略图
+                // 异步获取缩略图，避免同步请求阻塞主线程
                 let options = PHImageRequestOptions()
-                options.isSynchronous = true
                 options.deliveryMode = .highQualityFormat
                 options.isNetworkAccessAllowed = true
-                
-                PHImageManager.default().requestImage(for: asset, targetSize: CGSize(width: 300, height: 300), contentMode: .aspectFill, options: options) { (image, _) in
-                    sourceImage = image
+
+                PHImageManager.default().requestImage(for: asset, targetSize: CGSize(width: 300, height: 300), contentMode: .aspectFill, options: options) { [weak self] (image, _) in
+                    guard let self else { return }
+                    let nav = GalleryViewerViewController.makePresentingNavigationContainer(
+                        assets: self.assets,
+                        initialIndex: index,
+                        sourceFrame: sourceFrame,
+                        sourceImage: image
+                    )
+                    self.present(nav, animated: true)
                 }
-                
-                let nav = GalleryViewerViewController.makePresentingNavigationContainer(
-                    assets: self.assets,
-                    initialIndex: index,
-                    sourceFrame: sourceFrame,
-                    sourceImage: sourceImage
-                )
-                present(nav, animated: true)
             }
         }
     }

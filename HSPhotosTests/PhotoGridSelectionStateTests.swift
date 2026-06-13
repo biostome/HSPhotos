@@ -26,12 +26,14 @@ struct PhotoGridSelectionStateTests {
         #expect(s.orderedIDs == ["a", "b"])
     }
 
-    @Test func toggle_removeLast_doesNotReturnUpdatedOthers() {
+    /// M1 优化后 toggle 移除元素时无条件返回全部剩余 ID（避免 O(k) 字典查找判断 rank 是否变化）。
+    /// 移除非末尾项时调用方可能多刷新少量 cell，换取热路径零字典查找。
+    @Test func toggle_removeLast_returnsAllRemaining() {
         var s = PhotoGridSelectionState()
         _ = s.toggle(id: "a")
         _ = s.toggle(id: "b")
         let updated = s.toggle(id: "b")
-        #expect(updated == [])
+        #expect(updated == ["a"])  // M1: 返回全部剩余 ID，不做 rank 变化过滤
         #expect(s.contains("b") == false)
         #expect(s.rank(for: "a") == 1)
     }
@@ -48,13 +50,14 @@ struct PhotoGridSelectionStateTests {
         #expect(s.orderedIDs == ["b", "c"])
     }
 
-    @Test func toggle_removeMiddle_renumbersOnlyAfter() {
+    /// M1 优化后 toggle 移除元素时无条件返回全部剩余 ID，不做 rank 变化过滤。
+    @Test func toggle_removeMiddle_returnsAllRemaining() {
         var s = PhotoGridSelectionState()
         _ = s.toggle(id: "a")
         _ = s.toggle(id: "b")
         _ = s.toggle(id: "c")
         let updated = s.toggle(id: "b")
-        #expect(Set(updated) == Set(["c"]))
+        #expect(Set(updated) == Set(["a", "c"]))  // M1: 返回全部剩余 ID
         #expect(s.rank(for: "a") == 1)
         #expect(s.rank(for: "c") == 2)
     }

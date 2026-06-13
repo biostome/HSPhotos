@@ -652,9 +652,25 @@ private var cachedCanExpandAll: Bool?
                 guard let lastIndexPath = panLastIndexPath else {
                     let targetSelectionState = !panInitialSelectionState
                     let isCurrentlySelected = isAssetSelected(currentAsset)
-                    let rankChanged: Set<String> = isCurrentlySelected != targetSelectionState
-                        ? Set(toggle(photo: currentAsset))
-                        : []
+                    guard isCurrentlySelected != targetSelectionState else {
+                        panLastIndexPath = currentIndexPath
+                        delegate?.photoGridView(self, didSelectedItems: selectedAssetsForDelegateNotification)
+                        return
+                    }
+                    expandAllVisibleSelectionIfNeeded()
+                    let id = currentAsset.localIdentifier
+                    var rankChanged = Set<String>()
+                    if targetSelectionState {
+                        selectionState.insertIfAbsent(id: id)
+                        selectedAssetByID[id] = currentAsset
+                    } else {
+                        rankChanged = Set(selectionState.removeMultiple(ids: [id]))
+                        selectedAssetByID.removeValue(forKey: id)
+                        if anchorPhoto?.localIdentifier == id {
+                            anchorPhoto = nil
+                        }
+                    }
+                    invalidateSelectedIdentifierSetCache()
                     let toReload = indexPathsMergingExplicitAndVisibleRankChanges(
                         rankChangedIDs: rankChanged,
                         explicit: [currentIndexPath]
@@ -672,7 +688,8 @@ private var cachedCanExpandAll: Bool?
                 let fullRangeStart = min(startVisibleIndex, currentVisibleIndex)
                 let fullRangeEnd = max(startVisibleIndex, currentVisibleIndex)
 
-                var rankChangedAccumulator = Set<String>()
+                var assetsToSelect: [(asset: PHAsset, index: Int)] = []
+                var idsToDeselect = Set<String>()
                 var indexPathsToUpdate: [IndexPath] = []
                 for i in rangeStart...rangeEnd {
                     guard i < visibleAssets.count else { continue }
@@ -681,7 +698,11 @@ private var cachedCanExpandAll: Bool?
                     let isInFullRange = i >= fullRangeStart && i <= fullRangeEnd
                     let expectedState = isInFullRange ? targetSelectionState : panInitialSelectionState
                     if isCurrentlySelected != expectedState {
-                        rankChangedAccumulator.formUnion(toggle(photo: asset))
+                        if expectedState {
+                            assetsToSelect.append((asset, i))
+                        } else {
+                            idsToDeselect.insert(asset.localIdentifier)
+                        }
                         indexPathsToUpdate.append(IndexPath(item: i, section: 0))
                     }
                 }
@@ -690,6 +711,19 @@ private var cachedCanExpandAll: Bool?
                 panLastIndexPath = currentIndexPath
 
                 if !indexPathsToUpdate.isEmpty {
+                    expandAllVisibleSelectionIfNeeded()
+                    for (asset, _) in assetsToSelect {
+                        selectionState.insertIfAbsent(id: asset.localIdentifier)
+                        selectedAssetByID[asset.localIdentifier] = asset
+                    }
+                    for id in idsToDeselect {
+                        selectedAssetByID.removeValue(forKey: id)
+                        if anchorPhoto?.localIdentifier == id {
+                            anchorPhoto = nil
+                        }
+                    }
+                    let rankChangedAccumulator = Set(selectionState.removeMultiple(ids: idsToDeselect))
+                    invalidateSelectedIdentifierSetCache()
                     let toReload = indexPathsMergingExplicitAndVisibleRankChanges(
                         rankChangedIDs: rankChangedAccumulator,
                         explicit: indexPathsToUpdate
@@ -1709,7 +1743,8 @@ extension PhotoGridView {
         let visibleIndex = indexPath.item
         let isCurrentAnchor = anchorPhoto?.localIdentifier == assetID
 
-        return UIContextMenuConfiguration(identifier: indexPath as NSIndexPath, previewProvider: nil) { [self] _ in
+        return UIContextMenuConfiguration(identifier: indexPath as NSIndexPath, previewProvider: nil) { [weak self] _ in
+            guard let self else { return UIMenu(title: "", children: []) }
             var anchorGroup: [UIMenuElement] = []
             var tailGroup: [UIMenuElement] = []
 

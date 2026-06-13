@@ -65,15 +65,11 @@ struct PhotoGridSelectionState: Equatable, Sendable {
         if rankByID[id] != nil {
             rankByID.removeValue(forKey: id)
             orderedIDCache.removeAll { $0 == id }
-            var updatedIDs: [String] = []
             for (index, other) in orderedIDCache.enumerated() {
-                let newRank = index + 1
-                guard rankByID[other] != newRank else { continue }
-                rankByID[other] = newRank
-                updatedIDs.append(other)
+                rankByID[other] = index + 1
             }
-            nextRank = rankByID.count + 1
-            return updatedIDs
+            nextRank = orderedIDCache.count + 1
+            return Array(orderedIDCache)
         } else {
             rankByID[id] = nextRank
             orderedIDCache.append(id)
@@ -105,16 +101,10 @@ struct PhotoGridSelectionState: Equatable, Sendable {
             rankByID.removeValue(forKey: id)
         }
         orderedIDCache.removeAll { ids.contains($0) }
-        var changed: [String] = []
-        var newRank = 1
-        for id in orderedIDCache {
-            if rankByID[id] != newRank {
-                changed.append(id)
-                rankByID[id] = newRank
-            }
-            newRank += 1
+        for (index, id) in orderedIDCache.enumerated() {
+            rankByID[id] = index + 1
         }
-        nextRank = rankByID.count + 1
-        return changed
+        nextRank = orderedIDCache.count + 1
+        return Array(orderedIDCache)
     }
 }
