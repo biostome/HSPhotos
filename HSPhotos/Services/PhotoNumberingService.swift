@@ -312,13 +312,23 @@ final class PhotoNumberingService {
         let orderedIDs = orderedAssets.map(\.localIdentifier)
         let levels = levelsCache[cacheKey(collection)] ?? [:]
         let effective = PhotoNumberingLogic.effectiveLevels(orderedAssetIDs: orderedIDs, levels: levels)
-        guard let ancestorID = PhotoNumberingLogic.nearestVisibleNumberedAncestor(
-            of: asset.localIdentifier,
+
+        // 建立 ID 到 索引 的映射以進行 O(1) 查找
+        var idToIndex: [String: Int] = [:]
+        for (index, id) in orderedIDs.enumerated() {
+            idToIndex[id] = index
+        }
+
+        guard let index = idToIndex[asset.localIdentifier] else { return nil }
+        guard let ancestorID = PhotoNumberingLogic.nearestVisibleNumberedAncestorAtIndex(
+            index: index,
             visibleIDs: visibleAssetIDs,
             orderedAssetIDs: orderedIDs,
             effectiveLevels: effective
         ) else { return nil }
-        return orderedAssets.first { $0.localIdentifier == ancestorID }
+        guard let ancestorIndex = idToIndex[ancestorID] else { return nil }
+
+        return orderedAssets[ancestorIndex]
     }
 
     /// 根据折叠状态返回可见照片

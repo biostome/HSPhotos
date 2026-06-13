@@ -2577,6 +2577,9 @@ extension PhotoGridView {
         numberingService.endBatchUpdates(for: collection)
         guard changed else { return false }
 
+        // 层级折叠/展开状态已变更，使缓存的按钮可用状态失效以便工具栏刷新时重新计算
+        invalidateHierarchyEnablementCache()
+
         if isHierarchyShortcutVisibleAssetsAnimating {
             hierarchyShortcutNeedsVisibleRefresh = true
             onHierarchyToolbarRefresh?()

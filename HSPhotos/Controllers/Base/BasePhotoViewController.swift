@@ -361,8 +361,11 @@ class BasePhotoViewController: UIViewController {
                 expand: hierarchyExpandToolbarButton
             )
         } else {
-            hierarchyCollapseToolbarButton.isEnabled = true
-            hierarchyExpandToolbarButton.isEnabled = true
+            // 选择模式：同步按钮状态以反映层级操作的可用性
+            gridView.syncHierarchyToolbarButtons(
+                collapse: hierarchyCollapseToolbarButton,
+                expand: hierarchyExpandToolbarButton
+            )
         }
 
         let collapseAction = UIAction(
@@ -450,8 +453,11 @@ class BasePhotoViewController: UIViewController {
     internal func syncHierarchyToolbarButtonsEnabled() {
         guard showsHierarchyCollapseToolbar else { return }
         if selectionMode != .none {
-            hierarchyCollapseToolbarButton.isEnabled = true
-            hierarchyExpandToolbarButton.isEnabled = true
+            // 选择模式：同步按钮状态以反映层级操作的可用性
+            gridView.syncHierarchyToolbarButtons(
+                collapse: hierarchyCollapseToolbarButton,
+                expand: hierarchyExpandToolbarButton
+            )
             hierarchyToolbarMenuButton.menu = createHierarchyToolbarMenu()
             return
         }

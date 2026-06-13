@@ -175,21 +175,13 @@ enum PhotoNumberingLogic {
             return false
         }
 
-        var i = idx + 1
-        var foundHideable = false
-        while i < orderedAssetIDs.count {
+        for i in (idx + 1)..<orderedAssetIDs.count {
             let lv = levels[orderedAssetIDs[i]] ?? 0
-            if lv > 0 && lv <= level { break }
-            if lv > level {
-                foundHideable = true
-            } else if lv == 0,
-                      let nextLv = firstNumberedLevel(from: i + 1, orderedAssetIDs: orderedAssetIDs, levels: levels),
-                      nextLv > level {
-                foundHideable = true
-            }
-            i += 1
+            if lv == 0 { continue }
+            if lv <= level { return false }
+            return true
         }
-        return foundHideable
+        return false
     }
 
     // MARK: - 可见性
@@ -405,10 +397,11 @@ enum PhotoNumberingLogic {
         spanMode: HierarchyCollapseSpanMode
     ) -> VisibleHierarchyStepPlan? {
         guard !visibleIDs.isEmpty else { return nil }
+        let n = orderedAssetIDs.count
         let effective = effectiveLevels(orderedAssetIDs: orderedAssetIDs, levels: levels)
 
         var idxMap: [String: Int] = [:]
-        idxMap.reserveCapacity(orderedAssetIDs.count)
+        idxMap.reserveCapacity(n)
         for (i, id) in orderedAssetIDs.enumerated() { idxMap[id] = i }
 
         var descendantsMemo: [String: Bool] = [:]
@@ -423,16 +416,60 @@ enum PhotoNumberingLogic {
             return value
         }
 
+        // Precompute next numbered index to avoid O(n²) forward scans in hierarchyControlTargetID
+        var nextNumberedIdx: [Int] = Array(repeating: -1, count: n)
+        var nextFound = -1
+        for i in stride(from: n - 1, through: 0, by: -1) {
+            if (effective[orderedAssetIDs[i]] ?? 0) > 0 { nextFound = i }
+            nextNumberedIdx[i] = nextFound
+        }
+        // Precompute parent index (nearest preceding shallower level) to avoid O(n²) backward scans
+        var parentIdx: [Int] = Array(repeating: -1, count: n)
+        var lastNumberedIdx = -1
+        var lastIdxAtLevel: [Int: Int] = [:]
+        for i in 0..<n {
+            let lv = effective[orderedAssetIDs[i]] ?? 0
+            if lv > 0 {
+                lastNumberedIdx = i
+                lastIdxAtLevel[lv] = i
+            }
+            if lv == 0 {
+                parentIdx[i] = lastNumberedIdx
+            } else if lv > 1 {
+                parentIdx[i] = lastIdxAtLevel[lv - 1] ?? -1
+            }
+        }
+
         var controlTargets: Set<String> = []
-        controlTargets.reserveCapacity(min(visibleIDs.count, orderedAssetIDs.count))
-        for (index, id) in orderedAssetIDs.enumerated() where visibleIDs.contains(id) {
-            if let target = hierarchyControlTargetID(
-                at: index,
-                orderedAssetIDs: orderedAssetIDs,
-                effectiveLevels: effective,
-                hasDescendants: hasDescendantsCached
-            ) {
-                controlTargets.insert(target)
+        controlTargets.reserveCapacity(min(visibleIDs.count, n))
+        // Optimization: Iterate through visibleIDs instead of all orderedAssetIDs when visibleIDs is smaller
+        if visibleIDs.count < n / 2 {
+            for id in visibleIDs {
+                if let index = idxMap[id] {
+                    if let target = hierarchyControlTargetID(
+                        at: index,
+                        orderedAssetIDs: orderedAssetIDs,
+                        effectiveLevels: effective,
+                        hasDescendants: hasDescendantsCached,
+                        nextNumberedIdx: nextNumberedIdx,
+                        parentIdx: parentIdx
+                    ) {
+                        controlTargets.insert(target)
+                    }
+                }
+            }
+        } else {
+            for (index, id) in orderedAssetIDs.enumerated() where visibleIDs.contains(id) {
+                if let target = hierarchyControlTargetID(
+                    at: index,
+                    orderedAssetIDs: orderedAssetIDs,
+                    effectiveLevels: effective,
+                    hasDescendants: hasDescendantsCached,
+                    nextNumberedIdx: nextNumberedIdx,
+                    parentIdx: parentIdx
+                ) {
+                    controlTargets.insert(target)
+                }
             }
         }
         guard !controlTargets.isEmpty else { return nil }
@@ -483,10 +520,25 @@ enum PhotoNumberingLogic {
         effectiveLevels: [String: Int]
     ) -> String? {
         guard let index = orderedAssetIDs.firstIndex(of: assetID) else { return nil }
-        if visibleIDs.contains(assetID), (effectiveLevels[assetID] ?? 0) > 0 {
-            return assetID
+        return nearestVisibleNumberedAncestorAtIndex(
+            index: index,
+            visibleIDs: visibleIDs,
+            orderedAssetIDs: orderedAssetIDs,
+            effectiveLevels: effectiveLevels
+        )
+    }
+
+    static func nearestVisibleNumberedAncestorAtIndex(
+        index: Int,
+        visibleIDs: Set<String>,
+        orderedAssetIDs: [String],
+        effectiveLevels: [String: Int]
+    ) -> String? {
+        guard index >= 0, index < orderedAssetIDs.count else { return nil }
+        if visibleIDs.contains(orderedAssetIDs[index]), (effectiveLevels[orderedAssetIDs[index]] ?? 0) > 0 {
+            return orderedAssetIDs[index]
         }
-        var requiredParent = effectiveLevels[assetID].map { $0 - 1 } ?? Int.max
+        var requiredParent = (effectiveLevels[orderedAssetIDs[index]] ?? 0) - 1
         for i in stride(from: index - 1, through: 0, by: -1) {
             let id = orderedAssetIDs[i]
             guard let lv = effectiveLevels[id], lv > 0 else { continue }
@@ -556,23 +608,27 @@ enum PhotoNumberingLogic {
         at index: Int,
         orderedAssetIDs: [String],
         effectiveLevels: [String: Int],
-        hasDescendants: (String) -> Bool
+        hasDescendants: (String) -> Bool,
+        nextNumberedIdx: [Int],
+        parentIdx: [Int]
     ) -> String? {
         let id = orderedAssetIDs[index]
         let lv = effectiveLevels[id] ?? 0
         if lv > 0 {
             return hasDescendants(id)
                 ? id
-                : parentNumberedAssetID(at: index, orderedAssetIDs: orderedAssetIDs, effectiveLevels: effectiveLevels)
+                : parentIdx[index] >= 0 ? orderedAssetIDs[parentIdx[index]] : nil
         }
-        if let parent = parentNumberedAssetID(at: index, orderedAssetIDs: orderedAssetIDs, effectiveLevels: effectiveLevels),
-           hasDescendants(parent) {
-            return parent
+        // lv == 0: check parent first, then next numbered sibling
+        let parent = parentIdx[index]
+        if parent >= 0 {
+            let parentID = orderedAssetIDs[parent]
+            if hasDescendants(parentID) { return parentID }
         }
-        for i in (index + 1)..<orderedAssetIDs.count {
-            let nextID = orderedAssetIDs[i]
-            let nextLv = effectiveLevels[nextID] ?? 0
-            if nextLv > 0 {
+        if index + 1 < orderedAssetIDs.count {
+            let nextIdx = nextNumberedIdx[index + 1]
+            if nextIdx >= 0 {
+                let nextID = orderedAssetIDs[nextIdx]
                 return hasDescendants(nextID) ? nextID : nil
             }
         }
