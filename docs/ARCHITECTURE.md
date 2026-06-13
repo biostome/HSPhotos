@@ -410,3 +410,91 @@ enum PhotoGridQuickJumpMode {
 - **批量持久化**：`beginBatchUpdates` / `endBatchUpdates` 合并写入，避免多次序列化整表
 - **defer 模式**：批处理入口用 `beginBatchUpdates; defer { endBatchUpdates }` 确保成对调用
 - **弱引用**：闭包中使用 `[weak self]` 避免循环引用
+
+---
+
+## 附录 A：UserDefaults 使用红线
+
+### 核心原则
+
+**UserDefaults.set(_:forKey:) 会序列化整个值并写入磁盘。** 对于 `[String: Int]` 这类字典，开销随字典大小线性增长（数万条目时约数十毫秒/次）。
+
+### 禁止模式
+
+```
+// ❌ 循环内逐条写 UserDefaults
+for asset in selected {
+    setLevel(level, for: asset)         // 每次都 set(dict, forKey:) → O(n) 序列化
+}
+// 10000 条 × 每条约 50ms = 总计 ~500 秒
+```
+
+### 正确模式
+
+1. **读一次 → 本地改 → 写一次**：
+```swift
+// ✅ 批量操作只写一次
+var levels = service.levels(in: collection)   // 读取一次
+for asset in selected {
+    levels[asset.localIdentifier] = level     // 纯内存修改 O(1)
+}
+service.replaceAllLevels(levels, for: collection) // 写入一次
+```
+
+2. **合并写入**（关键路径不能避免逐条写时）：
+```swift
+// ✅ beginBatchUpdates / endBatchUpdates 包裹
+service.beginBatchUpdates(for: collection)
+defer { service.endBatchUpdates(for: collection) }
+for ... { service.setLevel(...) } // 期间不落盘，结束写一次
+```
+
+### 本次分支的教训
+
+批量下降层级的卡顿根因链：
+
+```
+onBatchDemoteLevel
+  └─ for asset in selected          ← 10000 项
+       └─ setLevel()                ← 每项 UserDefaults.set 序列化 25000 条目
+            └─ levelsCache[key] = dict   ← Swift CoW 拷贝 25000 条目
+└─ refreshParagraphDisplay
+     └─ computeNumbers              ← O(d²) 字符串拼接
+     └─ reloadData → configure      ← 每 cell 触发 PHImageManager 请求
+```
+
+四个瓶颈叠加后，单次操作卡顿数十秒。修复后整体耗时在毫秒级。
+
+---
+
+## 附录 B：UserDefaults 键值规范
+
+### 全局键（不区分相簿）
+
+| 键 | 类型 | 默认值 | 说明 | 服务 |
+|------|------|------|------|------|
+| `custom_photo_tags` | `[PhotoTag]` (JSON) | `[]` | 标签列表 | `PhotoTagService` |
+| `overlay_display_enabled` | `Bool` | `true` | 覆盖层总开关 | `OverlayDisplaySettings` |
+| `overlay_show_creation_in_custom` | `Bool` | `true` | 自定义排序下显示拍摄日期 | `OverlayDisplaySettings` |
+| `overlay_show_modification_in_custom` | `Bool` | `true` | 自定义排序下显示修改日期 | `OverlayDisplaySettings` |
+| `overlay_show_custom_order_in_date_sort` | `Bool` | `true` | 日期排序下显示序号 | `OverlayDisplaySettings` |
+| `overlay_show_field_prefixes` | `Bool` | `true` | 显示 "C:" / "M:" / "#" 前缀 | `OverlayDisplaySettings` |
+| `hierarchy_collapse_span_mode` | `Int` (rawValue) | `0` | 0=断无编号, 1=含间隙 | `HierarchyCollapseSettings` |
+
+### 按相簿分键（`{id}` = PHAssetCollection.localIdentifier）
+
+| 键模板 | 类型 | 说明 | 服务 |
+|------|------|------|------|
+| `photo_numbering_levels_{id}` | `[String: Int]` | assetID → 层级 | `PhotoNumberingService` |
+| `photo_numbering_collapse_{id}` | `[String: Bool]` | assetID → 折叠状态 | `PhotoNumberingService` |
+| `system_sort_preference_{id}` | `String` (rawValue) | 排序偏好 | `PhotoSortPreference` |
+| `photo_hierarchy_nodes_{id}` | Codable Data | 段落/首图层级节点 | `PhotoHeaderService` |
+| `header_photos_{id}` | `[String]` | 首图 assetID 列表 | `PhotoHeaderService` |
+| `paragraph_collapse_{id}` | `[String: Bool]` | 段落折叠状态 | `PhotoHeaderService` |
+
+### 按资源分键（`{assetID}` = PHAsset.localIdentifier）
+
+| 键模板 | 类型 | 说明 | 位置 |
+|------|------|------|------|
+| `asset_original_loc_lat_{assetID}` | `Double` | 原始 GPS 纬度 | `AssetLocationAdjustmentViewController` |
+| `asset_original_loc_lon_{assetID}` | `Double` | 原始 GPS 经度 | `AssetLocationAdjustmentViewController` |
