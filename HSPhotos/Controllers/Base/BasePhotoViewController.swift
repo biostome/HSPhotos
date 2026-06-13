@@ -1165,56 +1165,71 @@ class BasePhotoViewController: UIViewController {
     }
 
     internal func createOperationMenu() -> UIMenu {
-        let attributes: UIMenuElement.Attributes = gridView.hasSelectedAssets ? [] : .disabled
-        var menuChildren: [UIMenuElement] = []
+        let hasSelection = gridView.hasSelectedAssets
+        var groups: [UIMenuElement] = []
 
+        // ── 编辑历史 ──
         let undoAction = UIAction(title: "撤销", image: UIImage(systemName: "arrow.uturn.left"), attributes: canUndo ? [] : .disabled) { [weak self] _ in
             self?.undoAction()
         }
         let redoAction = UIAction(title: "重做", image: UIImage(systemName: "arrow.uturn.right"), attributes: canRedo ? [] : .disabled) { [weak self] _ in
             self?.redoAction()
         }
-        let addToAlbum = UIAction(title: "添加到相簿", image: UIImage(systemName: "plus.rectangle.on.folder"), attributes: attributes) { [weak self] _ in
-            self?.onAddToAlbumSelectedAssets()
-        }
+        groups.append(UIMenu(options: .displayInline, children: [undoAction, redoAction]))
 
-        let copy = UIAction(title: "拷贝", image: UIImage(systemName: "doc.on.doc"), attributes: attributes) { [weak self] _ in
-            self?.onCopy()
-        }
-
-        let duplicate = UIAction(title: "复制", image: UIImage(systemName: "doc.on.doc.fill"), attributes: attributes) { [weak self] _ in
-            self?.onDuplicate()
-        }
-
+        // ── 剪贴板 ──
         let paste = UIAction(title: "粘贴", image: UIImage(systemName: "doc.on.clipboard")) { [weak self] _ in
             self?.onPaste()
         }
-
-        let sort = UIAction(title: "排序", image: UIImage(systemName: "arrow.up.arrow.down"), attributes: attributes) { [weak self] _ in
-            self?.onOrder()
+        if hasSelection {
+            let cut = UIAction(title: "剪切", image: UIImage(systemName: "scissors")) { [weak self] _ in
+                self?.onMove()
+            }
+            let copy = UIAction(title: "拷贝", image: UIImage(systemName: "doc.on.doc")) { [weak self] _ in
+                self?.onCopy()
+            }
+            let duplicate = UIAction(title: "复制", image: UIImage(systemName: "doc.on.doc.fill")) { [weak self] _ in
+                self?.onDuplicate()
+            }
+            groups.append(UIMenu(options: .displayInline, children: [paste, cut, copy, duplicate]))
+        } else {
+            groups.append(UIMenu(options: .displayInline, children: [paste]))
         }
 
-        let delete = UIAction(title: "删除", image: UIImage(systemName: "trash"), attributes: [attributes, .destructive].compactMap { $0 }.reduce([], { $0.union($1) })) { [weak self] _ in
-            self?.onDelete()
+        guard hasSelection else {
+            return UIMenu(title: "操作选项", children: groups)
         }
 
-        let move = UIAction(title: "剪切", image: UIImage(systemName: "scissors"), attributes: attributes) { [weak self] _ in
-            self?.onMove()
+        // ── 整理 ──
+        let addToAlbum = UIAction(title: "添加到相簿", image: UIImage(systemName: "plus.rectangle.on.folder")) { [weak self] _ in
+            self?.onAddToAlbumSelectedAssets()
         }
-
-        let tagAction = UIAction(title: "添加标签", image: UIImage(systemName: "tag"), attributes: attributes) { [weak self] _ in
+        let tagAction = UIAction(title: "添加标签", image: UIImage(systemName: "tag")) { [weak self] _ in
             self?.onTagSelectedAssets()
         }
+        groups.append(UIMenu(options: .displayInline, children: [addToAlbum, tagAction]))
 
-        menuChildren = [undoAction, redoAction, addToAlbum, tagAction]
+        // ── 层级 ──
         if sortPreference == .custom, supportsHierarchyNumbering {
-            menuChildren.append(deferredHierarchyMenu(attributes: attributes))
+            groups.append(UIMenu(options: .displayInline, children: [deferredHierarchyMenu()]))
         }
-        menuChildren += [delete, move, paste, copy, duplicate, sort]
-        return UIMenu(title: "操作选项", children: menuChildren)
+
+        // ── 排序 ──
+        let sort = UIAction(title: "排序", image: UIImage(systemName: "arrow.up.arrow.down")) { [weak self] _ in
+            self?.onOrder()
+        }
+        groups.append(UIMenu(options: .displayInline, children: [sort]))
+
+        // ── 删除 ──
+        let delete = UIAction(title: "删除", image: UIImage(systemName: "trash"), attributes: .destructive) { [weak self] _ in
+            self?.onDelete()
+        }
+        groups.append(UIMenu(options: .displayInline, children: [delete]))
+
+        return UIMenu(title: "操作选项", children: groups)
     }
 
-    internal func deferredHierarchyMenu(attributes: UIMenuElement.Attributes) -> UIMenu {
+    internal func deferredHierarchyMenu() -> UIMenu {
         UIMenu(
             title: "层级操作",
             image: UIImage(systemName: "list.bullet.indent"),
@@ -1224,13 +1239,13 @@ class BasePhotoViewController: UIViewController {
                         completion([])
                         return
                     }
-                    completion(self.createHierarchyMenuChildren(attributes: attributes))
+                    completion(self.createHierarchyMenuChildren())
                 }
             ]
         )
     }
 
-    internal func createHierarchyMenuChildren(attributes: UIMenuElement.Attributes) -> [UIMenuElement] {
+    internal func createHierarchyMenuChildren() -> [UIMenuElement] {
         let selected = orderedSelectedAssets()
         guard !selected.isEmpty else { return [] }
 
@@ -1245,14 +1260,14 @@ class BasePhotoViewController: UIViewController {
         var children: [UIMenuElement] = []
 
         // 1. 设置主级 (Root)
-        let setMain = UIAction(title: "批量设为主级", image: UIImage(systemName: "list.number"), attributes: attributes) { [weak self] _ in
+        let setMain = UIAction(title: "批量设为主级", image: UIImage(systemName: "list.number"), ) { [weak self] _ in
             self?.onBatchSetLevel(to: 1)
         }
         children.append(setMain)
 
         // 2. 提升/下降 (缩进平移)
         if anyCanUp {
-            let promote = UIAction(title: "批量提升层级", image: UIImage(systemName: "arrow.left"), attributes: attributes) { [weak self] _ in
+            let promote = UIAction(title: "批量提升层级", image: UIImage(systemName: "arrow.left"), ) { [weak self] _ in
                 self?.onBatchPromoteLevel()
             }
             children.append(promote)
@@ -1261,7 +1276,7 @@ class BasePhotoViewController: UIViewController {
         // 下降条件：第一个选中的节点深度不能超过上方参考节点 + 1
         let firstLv = PhotoNumberingService.shared.level(for: firstAsset, in: collection)
         if firstLv < prevLv + 1 {
-            let demote = UIAction(title: "批量下降层级", image: UIImage(systemName: "arrow.right"), attributes: attributes) { [weak self] _ in
+            let demote = UIAction(title: "批量下降层级", image: UIImage(systemName: "arrow.right"), ) { [weak self] _ in
                 self?.onBatchDemoteLevel()
             }
             children.append(demote)
@@ -1269,12 +1284,12 @@ class BasePhotoViewController: UIViewController {
 
         // 3. 上下文相关：设为同级/子级
         if prevLv > 0 {
-            let setSame = UIAction(title: "批量设为同级", image: UIImage(systemName: "arrow.right.to.line"), attributes: attributes) { [weak self] _ in
+            let setSame = UIAction(title: "批量设为同级", image: UIImage(systemName: "arrow.right.to.line"), ) { [weak self] _ in
                 self?.onBatchSetLevel(to: prevLv)
             }
             children.append(setSame)
 
-            let setSub = UIAction(title: "批量设为子级", image: UIImage(systemName: "list.bullet.indent"), attributes: attributes) { [weak self] _ in
+            let setSub = UIAction(title: "批量设为子级", image: UIImage(systemName: "list.bullet.indent"), ) { [weak self] _ in
                 self?.onBatchSetLevel(to: prevLv + 1)
             }
             children.append(setSub)
@@ -1282,7 +1297,7 @@ class BasePhotoViewController: UIViewController {
 
         // 4. 清除
         if anyInHierarchy {
-            let clearAction = UIAction(title: "批量取消编号", image: UIImage(systemName: "xmark.circle"), attributes: attributes.union(.destructive)) { [weak self] _ in
+            let clearAction = UIAction(title: "批量取消编号", image: UIImage(systemName: "xmark.circle"), attributes: .destructive) { [weak self] _ in
                 self?.onBatchClearLevel()
             }
             children.append(clearAction)
