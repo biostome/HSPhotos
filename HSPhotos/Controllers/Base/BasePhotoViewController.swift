@@ -1235,7 +1235,8 @@ class BasePhotoViewController: UIViewController {
         guard !selected.isEmpty else { return [] }
 
         let firstAsset = selected[0]
-        let prevLv = getPreviousLevel(for: firstAsset)
+        let serviceLevels = PhotoNumberingService.shared.levels(in: collection)
+        let prevLv = getPreviousLevel(for: firstAsset, levels: serviceLevels)
         let anyInHierarchy = selected.contains { PhotoNumberingService.shared.level(for: $0, in: collection) > 0 }
 
         // 升级选项：存在不仅是主级(Level 1)的已编号项
@@ -1333,12 +1334,16 @@ class BasePhotoViewController: UIViewController {
     private func onBatchSetLevel(to level: Int) {
         let items = orderedSelectedAssets()
         guard !items.isEmpty else { return }
+        var dict = PhotoNumberingService.shared.levels(in: collection)
+        for asset in items {
+            let id = asset.localIdentifier
+            if level <= 0 { dict.removeValue(forKey: id) }
+            else { dict[id] = level }
+        }
         PhotoNumberingService.shared.beginBatchUpdates(for: collection)
         defer { PhotoNumberingService.shared.endBatchUpdates(for: collection) }
-        for asset in items {
-            PhotoNumberingService.shared.setLevel(level, for: asset, in: collection)
-        }
-        gridView.refreshParagraphDisplay()
+        PhotoNumberingService.shared.replaceAllLevels(dict, for: collection)
+        gridView.hideUnleveledAssets ? gridView.refreshParagraphDisplay() : gridView.refreshHierarchyNumbersOnly()
         updateOperationMenu()
     }
 
@@ -1352,7 +1357,7 @@ class BasePhotoViewController: UIViewController {
         return map
     }
 
-    private func getPreviousLevel(for asset: PHAsset, idToIndex: [String: Int]? = nil) -> Int {
+    private func getPreviousLevel(for asset: PHAsset, idToIndex: [String: Int]? = nil, levels: [String: Int]) -> Int {
         let idx: Int?
         if let map = idToIndex {
             idx = map[asset.localIdentifier]
@@ -1360,7 +1365,7 @@ class BasePhotoViewController: UIViewController {
             idx = assets.firstIndex(of: asset)
         }
         guard let i = idx, i > 0 else { return 0 }
-        return PhotoNumberingService.shared.level(for: assets[i - 1], in: collection)
+        return levels[assets[i - 1].localIdentifier] ?? 0
     }
 
     /// 批量升级：N→N-1（N=1⇄0 切换，N>1 则升级，0→1 开始）
@@ -1370,26 +1375,25 @@ class BasePhotoViewController: UIViewController {
         guard !orderedSelected.isEmpty else { return }
 
         let idToIndex = assetLocalIdentifierToIndexMap()
-        PhotoNumberingService.shared.beginBatchUpdates(for: collection)
-        defer { PhotoNumberingService.shared.endBatchUpdates(for: collection) }
+        var levels = PhotoNumberingService.shared.levels(in: collection)
 
         for asset in orderedSelected {
             if processedIDs.contains(asset.localIdentifier) { continue }
-
-            let current = PhotoNumberingService.shared.level(for: asset, in: collection)
+            let cid = asset.localIdentifier
+            let current = levels[cid] ?? 0
             if current == 0 {
-                // 无层级 → 1（设为主级）
-                PhotoNumberingService.shared.setLevel(1, for: asset, in: collection)
-                processedIDs.insert(asset.localIdentifier)
+                levels[cid] = 1
+                processedIDs.insert(cid)
             } else if current == 1 {
-                // 1 → 0（主级退出），连带其所有后续子节点一并清除
-                clearLevelCascading(asset: asset, processedIDs: &processedIDs, idToIndex: idToIndex)
+                clearLevelCascadingInDict(asset: asset, levels: &levels, processedIDs: &processedIDs, idToIndex: idToIndex)
             } else {
-                // N → N-1，级联带动后续子节点平移
-                shiftLevelCascading(asset: asset, delta: -1, processedIDs: &processedIDs, idToIndex: idToIndex)
+                shiftLevelCascadingInDict(asset: asset, delta: -1, levels: &levels, processedIDs: &processedIDs, idToIndex: idToIndex)
             }
         }
-        gridView.refreshParagraphDisplay()
+        PhotoNumberingService.shared.beginBatchUpdates(for: collection)
+        defer { PhotoNumberingService.shared.endBatchUpdates(for: collection) }
+        PhotoNumberingService.shared.replaceAllLevels(levels, for: collection)
+        gridView.hideUnleveledAssets ? gridView.refreshParagraphDisplay() : gridView.refreshHierarchyNumbersOnly()
         updateOperationMenu()
     }
 
@@ -1400,51 +1404,47 @@ class BasePhotoViewController: UIViewController {
         guard !orderedSelected.isEmpty else { return }
 
         let idToIndex = assetLocalIdentifierToIndexMap()
-        PhotoNumberingService.shared.beginBatchUpdates(for: collection)
-        defer { PhotoNumberingService.shared.endBatchUpdates(for: collection) }
+        var levels = PhotoNumberingService.shared.levels(in: collection)
 
         for asset in orderedSelected {
             if processedIDs.contains(asset.localIdentifier) { continue }
-
-            let current = PhotoNumberingService.shared.level(for: asset, in: collection)
+            let cid = asset.localIdentifier
+            let current = levels[cid] ?? 0
             if current == 0 {
-                // 如果当前没有层级，则进入层级。
-                // 约束：如果上方已存在编号照片，则设为其次一级；否则强制作为主级(1)开始。
-                let prev = getPreviousLevel(for: asset, idToIndex: idToIndex)
+                let prev = getPreviousLevel(for: asset, idToIndex: idToIndex, levels: levels)
                 let entryLevel = (prev > 0) ? (prev + 1) : 1
-                PhotoNumberingService.shared.setLevel(entryLevel, for: asset, in: collection)
-                processedIDs.insert(asset.localIdentifier)
+                levels[cid] = entryLevel
+                processedIDs.insert(cid)
             } else {
-                // 已有级别：尝试降级。级联带动后续子节点平移。
-                shiftLevelCascading(asset: asset, delta: 1, processedIDs: &processedIDs, idToIndex: idToIndex)
+                shiftLevelCascadingInDict(asset: asset, delta: 1, levels: &levels, processedIDs: &processedIDs, idToIndex: idToIndex)
             }
         }
-        gridView.refreshParagraphDisplay()
+
+        PhotoNumberingService.shared.beginBatchUpdates(for: collection)
+        defer { PhotoNumberingService.shared.endBatchUpdates(for: collection) }
+        PhotoNumberingService.shared.replaceAllLevels(levels, for: collection)
+
+        gridView.hideUnleveledAssets ? gridView.refreshParagraphDisplay() : gridView.refreshHierarchyNumbersOnly()
+
         updateOperationMenu()
     }
 
-    /// 级联平移级别：平移当前节点，并连带平移后续子节点
-    private func shiftLevelCascading(asset: PHAsset, delta: Int, processedIDs: inout Set<String>, idToIndex: [String: Int]) {
-        let oldLevel = PhotoNumberingService.shared.level(for: asset, in: collection)
+    /// 级联平移级别（操作本地 levels 字典，零拷贝开销）
+    private func shiftLevelCascadingInDict(asset: PHAsset, delta: Int, levels: inout [String: Int], processedIDs: inout Set<String>, idToIndex: [String: Int]) {
+        let cid = asset.localIdentifier
+        let oldLevel = levels[cid] ?? 0
         guard oldLevel > 0 else { return }
 
-        let newLevel = max(1, oldLevel + delta)
-        PhotoNumberingService.shared.setLevel(newLevel, for: asset, in: collection)
-        processedIDs.insert(asset.localIdentifier)
+        levels[cid] = max(1, oldLevel + delta)
+        processedIDs.insert(cid)
 
-        guard let idx = idToIndex[asset.localIdentifier] else { return }
+        guard let idx = idToIndex[cid] else { return }
         for i in (idx + 1)..<assets.count {
-            let next = assets[i]
-            let nextLevel = PhotoNumberingService.shared.level(for: next, in: collection)
-
-            // 遇到无层级、同层或更浅层级时，表示已经跳出了当前子树，终止
+            let nextID = assets[i].localIdentifier
+            let nextLevel = levels[nextID] ?? 0
             if nextLevel == 0 || nextLevel <= oldLevel { break }
-
-            let targetNextLevel = max(1, nextLevel + delta)
-            PhotoNumberingService.shared.setLevel(targetNextLevel, for: next, in: collection)
-
-            // 标记为已处理
-            processedIDs.insert(next.localIdentifier)
+            levels[nextID] = max(1, nextLevel + delta)
+            processedIDs.insert(nextID)
         }
     }
 
@@ -1455,31 +1455,34 @@ class BasePhotoViewController: UIViewController {
         guard !orderedSelected.isEmpty else { return }
 
         let idToIndex = assetLocalIdentifierToIndexMap()
-        PhotoNumberingService.shared.beginBatchUpdates(for: collection)
-        defer { PhotoNumberingService.shared.endBatchUpdates(for: collection) }
+        var levels = PhotoNumberingService.shared.levels(in: collection)
 
         for asset in orderedSelected {
             if processedIDs.contains(asset.localIdentifier) { continue }
-            clearLevelCascading(asset: asset, processedIDs: &processedIDs, idToIndex: idToIndex)
+            clearLevelCascadingInDict(asset: asset, levels: &levels, processedIDs: &processedIDs, idToIndex: idToIndex)
         }
-        gridView.refreshParagraphDisplay()
+        PhotoNumberingService.shared.beginBatchUpdates(for: collection)
+        defer { PhotoNumberingService.shared.endBatchUpdates(for: collection) }
+        PhotoNumberingService.shared.replaceAllLevels(levels, for: collection)
+        gridView.hideUnleveledAssets ? gridView.refreshParagraphDisplay() : gridView.refreshHierarchyNumbersOnly()
         updateOperationMenu()
     }
 
-    /// 清除指定资产的层级，并连带清除其后续所有更深的子节点
-    private func clearLevelCascading(asset: PHAsset, processedIDs: inout Set<String>, idToIndex: [String: Int]) {
-        let myLevel = PhotoNumberingService.shared.level(for: asset, in: collection)
-        PhotoNumberingService.shared.clearLevel(for: asset, in: collection)
-        processedIDs.insert(asset.localIdentifier)
+    /// 清除指定资产的层级，并连带清除其后续所有更深的子节点（操作本地字典）
+    private func clearLevelCascadingInDict(asset: PHAsset, levels: inout [String: Int], processedIDs: inout Set<String>, idToIndex: [String: Int]) {
+        let cid = asset.localIdentifier
+        let myLevel = levels[cid] ?? 0
+        levels.removeValue(forKey: cid)
+        processedIDs.insert(cid)
 
-        guard myLevel > 0, let idx = idToIndex[asset.localIdentifier] else { return }
+        guard myLevel > 0, let idx = idToIndex[cid] else { return }
 
         for i in (idx + 1)..<assets.count {
-            let child = assets[i]
-            let childLevel = PhotoNumberingService.shared.level(for: child, in: collection)
+            let childID = assets[i].localIdentifier
+            let childLevel = levels[childID] ?? 0
             if childLevel == 0 || childLevel <= myLevel { break }
-            PhotoNumberingService.shared.clearLevel(for: child, in: collection)
-            processedIDs.insert(child.localIdentifier)
+            levels.removeValue(forKey: childID)
+            processedIDs.insert(childID)
         }
     }
 

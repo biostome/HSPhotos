@@ -1202,7 +1202,6 @@ private var cachedCanExpandAll: Bool?
             hierarchyCache.removeAll()
             return
         }
-        // 不可再用「缓存条数 >= assets 条数」跳过：删除相片后 assets 变少但旧缓存仍多，会沿用错误编号
         hierarchyCache.removeAll()
         let (numbers, collapsed) = numberingService.computeNumbersAndCollapsed(for: assets, in: collection)
         for asset in assets {
@@ -1232,6 +1231,28 @@ private var cachedCanExpandAll: Bool?
         hierarchyCache.removeAll()
         invalidateQuickJumpTargetCache()
         updateVisibleAssets(animated: animated, completion: completion)
+    }
+
+    /// 仅刷新层级编号显示（跳过可见集重算与 cell 全量重配，避免触发每 cell 的 image request）
+    func refreshHierarchyNumbersOnly() {
+        hierarchyCache.removeAll()
+        prewarmHierarchyCache(for: visibleAssets)
+        // 直接更新可见 cell 的层级标签，绕过 configure() → loadImage() 的完整重配流程
+        let visibleCells = collectionView.visibleCells
+        for cell in visibleCells {
+            guard let photoCell = cell as? PhotoCell,
+                  let indexPath = collectionView.indexPath(for: cell),
+                  indexPath.item < visibleAssets.count else { continue }
+            let assetID = visibleAssets[indexPath.item].localIdentifier
+            if let cached = hierarchyCache[assetID] {
+                photoCell.updateHierarchyDisplay(text: cached.text, isCollapsed: cached.isCollapsed)
+            } else {
+                photoCell.updateHierarchyDisplay(text: nil, isCollapsed: false)
+            }
+        }
+        invalidateQuickJumpTargetCache()
+        syncSelectionQuickNavCurrentVisibleIndexToLastSelectedAsset()
+        scheduleHierarchyToolbarRefresh()
     }
 
     /// 底栏快捷折叠/展开：只更新可见集与折叠角标，不重算整表编号

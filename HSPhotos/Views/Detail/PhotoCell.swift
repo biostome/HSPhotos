@@ -386,6 +386,23 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
             hierarchyLabel.adjustsFontSizeToFitWidth = false
         }
     }
+
+    /// 轻量更新层级标签（不触发图片加载等重操作，供批量刷新用）
+    func updateHierarchyDisplay(text: String?, isCollapsed: Bool) {
+        guard labelsInstalled else { return }
+        if let text, !text.isEmpty {
+            let simplifiedText = text.replacingOccurrences(of: "级", with: "")
+            let displayText = isCollapsed ? "\(simplifiedText)折" : simplifiedText
+            hierarchyLabel.text = displayText
+            hierarchyLabel.isHidden = false
+            updateHierarchyLabelWidth(for: displayText)
+        } else {
+            hierarchyLabel.text = nil
+            hierarchyLabel.isHidden = true
+        }
+        lastHierarchyText = text
+        lastIsHierarchyCollapsed = isCollapsed
+    }
     
     lazy var requestOptions: PHImageRequestOptions = {
         let options = PHImageRequestOptions()
@@ -444,18 +461,7 @@ class PhotoCell: UICollectionViewCell, CAAnimationDelegate {
         anchorLabel.isHidden = !isAnchor
         
         if hierarchyText != lastHierarchyText || isHierarchyCollapsed != lastIsHierarchyCollapsed {
-            if let hierarchyText, !hierarchyText.isEmpty {
-                let simplifiedText = hierarchyText.replacingOccurrences(of: "级", with: "")
-                let displayText = isHierarchyCollapsed ? "\(simplifiedText)折" : simplifiedText
-                hierarchyLabel.text = displayText
-                hierarchyLabel.isHidden = false
-                updateHierarchyLabelWidth(for: displayText)
-            } else {
-                hierarchyLabel.text = nil
-                hierarchyLabel.isHidden = true
-            }
-            lastHierarchyText = hierarchyText
-            lastIsHierarchyCollapsed = isHierarchyCollapsed
+            updateHierarchyDisplay(text: hierarchyText, isCollapsed: isHierarchyCollapsed)
         }
         
         let isFavorite = asset.isFavorite

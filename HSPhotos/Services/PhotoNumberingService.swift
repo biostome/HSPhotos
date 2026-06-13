@@ -124,7 +124,10 @@ final class PhotoNumberingService {
     /// 设置层级（level >= 1），0 表示清除层级
     func setLevel(_ level: Int, for asset: PHAsset, in collection: PHAssetCollection) {
         let key = cacheKey(collection)
-        var dict = levelsCache[key] ?? [:]
+        // 用 removeValue 而非下标取引用，避免 Swift Dictionary CoW：
+        // 若缓存仍持有引用，修改 dict 会触发整个字典拷贝 (O(n))。
+        // 移除后 dict 获得唯一所有权，原地修改无需拷贝。
+        var dict = levelsCache.removeValue(forKey: key) ?? [:]
         if level <= 0 {
             dict.removeValue(forKey: asset.localIdentifier)
         } else {
@@ -139,10 +142,18 @@ final class PhotoNumberingService {
         setLevel(0, for: asset, in: collection)
     }
 
+    /// 批量替换全部层级缓存（一次写入，避免逐条 setLevel 的 removeValue/storeBack 开销）
+    func replaceAllLevels(_ levels: [String: Int], for collection: PHAssetCollection) {
+        let key = cacheKey(collection)
+        levelsCache[key] = levels
+        persistAfterMutation(for: collection)
+    }
+
     /// 切换折叠状态
     func toggleCollapse(_ asset: PHAsset, in collection: PHAssetCollection) {
         let key = cacheKey(collection)
-        var dict = collapsedCache[key] ?? [:]
+        // 用 removeValue 避免 CoW 拷贝整个字典（与 setLevel 同理）
+        var dict = collapsedCache.removeValue(forKey: key) ?? [:]
         dict[asset.localIdentifier] = !(dict[asset.localIdentifier] ?? false)
         collapsedCache[key] = dict
         persistAfterMutation(for: collection)

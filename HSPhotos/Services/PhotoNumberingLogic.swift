@@ -115,6 +115,8 @@ enum PhotoNumberingLogic {
     static func computeNumbers(orderedAssetIDs: [String], levels: [String: Int]) -> [String: String] {
         var result: [String: String] = [:]
         var counters: [Int] = [0]
+        /// 每层当前编号前缀，避免 O(k²) 的全量 parts.joined
+        var prefixAtLevel: [String] = [""]
         var lastLevel = 0
 
         for id in orderedAssetIDs {
@@ -125,9 +127,11 @@ enum PhotoNumberingLogic {
 
             while counters.count <= correctedLv {
                 counters.append(0)
+                prefixAtLevel.append("")
             }
 
             if correctedLv <= lastLevel {
+                // 回退到更浅层级：清零更深计数器
                 for i in (correctedLv + 1)..<counters.count {
                     counters[i] = 0
                 }
@@ -136,8 +140,13 @@ enum PhotoNumberingLogic {
             counters[correctedLv] += 1
             lastLevel = correctedLv
 
-            let parts = (1...correctedLv).map { String(counters[$0]) }
-            result[id] = parts.joined(separator: ".")
+            // O(1) 增量构建编号字符串，替代 O(k) 的 parts.map{String}.joined
+            if correctedLv == 1 {
+                prefixAtLevel[1] = String(counters[1])
+            } else {
+                prefixAtLevel[correctedLv] = "\(prefixAtLevel[correctedLv - 1]).\(counters[correctedLv])"
+            }
+            result[id] = prefixAtLevel[correctedLv]
         }
         return result
     }
