@@ -325,6 +325,25 @@ enum PhotoGridQuickJumpMode {
 - 文字输入 → 模糊匹配标签名称，应用标签筛选
 - 清空 → 移除标签筛选
 
+### 5.9 段落/首图系统（PhotoHeaderService）
+
+与编号系统并行的层级系统，用于在照片网格中插入**分隔标题**（段落首图）。两套系统互补：
+
+| 特征 | PhotoNumberingService | PhotoHierarchyService |
+|------|----------------------|----------------------|
+| 编号模型 | level (1,2,3,...) | path ([1], [1,2], [1,2,3]) |
+| UserDefaults | `photo_numbering_levels_{id}` | `photo_hierarchy_nodes_{id}` |
+| 用途 | 每张照片的内联多级编号 | 段落分隔标题（首图） |
+| 折叠 key | `photo_numbering_collapse_{id}` | `paragraph_collapse_{id}` |
+| 核心类型 | `[String: Int]` | `PhotoHierarchyNode` (Codable) |
+| 数据文件 | `PhotoNumberingLogic.swift` + `PhotoNumberingService.swift` | `PhotoHeaderService.swift` |
+
+**生命周期对齐：** BasePhotoViewController 的 `loadPhoto()` 同时调用两个服务的 `loadForCollection`，`saveForCollection` 同时触发两者的异步写入。
+
+**PhotoHierarchyNode 数据模型：** `path: [Int]` 表示段落层级路径（如 `[3, 2]` 表示第 3 个根段落下的第 2 个子段落），`isCollapsed: Bool` 表示段落折叠状态。首图（headerPhoto）是每个段落的第一张照片，在 `PhotoGridView` 中以特殊样式渲染。
+
+**注意：** `PhotoHierarchyService.saveNodes` 在 JSON 编码失败时执行 `removeObject(forKey:)`，该集合的所有数据永久丢失。这是破坏性容错策略，仅记 console 日志。
+
 ---
 
 ## 六、性能优化记录
@@ -498,3 +517,240 @@ onBatchDemoteLevel
 |------|------|------|------|
 | `asset_original_loc_lat_{assetID}` | `Double` | 原始 GPS 纬度 | `AssetLocationAdjustmentViewController` |
 | `asset_original_loc_lon_{assetID}` | `Double` | 原始 GPS 经度 | `AssetLocationAdjustmentViewController` |
+| `asset_original_creation_date_{assetID}` | `Date` | 原始拍摄日期（日期调整前备份） | `PhotoAssetInfoSheetViewController` |
+
+---
+
+## 附录 C：Magic Constants & Thresholds
+
+### PhotoGridConstants
+
+| 常量 | 值 | 说明 |
+|------|------|------|
+| `zoomThreshold.enlarge` | 1.3 | 捏合放大到这个比例切换更多列 |
+| `zoomThreshold.shrink` | 0.7 | 捏合缩小到这个比例切换更少列 |
+| `allowedColumns` | [1, 3, 5, 7, 11] | 捏合缩放允许的列数 |
+| `hierarchyBatchAnimationDuration` | 0.35s | 折叠/展开动画时长 |
+| `hierarchyLargeChangeReloadThreshold` | 120 | 超过此数量用 crossDissolve 替代 batch update |
+
+### PhotoGridView
+
+| 常量 | 值 | 说明 |
+|------|------|------|
+| `selectionThreshold` | 10.0 pt | 滑动选择最小触发距离 |
+| `quickJumpHighlightDelay` | 0.32s | 快跳高亮闪烁延迟 |
+| `maxSelectedAssetsInDelegatePayload` | 512 | 委托回调中 selectedAssets 数组上限（超过则传空） |
+
+### PhotoCell
+
+| 常量 | 值 | 说明 |
+|------|------|------|
+| `hierarchyLabelHorizontalPadding` | 14 pt | 层级标签水平内边距 |
+| `minimumScaleFactor` | 0.72 | 层级标签字体最小缩放比例 |
+| `hierarchyLabel minWidth` | 20 pt | 层级标签最小宽度 |
+| `hierarchyLabel initialWidth` | 26 pt | 层级标签默认宽度约束 |
+| `imageCache.countLimit` | 500 | 缩略图缓存条目上限 |
+| `imageCache.totalCostLimit` | 200 MB | 缩略图缓存内存上限 |
+| `QuickNavHighlightStyle.fillAlpha` | 0.62 | 快跳高亮填充不透明度 |
+| `QuickNavHighlightStyle.borderWidth` | 4 pt | 快跳高亮边框宽度 |
+| `QuickNavHighlightStyle.keyframeDuration` | 0.55s | 关键帧闪烁动画时长 |
+
+### BaseAlbumCell
+
+| 常量 | 值 | 说明 |
+|------|------|------|
+| `imageCache.countLimit` | 200 | 相簿缩略图缓存条目上限 |
+
+### GalleryViewer 手势阈值
+
+| 常量 | 值 | 说明 |
+|------|------|------|
+| 下滑 dismiss 位移阈值 | 120 pt | 超过此位移触发关闭 |
+| 下滑 dismiss 速度阈值 | 800 pt/s | 超过此速度触发关闭 |
+
+### PHPhotoLibrary 操作超时
+
+| 常量 | 值 | 说明 |
+|------|------|------|
+| `performChanges` 超时 | 15s | 超时后 alert，用 `finished` flag 防双重触发 |
+| 重复资源取回重试间隔 | 0.1s | `PhotoChangesService.duplicate` 取回新 asset 的重试间隔 |
+| Share Sheet dismiss 延迟 | 0.35s | 关闭分享面板后显示相簿选择器的延迟 |
+
+### GalleryViewer 源图请求
+
+| 常量 | 值 | 说明 |
+|------|------|------|
+| `targetSize` | 300×300 pt | 查看器转场源缩略图尺寸 |
+
+---
+
+## 附录 D：Delegate Protocols & Contracts
+
+### PhotoGridViewDelegate
+
+定义文件：`HSPhotos/Views/Detail/PhotoGridView.swift`
+
+**注意：** 以下隐式契约未在协议签名中体现，是调用者必须遵守的。
+
+| 方法 | 说明 |
+|------|------|
+| `didSelectItemAt(indexPath:)` | 选择模式(多选/范围选)下触发，用于选中/取消选中 |
+| `didSelectItemAt(asset:)` | 非选择模式下触发，用于打开查看器 |
+| `didDeselectItemAt(indexPath:)` / `(asset:)` | 取消选中回调 |
+| `didSelectedItems(assets:)` | **重要:** 当 `selectedAssetCount > 512` 时 `assets` 为空数组，必须用 `photoGridView.selectedAssets` 取全量 |
+| `didSetAnchor(asset:)` | 设置上下文菜单 anchor（长按定位） |
+| `didPasteAssets(_:after:)` | `after` 为插入位置**之后**的 asset（索引需 +1） |
+| `didRequestAddTagFor(asset:)` | 请求为单张照片添加标签 |
+| `didRequestDelete(asset:)` | 请求删除单张照片 |
+| `photoGridView(_:didEndDisplaying:forItemAt:)` | cell 离开屏幕，用于停止图片缓存 |
+
+### AlbumListViewDelegate
+
+定义文件：`HSPhotos/Views/Home/AlbumListView.swift`
+
+| 方法 | 说明 |
+|------|------|
+| `didTapFolderDisclosureAt(indexPath:)` | 展开/折叠文件夹。多选模式下只操作已选中的文件夹 |
+| `didTapAddPhotosFor(collection:)` | 为指定相簿添加照片 |
+| `didTapEditTitleFor(collection:)` | 编辑相簿/文件夹标题 |
+| `didTapDeleteFor(collection:)` | 删除相簿/文件夹 |
+| `didSelectItemAt(collection:)` | 点击进入相簿详情，picker 模式下传回选中结果 |
+| `didSelectFolder(collectionList:)` | 点击进入子文件夹 |
+| `albumListViewDidUpdateMultiSelection(selectedCollections:)` | 多选状态变化回调 |
+
+### TagFilterPanelDelegate
+
+定义文件：`HSPhotos/Controllers/Tags/TagFilterPanelViewController.swift`
+
+| 方法 | 说明 |
+|------|------|
+| `tagFilterPanel(_:didApply:)` | 应用标签筛选，传入 `TagFilterState`（含选中标签集 + all/any 规则） |
+
+### SearchBarViewDelegate
+
+定义文件：`HSPhotos/Views/Detail/SearchBarView.swift`
+
+| 方法 | 说明 |
+|------|------|
+| `searchBarViewDidRemoveToken` | 删除搜索 token（关闭标签筛选） |
+| `searchBarViewDidTapFilter` | 点击筛选按钮 |
+
+### CustomVerticalScrollIndicatorDelegate
+
+定义文件：`HSPhotos/Views/Detail/SystemIndicatorCollectionView.swift`
+
+| 方法 | 说明 |
+|------|------|
+| `scrollIndicator(_:textForScrollProgress:)` | 日期排序显示日期字符串，自定义排序显示序号 |
+
+### GalleryViewerMediaCell
+
+定义文件：`HSPhotos/Views/Gallery/PhotoCellBase.swift`
+
+| 方法 | 说明 |
+|------|------|
+| `scrollViewForZooming` | 查看器缩放目标 UIScrollView |
+| `handleSingleTap` | 切换 chrome 显示/隐藏 |
+| `configure(with:)` | 加载全尺寸图片 |
+| `resetScrollView` | 重置缩放状态 |
+
+### GalleryViewerMediaActionHandling
+
+定义文件：`HSPhotos/Controllers/Viewer/GalleryViewerMediaActionService.swift`
+
+| 方法 | 说明 |
+|------|------|
+| `share` / `addTag` / `copy` / `favorite` / `rename` 等 | 查看器 toolbar 操作分发 |
+
+---
+
+## 附录 E：Lifecycle Invariants & Implicit Assumptions
+
+### 必须按顺序设置的属性（违反则静默失败）
+
+1. **`gridView.currentCollection` 必须在 `loadPhoto()` 之前设置** — 否则层级缓存预热被跳过，层级功能静默失效
+2. **`gridView.supportsHierarchyNumbering` 必须在 `loadPhoto()` 之前设置** — `PhotoGridViewController` 设为 `true`，`HomeViewController` 不设（默认 `false`）
+3. **`refreshFetchOptionsForCurrentSortPreference()` 必须在直接修改 `sortPreference` 后调用** — 适用于 `onOrder()` 和 `didPasteAssets` 路径，忘记调用则下次 `loadPhoto()` 使用过时的 fetch 描述符
+
+### 必须成对调用的方法
+
+4. **`PhotoNumberingService.beginBatchUpdates / endBatchUpdates`** — 用 `defer` 确保配对，嵌套受支持（深度计数），忘记 `endBatchUpdates` 则数据永不落盘
+
+### 操作前必须调用的方法
+
+5. **`expandAllVisibleSelectionIfNeeded()`** — 在遍历 `selectionState.orderedIDs` 之前调用，因为 `allVisibleSelectionActive = true` 时选择状态不含个体 ID
+
+### 懒优化副作用
+
+6. **`allVisibleSelectionActive` 标志** — 仅由 `selectAll()` 设置。手动逐个选中全部可见照片不会触发此标志，`selectedAssetIDs` 仍跟踪每个个体。依赖此标志的代码必须在两种路径下正确工作
+
+### 排序模式切换假设
+
+7. **手动排序/粘贴后强制切换到 `.custom` 模式** — `onOrder()` 和 `didPasteAssets` 成功后自动切换，无 opt-out。假定用户操作手动顺序后期望自定义排序
+
+### 数据持久化竞争
+
+8. **`saveForCollection` 在 `.utility` 队列异步写入** — 无 `beginBackgroundTask` 保护。应用在写入完成前被杀死会导致数据丢失
+
+### GalleryViewer 转场假设
+
+9. **`overFullScreen` + `HeroPhotoTransitionDelegate`** — 依赖 presenting controller 的 `modalPresentationStyle` 为 `.overFullScreen` 且 source frame 非零
+
+### 选择集排序假设
+
+10. **`toggle()` vs `selectAll()` 产生不同 rank 分配** — `toggle()` 将新 ID 放在末尾（最高 rank），`selectAll()` 按给定顺序分配 rank 1...n。同 ID 集合可能对应不同 rank 序列
+
+---
+
+## 附录 F：Error Handling Patterns
+
+### PhotoChangesService — 静默忽略错误
+
+所有 `performChanges` completion handler 仅 `print()` 记录错误并传给回调字符串。无回滚机制。典型场景：
+- `didPasteAssets` 先在本地 `assets` 数组中插入新元素，再调用 `performChanges`——若系统操作失败，本地 UI 已更新但系统库未变更，处于不一致状态
+
+### PhotoNumberingLogic.computeNumbers — 自动纠错层级越界
+
+若某照片 `level=3` 但前一张有编号照片仅到 `level=1`，算法自动纠正为 `level=2`（`min(lv, lastLevel + 1)`）。此行为未在文档或 UI 中说明。
+
+### PhotoChangesService.duplicate — DispatchSemaphore 阻塞循环
+
+每个 asset 用 `semaphore.wait()` 阻塞当前线程取回资源数据。若数据取回挂起，整个循环挂死（semaphore 无超时）。`DispatchGroup.notify` 永不触发。
+
+### PhotoHierarchyService.saveNodes — 编码失败时删除 key
+
+`JSONEncoder` 编码失败时执行 `UserDefaults.standard.removeObject(forKey:)`，该集合的所有层级节点数据永久丢失。仅记录到 console。
+
+### saveForCollection — 异步写入无保护
+
+在 `viewWillDisappear` 中触发，写入在 `.utility` 队列异步执行。应用被杀时可能丢数据。无 `beginBackgroundTask` 或同步落盘。
+
+---
+
+## 附录 G：Dead Code & Legacy Systems
+
+### UISegmentedControl（BasePhotoViewController）
+
+`segmentControl` 包含 ["年", "月", "日", "所有"] 四个分段，已实例化、添加到视图层级并完成 Auto Layout 约束，但始终 `isHidden = true`。疑似未完成的日期分组功能。
+
+### PhotoHierarchyService — 路径式层级系统（段落/首图）
+
+与 `PhotoNumberingService`（level 式）**并列存在**的另一套完整层级系统：
+
+| 特征 | PhotoNumberingService | PhotoHierarchyService |
+|------|----------------------|----------------------|
+| 编号方式 | level (1,2,3,...) | path ([1], [1,2], [1,2,3]) |
+| UserDefaults key | `photo_numbering_levels_{id}` | `photo_hierarchy_nodes_{id}` |
+| 使用位置 | PhotoGridView 内联编号 | BasePhotoViewController 段落/首图 |
+| 数据模型 | `[String: Int]` | `[String: PhotoHierarchyNode]` |
+
+两者通过 `BasePhotoViewController` 的 `loadPhoto` 同时加载，`saveForCollection` 同时保存，**互补使用而非竞争**。`PhotoHierarchyService` 负责"段落/首图"功能（照片网格中的分隔标题），`PhotoNumberingService` 负责每张照片的内联多级编号。
+
+### 注释掉的代码
+
+- `GalleryViewController.createOperationMenu`：排序选项被注释，标注 `// 隐藏排序选项`
+- `BasePhotoViewController.onOrder`：`syncSuccess`/`syncFailed` 两行被注释（第 726-730 行）
+
+### #if DEBUG 块
+
+所有 `#if DEBUG` 仅用于调试日志和测试辅助方法，不含 TODO/FIXME/HACK 标记。
