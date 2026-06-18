@@ -2,3 +2,5 @@ HSPhotos.xcodeproj/project.xcworkspace/xcuserdata/hq.xcuserdatad/UserInterfaceSt
 HSPhotos.xcodeproj/xcuserdata/hq.xcuserdatad/xcschemes/xcschememanagement.plist
 MagicPhotos/
 HSPhotos.xcodeproj/project.xcworkspace/xcuserdata/han.xcuserdatad/UserInterfaceState.xcuserstate
+build/
+.claude/
